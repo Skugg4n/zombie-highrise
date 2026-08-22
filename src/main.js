@@ -384,32 +384,43 @@ const flashSpriteTex = (() => {
   return new THREE.CanvasTexture(c);
 })();
 const muzzleSprites = [];
-function spawnMuzzleSprite(origin, dir) {
+function spawnMuzzleSprite(pos) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
     map: flashSpriteTex, transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, rotation: Math.random() * Math.PI,
+    rotation: Math.random() * Math.PI,   // normal blending: reads on ANY background
   }));
-  s.position.copy(origin).addScaledVector(dir, 0.55);
+  s.position.copy(pos);
   s.scale.setScalar(0.42 + Math.random() * 0.14);
   scene.add(s);
-  muzzleSprites.push({ s, t: 0.09 });
+  muzzleSprites.push({ s, t: 0.14 });
 }
 
 // Tracers: brief additive streaks so every shot visibly goes somewhere.
-const tracerGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 4);
+const tracerGeo = new THREE.CylinderGeometry(0.022, 0.022, 1, 4);
 tracerGeo.rotateX(Math.PI / 2);   // align length with -Z lookAt axis
 const tracers = [];
+function localRayHitDist(o, d) {
+  // Approximate first zombie along the ray (visual only, for tracer length).
+  let best = 24;
+  for (const v of zombieStates.values()) {
+    const cx = v.x - o.x, cy = v.y + 1.1 - o.y, cz = v.z - o.z;
+    const t = cx * d.x + cy * d.y + cz * d.z;
+    if (t < 0.5 || t > best) continue;
+    const d2 = cx * cx + cy * cy + cz * cz - t * t;
+    if (d2 < 0.8 * 0.8) best = t;
+  }
+  return best;
+}
 function spawnTracer(origin, dir) {
   const m = new THREE.Mesh(tracerGeo, new THREE.MeshBasicMaterial({
-    color: 0xffd9a0, transparent: true, opacity: 0.8,
-    blending: THREE.AdditiveBlending, depthWrite: false,
+    color: 0xffe8b8, transparent: true, opacity: 0.95, depthWrite: false,
   }));
-  const len = 22;
-  m.position.copy(origin).addScaledVector(dir, 0.8 + len / 2);
+  const len = localRayHitDist(origin, dir);
+  m.position.copy(origin).addScaledVector(dir, 0.3 + len / 2);
   m.scale.z = len;
   m.lookAt(m.position.clone().add(dir));
   scene.add(m);
-  tracers.push({ m, t: 0.15 });
+  tracers.push({ m, t: 0.22 });
 }
 // Blood puffs: a dark red burst wherever a zombie takes a hit.
 const bloodTex = (() => {
@@ -484,7 +495,7 @@ function updateShotVfx(dt) {
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i];
     tr.t -= dt;
-    tr.m.material.opacity = 0.85 * Math.max(0, tr.t / 0.15);
+    tr.m.material.opacity = 0.95 * Math.max(0, tr.t / 0.22);
     if (tr.t <= 0) {
       scene.remove(tr.m);
       tr.m.material.dispose();
@@ -929,12 +940,20 @@ function makeArsenal() {
     onHudChange: refreshWeaponHud,
     effects: {
       muzzle: (o, d, w) => {
+        // All shot VFX originate at the WEAPON muzzle, offset right/down
+        // from the camera axis in flat modes (VFX on the center ray hide
+        // behind the crosshair and render end-on; probe-verified).
+        const inVR = vrInput && vrInput.active;
+        const right = new THREE.Vector3().crossVectors(d, upV).normalize();
+        const mp = o.clone().addScaledVector(d, inVR ? 0.28 : 0.62);
+        if (!inVR) mp.addScaledVector(right, 0.24).addScaledVector(upV, -0.14);
         flash.intensity = 11;
-        flash.position.copy(o).addScaledVector(d, 0.55);
+        flash.position.copy(mp);
         viewmodelKick = 0.06;
         audio.play(w || 'pistol');
-        spawnMuzzleSprite(o, d);
-        spawnTracer(o, d);
+        spawnMuzzleSprite(mp);
+        const aimPoint = o.clone().addScaledVector(d, 30);
+        spawnTracer(mp, aimPoint.sub(mp).normalize());
         // Recoil (flat modes): a per-weapon upward kick, most of which
         // eases back down over the next frames (recovery). Auto weapons
         // also wander sideways slightly under sustained fire.
@@ -1356,8 +1375,9 @@ function handleEvents(evs) {
           if (Array.isArray(ev.d) && ev.w !== 'machete') {
             const o = new THREE.Vector3().fromArray(ev.o);
             const d = new THREE.Vector3().fromArray(ev.d);
-            spawnMuzzleSprite(o, d);
-            spawnTracer(o, d);
+            const mp = o.clone().addScaledVector(d, 0.5);
+            spawnMuzzleSprite(mp);
+            spawnTracer(mp, d);
           }
         }
         break;
@@ -1903,7 +1923,7 @@ renderer.setAnimationLoop(() => {
   updateMapMarkers();
 
   // Muzzle flash decay + explosion + ping VFX.
-  if (flash.intensity > 0) flash.intensity = Math.max(0, flash.intensity - dt * 80);
+  if (flash.intensity > 0) flash.intensity = Math.max(0, flash.intensity - dt * 45);
   updateExplosions(dt);
   updatePings(dt);
   updateEffectVisuals(dt);
