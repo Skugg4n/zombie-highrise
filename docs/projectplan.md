@@ -26,19 +26,19 @@ expensive.
 
 ## Phase 1 - The core loop
 
-- [ ] Wave system with escalating difficulty, day/night cycle
+- [x] Wave system with escalating difficulty, day/night cycle
 - [ ] Level generator: basement / ground level / upper floor types, layouts
       fitting the chosen play area (SMALL/MEDIUM/LARGE), ground level about
       every 3rd level with open sightlines OUT of the base
 - [ ] The elevator: end level, upgrade shop, next level, re-center world
-- [ ] 3 enemy types with distinct behavior and readable silhouettes
-- [ ] Weapon roster v1: pistol, shotgun, SMG, each with distinct feel,
-      ammo, loot and proper reloading (VR gesture, R key, touch button)
-- [ ] Machete melee (ammo saver, satisfying in VR)
-- [ ] Health packs (use on self or teammate) and frag grenades
+- [x] 3 enemy types with distinct behavior and readable silhouettes
+- [x] Weapon roster v1: pistol, shotgun, SMG, each with distinct feel,
+      ammo, loot and proper reloading (VR grip squeeze, R key, touch button)
+- [x] Machete melee (ammo saver, satisfying in VR)
+- [x] Health packs (use on self or teammate) and frag grenades
 - [ ] Traps and mines, placeable
 - [ ] Tactical map view (mobile can flip): ping, place traps
-- [ ] Countdown, game over, score screen
+- [x] Countdown, game over, score screen
 
 ## Phase 2 - Roles and depth
 

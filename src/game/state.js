@@ -1,6 +1,6 @@
 // Host-authoritative game state: the horde, the wave director, player
-// health/downed state and hitscan damage. Runs ONLY on the host (and in
-// solo); clients render from snapshots (see replica.js).
+// health/downed state, inventories, weapons, grenades, loot and damage.
+// Runs ONLY on the host (and in solo); clients render from snapshots.
 //
 // Wave flow (phase machine, host-driven, mirrored to clients in snapshots):
 //   lobby -> day -> countdown -> night -> (cleared) -> day ...
@@ -13,24 +13,25 @@ import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute'];
+export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
+
+const AMMO_PICKUP = { ammo_shotgun: ['shotgun', 25], ammo_smg: ['smg', 120] };
 
 export class HostSim {
   constructor(level) {
     this.level = level;
-    this.players = new Map();  // id -> player record
-    this.zombies = new Map();  // id -> zombie record
+    this.players = new Map();
+    this.zombies = new Map();
+    this.grenades = new Map();
+    this.items = new Map();
     this.nextZid = 1;
+    this.nextGid = 1;
+    this.nextIid = 1;
     this.events = [];
     this.kills = 0;
     this.wave = {
-      phase: 'lobby',   // lobby|day|countdown|night|elevator|ride|gameover
-      night: 0,         // global night counter (1-based once started)
-      level: level.index,
-      t: 0,             // seconds left in the current phase (day/countdown/ride)
-      queue: [],        // zombie types waiting to spawn this night
-      spawnT: 0,
-      spawnCount: 0,
-      left: 0,          // queue + alive (HUD "zombies left")
+      phase: 'lobby', night: 0, level: level.index,
+      t: 0, queue: [], spawnT: 0, spawnCount: 0, left: 0,
     };
   }
 
@@ -38,7 +39,8 @@ export class HostSim {
     this.level = level;
     this.wave.level = level.index;
     this.zombies.clear();
-    // Re-seat players on the new level's spawns.
+    this.grenades.clear();
+    this.items.clear();
     let i = 0;
     for (const p of this.players.values()) {
       p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
@@ -53,6 +55,11 @@ export class HostSim {
       hp: TUNING.player.maxHp, down: false, reviveT: 0,
       name: name || id, platform: platform || '?',
       h: null, hl: null, hr: null,
+      inv: {
+        w: ['pistol', 'machete'], active: 'pistol',
+        a: { pistol: [TUNING.weapons.pistol.magazine, -1] },   // -1 = infinite reserve
+        g: 1, k: 0, s: TUNING.economy.startingScrap,
+      },
     });
     this.events.push({ e: 'join', id, name: name || id });
   }
@@ -75,6 +82,106 @@ export class HostSim {
     return n;
   }
 
+  // ---- Player actions (from clients AND from the host's own input) -----
+  applyAction(id, m) {
+    const p = this.players.get(id);
+    if (!p || p.down) return;
+    switch (m.t) {
+      case 'shoot': this._actShoot(id, p, m); break;
+      case 'melee': this._actMelee(id, p, m); break;
+      case 'throwG': this._actThrow(id, p, m); break;
+      case 'reloadDone': this._actReload(p, m.w); break;
+      case 'switch':
+        if (p.inv.w.includes(m.w)) p.inv.active = m.w;
+        break;
+      case 'use':
+        if (m.item === 'pack') this._actPack(id, p);
+        break;
+      default:
+        break;
+    }
+  }
+
+  _actShoot(id, p, m) {
+    const def = TUNING.weapons[m.w];
+    if (!def || !p.inv.w.includes(m.w)) return;
+    const a = p.inv.a[m.w];
+    if (!a || a[0] <= 0) return;
+    a[0]--;
+    this.events.push({ e: 'shot', id, w: m.w, o: m.o });
+    const dir = new THREE.Vector3().fromArray(m.d).normalize();
+    const spread = THREE.MathUtils.degToRad(def.spreadDeg || 0);
+    for (let i = 0; i < (def.pellets || 1); i++) {
+      const d = dir.clone();
+      if (spread > 0) {
+        d.x += (Math.random() - 0.5) * spread;
+        d.y += (Math.random() - 0.5) * spread;
+        d.z += (Math.random() - 0.5) * spread;
+        d.normalize();
+      }
+      this.shootRay(m.o, d.toArray(), def.damage, id);
+    }
+  }
+
+  _actMelee(id, p, m) {
+    const def = TUNING.weapons.machete;
+    const dir = new THREE.Vector3().fromArray(m.d); dir.y = 0;
+    if (dir.lengthSq() < 1e-6) return;
+    dir.normalize();
+    const cosHalf = Math.cos(THREE.MathUtils.degToRad(def.arcDegrees / 2));
+    this.events.push({ e: 'shot', id, w: 'machete', o: m.o });
+    for (const z of [...this.zombies.values()]) {
+      const to = z.pos.clone().sub(p.pos); to.y = 0;
+      const dist = to.length();
+      if (dist > def.range + TUNING.enemies[z.type].radius) continue;
+      if (dist > 0.01 && to.normalize().dot(dir) < cosHalf) continue;
+      this.damageZombie(z, def.damage, true, id);
+    }
+  }
+
+  _actThrow(id, p, m) {
+    if (p.inv.g <= 0) return;
+    p.inv.g--;
+    const gid = this.nextGid++;
+    const dir = new THREE.Vector3().fromArray(m.d).normalize();
+    this.grenades.set(gid, {
+      id: gid, owner: id,
+      pos: new THREE.Vector3().fromArray(m.o).addScaledVector(dir, 0.4),
+      vel: dir.multiplyScalar(TUNING.weapons.fragGrenade.throwSpeed).add(new THREE.Vector3(0, 3.2, 0)),
+      fuse: TUNING.weapons.fragGrenade.fuseTime,
+    });
+  }
+
+  _actReload(p, w) {
+    const def = TUNING.weapons[w];
+    const a = p.inv.a[w];
+    if (!def || !a) return;
+    const need = def.magazine - a[0];
+    if (need <= 0) return;
+    const take = a[1] < 0 ? need : Math.min(need, a[1]);
+    a[0] += take;
+    if (a[1] >= 0) a[1] -= take;
+  }
+
+  _actPack(id, p) {
+    if (p.inv.k <= 0) return;
+    // Near a downed teammate: the pack revives them instead of healing you.
+    for (const [qid, q] of this.players) {
+      if (q === p || !q.down) continue;
+      if (q.pos.distanceToSquared(p.pos) < 4) {
+        p.inv.k--;
+        q.down = false; q.reviveT = 0;
+        q.hp = Math.min(TUNING.player.maxHp, TUNING.player.revivedAtHp + TUNING.player.healthPackHeal);
+        this.events.push({ e: 'revive', id: qid, hp: q.hp });
+        return;
+      }
+    }
+    if (p.hp >= TUNING.player.maxHp) return;
+    p.inv.k--;
+    p.hp = Math.min(TUNING.player.maxHp, p.hp + TUNING.player.healthPackHeal);
+    this.events.push({ e: 'phit', id, hp: p.hp });   // phit doubles as hp sync
+  }
+
   // ---- Wave director ---------------------------------------------------
   startRun() {
     if (this.wave.phase !== 'lobby' && this.wave.phase !== 'gameover') return;
@@ -83,10 +190,47 @@ export class HostSim {
     this._enterDay();
   }
 
+  restartLevel() {
+    this.zombies.clear();
+    this.grenades.clear();
+    this.wave.night = (this.wave.level - 1) * TUNING.pacing.nightsPerLevel;
+    let i = 0;
+    for (const p of this.players.values()) {
+      p.hp = TUNING.player.maxHp; p.down = false; p.reviveT = 0;
+      p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
+    }
+    this.events.push({ e: 'restart' });
+    this._enterDay();
+  }
+
   _enterDay() {
     this.wave.phase = 'day';
     this.wave.t = TUNING.pacing.dayPhaseDuration;
     this.events.push({ e: 'day', n: this.wave.night + 1 });
+    this._spawnDayLoot();
+  }
+
+  _spawnDayLoot() {
+    const owned = new Set();
+    for (const p of this.players.values()) for (const w of p.inv.w) owned.add(w);
+    const pool = ['pack', 'grenade'];
+    if (owned.has('shotgun')) pool.push('ammo_shotgun', 'ammo_shotgun');
+    if (owned.has('smg')) pool.push('ammo_smg', 'ammo_smg');
+    const count = 2;
+    const half = CONFIG.PLAY_AREA / 2 - 2;
+    for (let i = 0; i < count; i++) {
+      const kind = pool[Math.floor(Math.random() * pool.length)];
+      const pos = new THREE.Vector3(
+        (Math.random() * 2 - 1) * half, 0, (Math.random() * 2 - 1) * half);
+      resolveCircle(pos, 0.5, this.level.colliders);
+      pos.y = this.level.heightAt(pos.x, pos.z);
+      this.spawnItem(kind, pos);
+    }
+  }
+
+  spawnItem(kind, pos) {
+    const id = this.nextIid++;
+    this.items.set(id, { id, kind, pos: pos.clone() });
   }
 
   _enterCountdown() {
@@ -110,7 +254,6 @@ export class HostSim {
       for (let i = 0; i < count; i++) queue.push(type);
     }
     if ((mix.brute || 0) > 0 && !queue.includes('brute')) queue.push('brute');
-    // Shuffle so types interleave.
     for (let i = queue.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [queue[i], queue[j]] = [queue[j], queue[i]];
@@ -123,8 +266,7 @@ export class HostSim {
   }
 
   _nightCleared() {
-    const perLevel = TUNING.pacing.nightsPerLevel;
-    if (this.wave.night % perLevel === 0) {
+    if (this.wave.night % TUNING.pacing.nightsPerLevel === 0) {
       this.wave.phase = 'elevator';
       this.events.push({ e: 'elevator' });
     } else {
@@ -132,7 +274,6 @@ export class HostSim {
     }
   }
 
-  // The squad boarded; the ride is the shop.
   _enterRide() {
     this.wave.phase = 'ride';
     this.wave.t = 20;
@@ -142,30 +283,12 @@ export class HostSim {
   _arrive() {
     this.wave.level++;
     this.events.push({ e: 'level', index: this.wave.level });
-    // main.js rebuilds the level on this event (all peers, same seed) and
-    // calls setLevel(); the day phase starts on the new floor.
     this._enterDay();
   }
 
-  // Solo/host rule after a wipe: restart the CURRENT level (inventory and
-  // scrap kept). Rolls the night counter back to this level's first night.
-  restartLevel() {
-    this.zombies.clear();
-    this.wave.night = (this.wave.level - 1) * TUNING.pacing.nightsPerLevel;
-    let i = 0;
-    for (const p of this.players.values()) {
-      p.hp = TUNING.player.maxHp; p.down = false; p.reviveT = 0;
-      p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
-    }
-    this.events.push({ e: 'restart' });
-    this._enterDay();
-  }
-
-  forceNight() {  // test hook (smoke test drives the wave machine directly)
-    if (this.wave.phase === 'day' || this.wave.phase === 'lobby') {
-      if (this.wave.phase === 'lobby') this.startRun();
-      this._enterNight();
-    }
+  forceNight() {  // test hook
+    if (this.wave.phase === 'lobby') this.startRun();
+    if (this.wave.phase === 'day' || this.wave.phase === 'countdown') this._enterNight();
   }
 
   // ---- Combat ----------------------------------------------------------
@@ -185,8 +308,8 @@ export class HostSim {
   }
 
   // Hitscan: ray vs every living zombie's torso sphere, nearest first,
-  // occluded by tall colliders (walls). Returns the zombie hit or null.
-  shoot(origin, dir, damage = 1) {
+  // occluded by tall colliders. Returns the zombie hit or null.
+  shootRay(origin, dir, damage = 1, byId = null) {
     const o = new THREE.Vector3().fromArray(origin);
     const d = new THREE.Vector3().fromArray(dir).normalize();
     let best = null, bestT = Infinity;
@@ -203,24 +326,51 @@ export class HostSim {
     }
     if (!best) return null;
     const hit = o.clone().addScaledVector(d, bestT);
-    const tall = this.level.colliders.filter((c) => c.tall);
+    const tall = this._tall();
     if (segmentBlocked(o.x, o.z, hit.x, hit.z, tall)) return null;
-    this.damageZombie(best, damage, false);
+    this.damageZombie(best, damage, false, byId);
     return best;
   }
 
-  damageZombie(z, damage, isMelee) {
+  // Back-compat alias (older callers/tests).
+  shoot(o, d, damage = 1) { return this.shootRay(o, d, damage, 'H'); }
+
+  _tall() {
+    return this.level.collidersTall
+      || (this.level.collidersTall = this.level.colliders.filter((c) => c.tall));
+  }
+
+  damageZombie(z, damage, isMelee, byId = null) {
     if (!z.alive) return;
     z.hp -= damage;
     if (z.hp <= 0) {
       z.alive = false;
       this.kills++;
       const scrap = TUNING.economy.scrapPerKill[z.type] + (isMelee ? TUNING.economy.meleeKillBonus : 0);
-      this.events.push({ e: 'zdie', id: z.id, type: z.type, p: z.pos.toArray(), scrap });
+      const killer = byId ? this.players.get(byId) : null;
+      if (killer) killer.inv.s += scrap;
+      this.events.push({ e: 'zdie', id: z.id, type: z.type, p: z.pos.toArray(), scrap, by: byId });
       this.zombies.delete(z.id);
+      this._maybeDrop(z);
     } else {
       this.events.push({ e: 'zhit', id: z.id });
     }
+  }
+
+  _maybeDrop(z) {
+    const roll = Math.random();
+    let kind = null;
+    if (roll < 0.05) kind = 'grenade';
+    else if (roll < 0.09) kind = 'pack';
+    else if (roll < 0.17) {
+      const owned = new Set();
+      for (const p of this.players.values()) for (const w of p.inv.w) owned.add(w);
+      const opts = [];
+      if (owned.has('shotgun')) opts.push('ammo_shotgun');
+      if (owned.has('smg')) opts.push('ammo_smg');
+      if (opts.length) kind = opts[Math.floor(Math.random() * opts.length)];
+    }
+    if (kind) this.spawnItem(kind, z.pos);
   }
 
   damagePlayer(id, amount) {
@@ -254,7 +404,6 @@ export class HostSim {
         if (wave.t <= 0) this._enterNight();
         break;
       case 'night': {
-        // Trickle spawner with bursts.
         const P = TUNING.pacing;
         const players = Math.max(1, this.players.size);
         const interval = P.spawnInterval(wave.night) / TUNING.coopScaling.spawnIntervalDivisor(players);
@@ -272,7 +421,6 @@ export class HostSim {
         break;
       }
       case 'elevator': {
-        // Waiting for every standing player to board.
         const zone = this.level.elevatorZone;
         let boarded = 0, standing = 0;
         for (const p of this.players.values()) {
@@ -291,11 +439,11 @@ export class HostSim {
         break;
     }
 
-    // Zombies hunt (during night and while the squad heads for the elevator).
     if (wave.phase === 'night' || wave.phase === 'elevator') this._stepZombies(dt);
+    this._stepGrenades(dt);
+    this._stepPickups();
 
-    // Revives: a standing teammate close to a downed player revives them
-    // by staying close (proximity revive works on every platform).
+    // Proximity revives.
     for (const [id, p] of this.players) {
       if (!p.down) continue;
       let helper = null;
@@ -337,11 +485,9 @@ export class HostSim {
 
       // Routing: when the straight line to the target crosses a tall wall,
       // or the zombie is outside a ground level's base, head for the best
-      // entry first. Low colliders (sandbags, crates) block movement via
-      // pushout, which slides the zombie along them.
+      // entry first. Low colliders block movement via pushout (slide).
       let goal = target.pos;
-      const tall = this.level.collidersTall || (this.level.collidersTall = this.level.colliders.filter((c) => c.tall));
-      const losBlocked = segmentBlocked(z.pos.x, z.pos.z, target.pos.x, target.pos.z, tall);
+      const losBlocked = segmentBlocked(z.pos.x, z.pos.z, target.pos.x, target.pos.z, this._tall());
       const half = CONFIG.PLAY_AREA / 2;
       const outsideGround = this.level.type === 'ground'
         && (Math.abs(z.pos.x) > half || Math.abs(z.pos.z) > half);
@@ -375,6 +521,74 @@ export class HostSim {
     }
   }
 
+  _stepGrenades(dt) {
+    const G = TUNING.weapons.fragGrenade;
+    for (const g of [...this.grenades.values()]) {
+      g.vel.y -= 9.8 * dt;
+      g.pos.addScaledVector(g.vel, dt);
+      const floor = this.level.heightAt(g.pos.x, g.pos.z) + 0.12;
+      if (g.pos.y < floor) {
+        g.pos.y = floor;
+        g.vel.y = Math.abs(g.vel.y) * 0.35;
+        g.vel.x *= 0.6; g.vel.z *= 0.6;
+      }
+      g.fuse -= dt;
+      if (g.fuse <= 0) {
+        this.grenades.delete(g.id);
+        this.events.push({ e: 'boom', p: g.pos.toArray() });
+        for (const z of [...this.zombies.values()]) {
+          const dist = z.pos.distanceTo(g.pos);
+          if (dist > G.falloffRadius) continue;
+          const dmg = G.damageCenter + (G.damageAtEdge - G.damageCenter) * (dist / G.falloffRadius);
+          this.damageZombie(z, dmg, false, g.owner);
+        }
+        // Self damage for the thrower only (no friendly fire).
+        const owner = this.players.get(g.owner);
+        if (owner && !owner.down) {
+          const dist = owner.pos.distanceTo(g.pos);
+          if (dist < G.falloffRadius) {
+            this.damagePlayer(g.owner, Math.round(G.selfDamage * (1 - dist / G.falloffRadius)));
+          }
+        }
+      }
+    }
+  }
+
+  _stepPickups() {
+    for (const item of [...this.items.values()]) {
+      for (const [pid, p] of this.players) {
+        if (p.down) continue;
+        if (p.pos.distanceToSquared(item.pos) > 0.9 * 0.9) continue;
+        if (!this._grant(p, item.kind)) continue;
+        this.items.delete(item.id);
+        this.events.push({ e: 'pickup', id: item.id, kind: item.kind, by: pid });
+        break;
+      }
+    }
+  }
+
+  _grant(p, kind) {
+    if (kind === 'pack') {
+      if (p.inv.k >= 2) return false;
+      p.inv.k++; return true;
+    }
+    if (kind === 'grenade') {
+      if (p.inv.g >= 5) return false;
+      p.inv.g++; return true;
+    }
+    const am = AMMO_PICKUP[kind];
+    if (am) {
+      const [w, amount] = am;
+      if (!p.inv.w.includes(w)) return false;
+      const a = p.inv.a[w];
+      const max = TUNING.weapons[w].reserveMax;
+      if (a[1] >= max) return false;
+      a[1] = Math.min(max, a[1] + amount);
+      return true;
+    }
+    return false;
+  }
+
   // ---- Snapshot --------------------------------------------------------
   snapshot(ts) {
     const players = {};
@@ -384,18 +598,27 @@ export class HostSim {
         ry: +p.ry.toFixed(3), rx: +p.rx.toFixed(3),
         vr: p.vr, hp: p.hp, down: p.down, name: p.name,
         h: p.h, hl: p.hl, hr: p.hr,
+        inv: p.inv,
       };
     }
-    // Compact zombie array: [id, typeIndex, x, y, z, hp]
     const zs = [];
     for (const z of this.zombies.values()) {
       zs.push([z.id, ZOMBIE_TYPES.indexOf(z.type),
         +z.pos.x.toFixed(2), +z.pos.y.toFixed(2), +z.pos.z.toFixed(2), z.hp]);
     }
+    const gs = [];
+    for (const g of this.grenades.values()) {
+      gs.push([g.id, +g.pos.x.toFixed(2), +g.pos.y.toFixed(2), +g.pos.z.toFixed(2)]);
+    }
+    const is = [];
+    for (const item of this.items.values()) {
+      is.push([item.id, ITEM_KINDS.indexOf(item.kind),
+        +item.pos.x.toFixed(2), +item.pos.y.toFixed(2), +item.pos.z.toFixed(2)]);
+    }
     const ev = this.events; this.events = [];
     const w = this.wave;
     return {
-      t: 'snap', ts, players, zs,
+      t: 'snap', ts, players, zs, gs, is,
       wave: { ph: w.phase, n: w.night, lv: w.level, t: Math.max(0, Math.ceil(w.t)), left: w.left },
       ev,
     };

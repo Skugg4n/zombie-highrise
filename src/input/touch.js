@@ -1,19 +1,21 @@
 // Mobile input: left virtual joystick to move, drag right zone to look,
-// tap right zone (or the FIRE button) to shoot. No pointer lock on mobile
-// (LESSONS.md); the touch layer owns its own camera control.
+// tap right zone or hold the FIRE button to shoot (hold = auto weapons).
+// Extra buttons: WEAPON (cycle), RELOAD, GRENADE, PACK. No pointer lock on
+// mobile (LESSONS.md); the touch layer owns its own camera control.
 import * as THREE from 'three';
-import { CONFIG } from '../config.js';
+import { TUNING } from '../game/tuning.js';
 
 const STICK_RADIUS = 45;
 
 export class TouchInput {
   constructor(ctx) {
-    this.ctx = ctx;               // { rig, camera, fire(), isPlaying() }
-    this.move = { x: 0, y: 0 };   // normalized -1..1
+    this.ctx = ctx;
+    this.move = { x: 0, y: 0 };
     this.stickId = null;
     this.lookId = null;
     this.lookLast = null;
     this.lookStart = null;
+    this.fireHeld = false;
 
     this.ui = document.getElementById('touch-ui');
     this.base = document.getElementById('stick-base');
@@ -23,6 +25,18 @@ export class TouchInput {
     const fireBtn = document.getElementById('btn-fire');
     this.ui.classList.remove('hidden');
     fireBtn.style.display = 'block';
+    document.getElementById('touch-actions').style.display = 'flex';
+
+    const bind = (id, fn) => {
+      document.getElementById(id).addEventListener('touchstart', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (this.ctx.isPlaying()) fn();
+      }, { passive: false });
+    };
+    bind('btn-cycle', () => ctx.actions.cycle());
+    bind('btn-reload', () => ctx.actions.reload());
+    bind('btn-grenade', () => ctx.actions.grenade());
+    bind('btn-pack', () => ctx.actions.pack());
 
     stickZone.addEventListener('touchstart', (e) => {
       e.preventDefault();
@@ -79,10 +93,9 @@ export class TouchInput {
       for (const t of e.changedTouches) {
         if (t.identifier !== this.lookId) continue;
         this.lookId = null;
-        // Quick tap without dragging = shoot.
         const moved = Math.hypot(t.clientX - this.lookStart.x, t.clientY - this.lookStart.y);
         const held = performance.now() - this.lookStart.time;
-        if (moved < 12 && held < 300 && this.ctx.isPlaying()) this._fireFromCamera();
+        if (moved < 12 && held < 300 && this.ctx.isPlaying()) this.ctx.actions.fire();
       }
     };
     lookZone.addEventListener('touchend', lookEnd);
@@ -90,8 +103,13 @@ export class TouchInput {
 
     fireBtn.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      if (this.ctx.isPlaying()) this._fireFromCamera();
+      if (!this.ctx.isPlaying()) return;
+      this.fireHeld = true;
+      this.ctx.actions.fire();
     }, { passive: false });
+    const fireEnd = (e) => { e.preventDefault(); this.fireHeld = false; };
+    fireBtn.addEventListener('touchend', fireEnd, { passive: false });
+    fireBtn.addEventListener('touchcancel', fireEnd, { passive: false });
   }
 
   _showStick(bx, by, nx, ny) {
@@ -100,21 +118,13 @@ export class TouchInput {
     this.nub.style.left = nx + 'px'; this.nub.style.top = ny + 'px';
   }
 
-  _fireFromCamera() {
-    const cam = this.ctx.camera;
-    const origin = cam.getWorldPosition(new THREE.Vector3());
-    const dir = cam.getWorldDirection(new THREE.Vector3());
-    this.ctx.fire(origin, dir);
-  }
-
   update(dt) {
     if (!this.ctx.isPlaying()) return;
     const { x, y } = this.move;
     if (!x && !y) return;
     const rig = this.ctx.rig;
-    const speed = CONFIG.PLAYER_SPEED * dt;
+    const speed = TUNING.player.walkSpeed * dt;
     const sin = Math.sin(rig.yaw), cos = Math.cos(rig.yaw);
-    // Stick up (negative y) = forward.
     rig.group.position.x += (x * cos + y * sin) * speed;
     rig.group.position.z += (-x * sin + y * cos) * speed;
   }

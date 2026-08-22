@@ -1,29 +1,45 @@
-// Desktop input: WASD + mouse with pointer lock. Click shoots, R reloads.
-// Pointer lock is requested from a user gesture on the canvas while playing.
+// Desktop input: WASD + mouse with pointer lock.
+//   click/hold  shoot (hold = auto weapons keep firing)
+//   R reload, 1-4 weapon slots, Q cycle, G grenade, H health pack,
+//   F flashlight, M tactical map (Phase 1 Pass D)
 import * as THREE from 'three';
-import { CONFIG } from '../config.js';
+import { TUNING } from '../game/tuning.js';
+
+const SLOT_KEYS = { Digit1: 'pistol', Digit2: 'shotgun', Digit3: 'smg', Digit4: 'machete' };
 
 export class KeyboardInput {
   constructor(ctx) {
-    this.ctx = ctx;               // { rig, camera, dom, fire(), reload(), isPlaying() }
+    this.ctx = ctx;               // shared input context, see main.js
     this.keys = new Set();
-    this.enabled = true;
+    this.fireHeld = false;
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       this.keys.add(e.code);
-      if (e.code === 'KeyR') ctx.reload();
+      const act = ctx.actions;
+      if (e.code === 'KeyR') act.reload();
+      else if (e.code === 'KeyQ') act.cycle();
+      else if (e.code === 'KeyG') act.grenade();
+      else if (e.code === 'KeyH') act.pack();
+      else if (e.code === 'KeyF') act.flashlight();
+      else if (e.code === 'KeyM') act.map();
+      else if (SLOT_KEYS[e.code]) act.switchTo(SLOT_KEYS[e.code]);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('blur', () => { this.keys.clear(); this.fireHeld = false; });
 
-    ctx.dom.addEventListener('click', () => {
+    ctx.dom.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       if (!ctx.isPlaying()) return;
       if (document.pointerLockElement !== ctx.dom) {
         ctx.dom.requestPointerLock();
-      } else {
-        this._fireFromCamera();
+        return;
       }
+      this.fireHeld = true;
+      ctx.actions.fire();          // semi weapons fire once per press
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.fireHeld = false;
     });
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== ctx.dom) return;
@@ -31,13 +47,9 @@ export class KeyboardInput {
       this.ctx.rig.pitch = THREE.MathUtils.clamp(
         this.ctx.rig.pitch - e.movementY * 0.0022, -1.45, 1.45);
     });
-  }
-
-  _fireFromCamera() {
-    const cam = this.ctx.camera;
-    const origin = cam.getWorldPosition(new THREE.Vector3());
-    const dir = cam.getWorldDirection(new THREE.Vector3());
-    this.ctx.fire(origin, dir);
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement !== ctx.dom) this.fireHeld = false;
+    });
   }
 
   update(dt) {
@@ -50,7 +62,7 @@ export class KeyboardInput {
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) str += 1;
     if (!fwd && !str) return;
     const len = Math.hypot(fwd, str) || 1;
-    const speed = CONFIG.PLAYER_SPEED * dt / len;
+    const speed = TUNING.player.walkSpeed * dt / len;
     const sin = Math.sin(rig.yaw), cos = Math.cos(rig.yaw);
     rig.group.position.x += (str * cos - fwd * sin) * speed;
     rig.group.position.z += (-str * sin - fwd * cos) * speed;

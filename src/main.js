@@ -10,8 +10,10 @@ import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS } from './world/actors.js
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
-import { HostSim, ZOMBIE_TYPES } from './game/state.js';
+import { HostSim, ZOMBIE_TYPES, ITEM_KINDS } from './game/state.js';
 import { TUNING } from './game/tuning.js';
+import { Arsenal } from './game/arsenal.js';
+import { makeWeaponMesh, makeItemMesh } from './world/weapons3d.js';
 import { Replica } from './game/replica.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { TouchInput } from './input/touch.js';
@@ -263,6 +265,83 @@ function updateAvatar(id, p) {
 const flash = new THREE.PointLight(0xffc890, 0, 9);
 scene.add(flash);
 
+// ---- Item and grenade visuals ------------------------------------------
+const itemVisuals = new Map();     // id -> {group, kind, bobT}
+const grenadeVisuals = new Map();  // id -> mesh
+const explosions = [];             // [{light, shell, t}]
+
+function updateItemVisuals(rows, dt) {
+  const keep = new Set();
+  for (const [id, ki, x, y, z] of rows) {
+    keep.add(id);
+    let v = itemVisuals.get(id);
+    if (!v) {
+      v = { group: makeItemMesh(ITEM_KINDS[ki]), kind: ITEM_KINDS[ki], bobT: Math.random() * 6 };
+      itemVisuals.set(id, v);
+      scene.add(v.group);
+    }
+    v.bobT += dt * 2;
+    v.group.position.set(x, y + 0.12 + Math.sin(v.bobT) * 0.06, z);
+    v.group.rotation.y += dt * 1.2;
+  }
+  for (const [id, v] of itemVisuals) {
+    if (!keep.has(id)) { scene.remove(v.group); itemVisuals.delete(id); }
+  }
+}
+
+function updateGrenadeVisuals(rows) {
+  const keep = new Set();
+  for (const [id, x, y, z] of rows) {
+    keep.add(id);
+    let m = grenadeVisuals.get(id);
+    if (!m) {
+      m = makeWeaponMesh('grenade');
+      m.scale.setScalar(1.4);
+      grenadeVisuals.set(id, m);
+      scene.add(m);
+    }
+    m.position.set(x, y, z);
+  }
+  for (const [id, m] of grenadeVisuals) {
+    if (!keep.has(id)) { scene.remove(m); grenadeVisuals.delete(id); }
+  }
+}
+
+function spawnExplosion(p) {
+  const light = new THREE.PointLight(0xffa040, 26, 14, 1.5);
+  light.position.set(p[0], p[1] + 0.4, p[2]);
+  const shell = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 12, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.7 }));
+  shell.position.copy(light.position);
+  shell.scale.setScalar(0.3);
+  scene.add(light, shell);
+  explosions.push({ light, shell, t: 0.45 });
+}
+
+function updateExplosions(dt) {
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    const ex = explosions[i];
+    ex.t -= dt;
+    const k = Math.max(0, ex.t / 0.45);
+    ex.light.intensity = 26 * k;
+    ex.shell.scale.setScalar(0.3 + (1 - k) * 2.4);
+    ex.shell.material.opacity = 0.7 * k;
+    if (ex.t <= 0) {
+      scene.remove(ex.light, ex.shell);
+      ex.shell.geometry.dispose(); ex.shell.material.dispose();
+      explosions.splice(i, 1);
+    }
+  }
+}
+
+function clearTransientVisuals() {
+  for (const v of itemVisuals.values()) scene.remove(v.group);
+  itemVisuals.clear();
+  for (const m of grenadeVisuals.values()) scene.remove(m);
+  grenadeVisuals.clear();
+}
+
 // ---- UI -----------------------------------------------------------------
 const hud = new Hud();
 const lobby = new LobbyUI({
@@ -311,11 +390,78 @@ function hideToast() {
   $('toast').classList.add('hidden');
 }
 
-const weapon = { ammo: TUNING.weapons.pistol.magazine, reloading: false, reloadT: 0, cooldown: 0 };
 const playerName = PARAMS.get('name') || 'Player';
 
 function isPlaying() { return lobby.state === 'playing'; }
 function canAct() { return isPlaying() && !myDown; }
+
+// ---- Arsenal (weapons controller) ---------------------------------------
+// Routes actions to the local sim (host/solo) or over the wire (client).
+function dispatchAction(m) {
+  if (role === 'client') net?.sendToHost(m);
+  else if (sim) sim.applyAction('H', m);
+}
+
+// Flat-mode viewmodel: the active weapon in the lower right of the camera.
+const viewmodel = new THREE.Group();
+viewmodel.position.set(0.28, -0.24, -0.5);
+camera.add(viewmodel);
+let viewmodelKick = 0;
+let lastActiveWeapon = null;
+
+function aimRay() {
+  if (vrInput && vrInput.active) return vrInput.getAimRay();
+  return {
+    origin: camera.getWorldPosition(new THREE.Vector3()),
+    dir: camera.getWorldDirection(new THREE.Vector3()),
+  };
+}
+
+function makeArsenal() {
+  return new Arsenal({
+    dispatch: dispatchAction,
+    onHudChange: refreshWeaponHud,
+    effects: {
+      muzzle: (o, d) => {
+        flash.intensity = 10;
+        flash.position.copy(o).addScaledVector(d, 0.3);
+        viewmodelKick = 0.06;
+      },
+      swing: () => { viewmodelKick = 0.1; },
+      throw: () => {},
+    },
+  });
+}
+let arsenal = makeArsenal();
+
+function refreshWeaponHud() {
+  hud.setWeapon(arsenal.hudInfo());
+  hud.setScrap(scrap);
+  if (arsenal.active !== lastActiveWeapon) {
+    lastActiveWeapon = arsenal.active;
+    viewmodel.clear();
+    viewmodel.add(makeWeaponMesh(arsenal.active));
+    if (vrInput) vrInput.setWeaponModel(arsenal.active);
+  }
+}
+
+// Shared action set for every input layer (all gated on canAct).
+const actions = {
+  fire: () => { if (canAct()) { const r = aimRay(); if (r) arsenal.fire(r.origin, r.dir); } },
+  fireFrom: (o, d) => { if (canAct()) arsenal.fire(o, d); },
+  reload: () => { if (canAct()) arsenal.reload(); },
+  cycle: () => { if (canAct()) arsenal.cycle(); },
+  switchTo: (w) => { if (canAct()) arsenal.switchTo(w); },
+  grenade: () => {
+    if (!canAct()) return;
+    const r = aimRay();
+    if (r) arsenal.throwGrenade(r.origin, r.dir.clone().add(new THREE.Vector3(0, 0.35, 0)).normalize());
+  },
+  grenadeFrom: (o, d) => { if (canAct()) arsenal.throwGrenade(o, d); },
+  pack: () => { if (canAct()) arsenal.usePack(); },
+  flashlight: () => { flashlightOn = !flashlightOn; },
+  map: () => {},   // tactical map lands in Pass D
+};
 
 // Tear down any previous session completely before starting a new one.
 function resetSession() {
@@ -323,9 +469,11 @@ function resetSession() {
   net = null; sim = null; replica = null; role = null;
   myHp = TUNING.player.maxHp; myDown = false;
   scrap = TUNING.economy.startingScrap;
-  weapon.ammo = TUNING.weapons.pistol.magazine;
-  weapon.reloading = false; weapon.reloadT = 0; weapon.cooldown = 0;
+  arsenal = makeArsenal();
+  lastActiveWeapon = null;
+  refreshWeaponHud();
   lastSnapAt = 0; lastWave = null;
+  clearTransientVisuals();
   hideToast();
   $('panel-gameover').classList.add('hidden');
   $('downed-note').classList.add('hidden');
@@ -359,7 +507,7 @@ function startHosting() {
   net.onPeerLeave = (id) => { sim.removePlayer(id); refreshHostPlayers(); };
   net.onClientMessage = (id, m) => {
     if (m.t === 'pose') sim.updatePose(id, m);
-    else if (m.t === 'shoot') sim.shoot(m.o, m.d);
+    else sim.applyAction(id, m);
   };
   net.onError = onNetError;
   net.getWelcomeExtras = () => ({ seed: runSeed, level: levelIndex });
@@ -395,6 +543,10 @@ function startJoining(code) {
     if (me) {
       if (me.hp !== myHp) { myHp = me.hp; hud.setHealth(myHp); }
       if (me.down !== myDown) setDowned(me.down);
+      if (me.inv) {
+        arsenal.syncFromHost(me.inv);
+        if (me.inv.s !== scrap) { scrap = me.inv.s; hud.setScrap(scrap); }
+      }
     }
   };
   net.onDisconnected = () => lobby.showError('Lost the connection to the host.');
@@ -405,7 +557,7 @@ function startJoining(code) {
 function startPlaying() {
   lobby.setState('playing');
   hud.setHealth(myHp);
-  hud.setAmmo(weapon.ammo, TUNING.weapons.pistol.magazine, false);
+  refreshWeaponHud();
   if (sim && (sim.wave.phase === 'lobby' || sim.wave.phase === 'gameover')) sim.startRun();
 }
 
@@ -449,7 +601,29 @@ function handleEvents(evs) {
           zombieVisuals.delete(ev.id);
           dyingZombies.push({ group: v.group, t: 0.45 });
         }
-        if (role !== 'client') scrap += ev.scrap || 0;   // client scrap arrives in Pass C economy sync
+        break;
+      }
+      case 'shot': {
+        // Other players' muzzle flashes (own shots flash locally already).
+        const me = role === 'client' ? net?.myId : 'H';
+        if (ev.id !== me && Array.isArray(ev.o)) {
+          flash.intensity = Math.max(flash.intensity, 7);
+          flash.position.fromArray(ev.o);
+        }
+        break;
+      }
+      case 'boom':
+        spawnExplosion(ev.p);
+        break;
+      case 'pickup': {
+        const me = role === 'client' ? net?.myId : 'H';
+        if (ev.by === me) {
+          const label = {
+            ammo_shotgun: '+25 shells', ammo_smg: '+120 rounds',
+            pack: '+1 health pack', grenade: '+1 grenade',
+          }[ev.kind] || ev.kind;
+          showToast(label, 1800);
+        }
         break;
       }
       case 'phit':
@@ -509,37 +683,12 @@ function showCenterText(text, seconds) {
   centerT = seconds;
 }
 
-// ---- Weapon (Phase 1 Pass A: the pistol; full arsenal lands in Pass B) --
-function tryFire(origin, dir) {
-  if (!canAct() || weapon.reloading || weapon.cooldown > 0) return;
-  if (weapon.ammo <= 0) { reload(); return; }
-  const W = TUNING.weapons.pistol;
-  weapon.ammo--;
-  weapon.cooldown = W.fireCooldown;
-  hud.setAmmo(weapon.ammo, W.magazine, false);
-  flash.intensity = 10;
-  flash.position.copy(origin).addScaledVector(dir, 0.3);
-  const o = origin.toArray(), d = dir.toArray();
-  if (role === 'client') net.sendToHost(msg.shoot(o, d));
-  else if (sim) { sim.shoot(o, d, W.damage); if (role === 'solo') handleEvents(sim.events.splice(0)); }
-}
-
-function reload() {
-  const W = TUNING.weapons.pistol;
-  if (weapon.reloading || weapon.ammo >= W.magazine) return;
-  weapon.reloading = true;
-  weapon.reloadT = W.reloadTime;
-  hud.setAmmo(weapon.ammo, W.magazine, true);
-}
-
 // ---- Inputs -------------------------------------------------------------
 const inputCtx = {
   rig, camera, renderer,
   dom: renderer.domElement,
-  fire: tryFire,
-  reload,
+  actions,
   isPlaying: canAct,
-  toggleFlashlight: () => { flashlightOn = !flashlightOn; },
   getLocoMode: () => lobby.locoMode,
   onSessionChange: (active) => {
     if (active) {
@@ -565,6 +714,7 @@ if (!PHOTOMODE && !UISTATE) {
   vrInput = new VRInput(inputCtx);
   inputs.push(vrInput);
 }
+refreshWeaponHud();
 
 // ---- Pose reporting -----------------------------------------------------
 function buildPose() {
@@ -631,7 +781,7 @@ function updateWaveHud(w) {
 
 // ---- Frame loop ---------------------------------------------------------
 let last = performance.now();
-let poseAccum = 0, snapAccum = 0;
+let poseAccum = 0, snapAccum = 0, invAccum = 0;
 
 renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -661,16 +811,13 @@ renderer.setAnimationLoop(() => {
     }
     rig.group.position.y = level.heightAt(ref.x, ref.z);
 
-    // Weapon timers.
-    if (weapon.cooldown > 0) weapon.cooldown -= dt;
-    if (weapon.reloading) {
-      weapon.reloadT -= dt;
-      if (weapon.reloadT <= 0) {
-        weapon.reloading = false;
-        weapon.ammo = TUNING.weapons.pistol.magazine;
-        hud.setAmmo(weapon.ammo, TUNING.weapons.pistol.magazine, false);
-      }
+    // Weapons: auto fire + reload timing, predicted locally.
+    const fireHeld = inputs.some((i) => i.fireHeld);
+    arsenal.update(dt, fireHeld && canAct(), aimRay);
+    if (viewmodelKick > 0) {
+      viewmodelKick = Math.max(0, viewmodelKick - dt * 0.4);
     }
+    viewmodel.position.z = -0.5 + viewmodelKick;
 
     // Simulation / replication.
     if (sim) {
@@ -687,12 +834,33 @@ renderer.setAnimationLoop(() => {
         }
       }
       lastWave = { ph: sim.wave.phase, n: sim.wave.night, lv: sim.wave.level, t: Math.ceil(sim.wave.t), left: sim.wave.left };
+      // Authoritative inventory sync for the host's own arsenal (pickups,
+      // grenade drops, scrap) at snapshot cadence.
+      invAccum += dt;
+      if (invAccum > 0.2) {
+        invAccum = 0;
+        const hostP = sim.players.get('H');
+        if (hostP) {
+          arsenal.syncFromHost(hostP.inv);
+          if (hostP.inv.s !== scrap) { scrap = hostP.inv.s; hud.setScrap(scrap); }
+        }
+      }
       // Visuals straight from the authoritative sim.
       const rows = [];
       for (const z of sim.zombies.values()) {
         rows.push([z.id, ZOMBIE_TYPES.indexOf(z.type), z.pos.x, z.pos.y, z.pos.z, z.hp]);
       }
       updateZombieVisuals(rows, dt);
+      const irows = [];
+      for (const it of sim.items.values()) {
+        irows.push([it.id, ITEM_KINDS.indexOf(it.kind), it.pos.x, it.pos.y, it.pos.z]);
+      }
+      updateItemVisuals(irows, dt);
+      const grows = [];
+      for (const g of sim.grenades.values()) {
+        grows.push([g.id, g.pos.x, g.pos.y, g.pos.z]);
+      }
+      updateGrenadeVisuals(grows);
       const keep = new Set();
       for (const [id, p] of sim.players) {
         if (id === 'H') continue;
@@ -720,6 +888,11 @@ renderer.setAnimationLoop(() => {
         updateZombieVisuals(s.zs || [], dt);
         if (s.wave) lastWave = s.wave;
       }
+      const latest = replica.latest;
+      if (latest) {
+        updateItemVisuals(latest.is || [], dt);
+        updateGrenadeVisuals(latest.gs || []);
+      }
       // Stale-connection feedback (LESSONS.md).
       const stale = lastSnapAt > 0 && performance.now() - lastSnapAt > 4000;
       if (stale && !staleShown) { staleShown = true; showToast('Connection stalled, waiting for the host...', 0); }
@@ -744,8 +917,9 @@ renderer.setAnimationLoop(() => {
   // Flashlight follows its toggle.
   flashlight.intensity += ((flashlightOn ? 9 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
 
-  // Muzzle flash decay.
+  // Muzzle flash decay + explosion VFX.
   if (flash.intensity > 0) flash.intensity = Math.max(0, flash.intensity - dt * 80);
+  updateExplosions(dt);
 
   renderer.render(scene, camera);
 });
@@ -760,7 +934,8 @@ window.__zhr = {
   role: () => role,
   myId: () => (role === 'client' ? net?.myId : role ? 'H' : null),
   hp: () => myHp,
-  ammo: () => weapon.ammo,
+  ammo: () => arsenal.hudInfo().mag,
+  weapon: () => arsenal.active,
   scrap: () => scrap,
   wave: () => lastWave,
   levelIndex: () => levelIndex,
@@ -783,9 +958,10 @@ window.__zhr = {
     const c = first.group.position.clone(); c.y += 1.1;
     const o = camera.getWorldPosition(new THREE.Vector3());
     const d = c.sub(o).normalize();
-    tryFire(o, d);
+    arsenal.fire(o, d);
     return true;
   },
+  items: () => [...itemVisuals.keys()],
   renderInfo: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }),
 };
 

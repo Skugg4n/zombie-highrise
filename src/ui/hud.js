@@ -12,8 +12,20 @@ export class Hud {
     $('hud-health').textContent = 'HP ' + hp;
     $('hud-health').style.color = hp <= 25 ? 'var(--danger)' : 'var(--accent2)';
   }
-  setAmmo(cur, mag, reloading) {
-    $('hud-ammo').textContent = reloading ? 'RELOADING...' : cur + ' / ' + mag;
+  // info: { name, mag, reserve (-1 = infinite, null = melee), reloading,
+  //         grenades, packs }
+  setWeapon(info) {
+    $('hud-weapon').textContent = info.name;
+    if (info.mag === null) {
+      $('hud-ammo').textContent = 'MELEE';
+    } else if (info.reloading) {
+      $('hud-ammo').textContent = 'RELOADING...';
+    } else {
+      const res = info.reserve < 0 ? '∞' : info.reserve;
+      $('hud-ammo').textContent = `${info.mag} / ${res}`;
+    }
+    $('hud-items').textContent = `G ${info.grenades}   P ${info.packs}`;
   }
+  setScrap(n) { $('hud-scrap').textContent = 'SCRAP ' + n; }
   setWave(text) { $('hud-wave').textContent = text; }
 }

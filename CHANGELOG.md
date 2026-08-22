@@ -1,5 +1,51 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.3.0 - 2026-08-22 15:55
+
+Phase 1 Pass B: the arsenal. Why: projectplan weapon roster v1 + gear.
+
+- Weapons v1 with distinct feel from the tuning sheet: pistol (8-mag,
+  infinite reserve), shotgun (6 pellets, one-shots walkers point blank),
+  SMG (full auto, 30-mag), machete (one-swing walker/runner, +5 scrap
+  melee bonus), frag grenades (3 s fuse, physics arc, falloff, thrower
+  self-damage only).
+- Host-authoritative inventories (owned weapons, mags, reserves, grenades,
+  packs, scrap per player) with client-side prediction (arsenal.js).
+- Reload per platform: R key, RELOAD button, VR grip squeeze. Auto weapons
+  fire while trigger/button held on all platforms.
+- Weapon switching: 1-4 keys + Q cycle, WEAPON button on touch, A button
+  in VR; the active weapon's model shows on the flat viewmodel and both VR
+  controller grips.
+- Loot: day-phase supply drops and zombie drops (ammo, grenades, health
+  packs) with pickup by proximity and toast feedback.
+- Health packs heal 50, or instantly revive a downed teammate next to you.
+- Explosion and muzzle VFX; other players' shots flash at their muzzle.
+- HUD: weapon name, mag/reserve, grenade + pack counts, scrap.
+
+## v0.2.0 - 2026-08-22 15:05
+
+Phase 1 Pass A: the world and the loop skeleton. Why: projectplan Phase 1.
+
+- Seeded level generator: ground (fortified base, wasteland sightlines),
+  basement (dark room, pillars, doorway entries, flashlight), upper floor
+  (window wall, balcony, street below). All peers build identical geometry
+  from the seed in the welcome message; levels are never networked.
+- Elevator cab (worn metal, sliding doors, interior lamp) on every level;
+  doors open when the floor is cleared, the squad boards, the ride leads
+  to the next floor.
+- Horde: many zombies, three types with readable silhouettes and accents
+  (walker rust, runner yellow lean, brute massive dark red).
+- Wave director from the tuning sheet (game-design agent pass): threat
+  budgets 1.25x per night, trickle + bursts, 2 nights per level, alive cap
+  20 (Quest budget), co-op scaling.
+- Day/night cycle with smooth sky/fog/sun lerp; night waves, day prep.
+- Downed/revive (proximity revive, 4 s), game over + score screen, restart
+  current level. Countdown and phase announcements on the HUD.
+- Collision: players and zombies resolve against level colliders; hitscan
+  is occluded by walls; zombies route through doorways/gaps.
+- Flashlight (headlamp, F toggles, auto-on in basements).
+- Tuning config in src/game/tuning.js with the design rationale inline.
+
 ## v0.1.1 - 2026-08-22 14:20
 
 Fixes from a 33-agent adversarial review of the Phase 0 code (21 confirmed
