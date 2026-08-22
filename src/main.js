@@ -16,6 +16,7 @@ import { Arsenal } from './game/arsenal.js';
 import { makeWeaponMesh, makeItemMesh } from './world/weapons3d.js';
 import { Replica } from './game/replica.js';
 import { meta } from './game/meta.js';
+import { audio } from './audio/audio.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { TouchInput } from './input/touch.js';
 import { VRInput } from './input/vr.js';
@@ -153,6 +154,11 @@ addEventListener('resize', () => {
 // clock so the first frame is not a huge step (LESSONS.md).
 document.addEventListener('visibilitychange', () => { last = performance.now(); });
 
+// Audio unlocks on the first user gesture (iOS/WebAudio rule).
+for (const evName of ['pointerdown', 'touchstart', 'keydown']) {
+  document.addEventListener(evName, () => audio.unlock(), { once: true, passive: true });
+}
+
 // ---- Zombie visuals pool ------------------------------------------------
 const zombieVisuals = new Map();  // id -> {group, prev:V3, animT, flashT, type}
 const dyingZombies = [];          // [{group, t}] short shrink-out corpses
@@ -215,15 +221,25 @@ function updateZombieVisuals(rows, dt) {
       v.flashT -= dt;
       if (v.flashT <= 0) setZombieEmissive(v.group, 0x000000, 0);
     }
+    // Hit reaction: a quick backward flinch of the torso.
+    if (v.staggerT > 0) {
+      v.staggerT -= dt;
+      v.group.userData.parts.torso.rotation.x = -0.35 * Math.max(0, v.staggerT / 0.18);
+    }
   }
   for (const [id, v] of zombieVisuals) {
     if (!keep.has(id)) { scene.remove(v.group); zombieVisuals.delete(id); }
   }
+  // Ragdoll-light death: the corpse topples backward, rests briefly, then
+  // sinks into the ground.
   for (let i = dyingZombies.length - 1; i >= 0; i--) {
     const d = dyingZombies[i];
     d.t -= dt;
-    const k = Math.max(0.05, d.t / 0.45);
-    d.group.scale.set(1, k, 1);
+    const T = 1.1;                       // total corpse lifetime
+    const elapsed = T - d.t;
+    const fall = Math.min(1, elapsed / 0.35);
+    d.group.rotation.x = -Math.PI / 2 * (fall * fall);
+    if (elapsed > 0.7) d.group.position.y -= dt * 0.9;   // sink away
     if (d.t <= 0) { scene.remove(d.group); dyingZombies.splice(i, 1); }
   }
 }
@@ -285,6 +301,36 @@ function updateAvatar(id, p) {
 // Muzzle flash: one pooled point light.
 const flash = new THREE.PointLight(0xffc890, 0, 9);
 scene.add(flash);
+
+// Ejected shell casings: a small pooled particle effect.
+const casingGeo = new THREE.BoxGeometry(0.02, 0.02, 0.05);
+const casingMat = new THREE.MeshBasicMaterial({ color: 0xc8a848 });
+const casings = [];
+const upV = new THREE.Vector3(0, 1, 0);
+function spawnCasing(origin, dir) {
+  if (casings.length > 14) {
+    const old = casings.shift();
+    scene.remove(old.mesh);
+  }
+  const mesh = new THREE.Mesh(casingGeo, casingMat);
+  mesh.position.copy(origin).addScaledVector(dir, 0.15);
+  const right = new THREE.Vector3().crossVectors(dir, upV).normalize();
+  const vel = right.multiplyScalar(1.2 + Math.random())
+    .add(new THREE.Vector3(0, 1.8 + Math.random(), 0));
+  scene.add(mesh);
+  casings.push({ mesh, vel, t: 0.9, spin: (Math.random() - 0.5) * 20 });
+}
+function updateCasings(dt) {
+  for (let i = casings.length - 1; i >= 0; i--) {
+    const c = casings[i];
+    c.t -= dt;
+    c.vel.y -= 9.8 * dt;
+    c.mesh.position.addScaledVector(c.vel, dt);
+    c.mesh.rotation.x += c.spin * dt;
+    c.mesh.rotation.z += c.spin * 0.7 * dt;
+    if (c.t <= 0) { scene.remove(c.mesh); casings.splice(i, 1); }
+  }
+}
 
 // ---- Item and grenade visuals ------------------------------------------
 const itemVisuals = new Map();     // id -> {group, kind, bobT}
@@ -668,13 +714,21 @@ function makeArsenal() {
     dispatch: dispatchAction,
     onHudChange: refreshWeaponHud,
     effects: {
-      muzzle: (o, d) => {
+      muzzle: (o, d, w) => {
         flash.intensity = 10;
         flash.position.copy(o).addScaledVector(d, 0.3);
         viewmodelKick = 0.06;
+        audio.play(w || 'pistol');
+        // Recoil (flat modes): a per-weapon upward kick the player rides.
+        if (!(vrInput && vrInput.active)) {
+          rig.pitch += { pistol: 0.010, akimbo: 0.008, shotgun: 0.028, smg: 0.005, ak: 0.011 }[w] || 0.01;
+        }
+        spawnCasing(o, d);
       },
-      swing: () => { viewmodelKick = 0.1; },
-      throw: () => {},
+      swing: () => { viewmodelKick = 0.1; audio.play('machete'); },
+      throw: () => audio.play('throw'),
+      reload: () => audio.play('reload'),
+      dry: () => audio.play('dryfire'),
     },
   });
 }
@@ -980,15 +1034,21 @@ function handleEvents(evs) {
     switch (ev.e) {
       case 'zhit': {
         const v = zombieVisuals.get(ev.id);
-        if (v) { v.flashT = 0.12; setZombieEmissive(v.group, 0xff5040, 0.8); }
+        if (v) {
+          v.flashT = 0.12;
+          setZombieEmissive(v.group, 0xff5040, 0.8);
+          v.staggerT = 0.18;   // hit reaction: brief flinch
+          audio.play('zhit', v.group.position);
+        }
         break;
       }
       case 'zdie': {
         recentlyDeadZ.set(ev.id, performance.now() + 600);
+        if (Array.isArray(ev.p)) audio.play('zdie', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
         const v = zombieVisuals.get(ev.id);
         if (v) {
           zombieVisuals.delete(ev.id);
-          dyingZombies.push({ group: v.group, t: 0.45 });
+          dyingZombies.push({ group: v.group, t: 1.1 });
         }
         break;
       }
@@ -998,17 +1058,22 @@ function handleEvents(evs) {
         if (ev.id !== me && Array.isArray(ev.o)) {
           flash.intensity = Math.max(flash.intensity, 7);
           flash.position.fromArray(ev.o);
+          audio.play(ev.w === 'machete' ? 'machete' : (ev.w || 'pistol'),
+            { x: ev.o[0], y: ev.o[1], z: ev.o[2] });
         }
         break;
       }
       case 'boom':
         spawnExplosion(ev.p);
+        audio.play('explosion', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
         break;
       case 'smoke':
         spawnSmokeVisual(ev.p, ev.d || 8);
+        audio.play('smoke', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
         break;
       case 'fire':
         spawnFireVisual(ev.p, ev.d || 5);
+        audio.play('ignite', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
         break;
       case 'droned': {
         const me = role === 'client' ? net?.myId : 'H';
@@ -1023,12 +1088,16 @@ function handleEvents(evs) {
             pack: '+1 health pack', grenade: '+1 grenade',
           }[ev.kind] || ev.kind;
           showToast(label, 1800);
+          audio.play('pickup');
         }
         break;
       }
-      case 'phit':
+      case 'phit': {
+        const me = role === 'client' ? net?.myId : 'H';
+        if (ev.id === me) audio.play('hurt');
         if (role !== 'client' && ev.id === 'H') { myHp = ev.hp; hud.setHealth(myHp); }
         break;
+      }
       case 'down':
         if (ev.id === (role === 'client' ? net?.myId : 'H')) setDowned(true);
         break;
@@ -1036,23 +1105,31 @@ function handleEvents(evs) {
         if (ev.id === (role === 'client' ? net?.myId : 'H')) {
           setDowned(false);
           myHp = ev.hp; hud.setHealth(myHp);
+          audio.play('heal');
         }
         break;
       // Phase SIDE EFFECTS (lighting, shop, panels) are driven from the
       // wave block by presentPhase() so late joiners land in the right
       // state; events only carry the one-shot announcements.
       case 'day':
-        if (isPlaying()) showCenterText('DAY', 1.6);
+        if (isPlaying()) {
+          showCenterText('DAY', 1.6);
+          audio.stinger('day');
+        }
         break;
       case 'countdown':
         break;   // ticking text driven from the wave block each frame
       case 'night':
-        if (isPlaying()) showCenterText('NIGHT ' + ev.n, 2.0);
+        if (isPlaying()) {
+          showCenterText('NIGHT ' + ev.n, 2.0);
+          audio.stinger('night');
+        }
         break;
       case 'elevator':
         if (isPlaying()) {
           showCenterText('CLEARED', 1.6);
           showToast('Board the elevator!', 5000);
+          audio.play('doors');
         }
         break;
       case 'ride':
@@ -1077,6 +1154,7 @@ function handleEvents(evs) {
       }
       case 'ping':
         spawnPing(ev.p);
+        audio.play('ping', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
         break;
       case 'mined': {
         const me = role === 'client' ? net?.myId : 'H';
@@ -1085,7 +1163,7 @@ function handleEvents(evs) {
       }
       case 'bought': {
         const me = role === 'client' ? net?.myId : 'H';
-        if (ev.id === me) showToast('Purchased: ' + ev.item, 1500);
+        if (ev.id === me) { showToast('Purchased: ' + ev.item, 1500); audio.play('buy'); }
         refreshShop();
         break;
       }
@@ -1261,6 +1339,8 @@ function updateWaveHud(w) {
 // ---- Frame loop ---------------------------------------------------------
 let last = performance.now();
 let poseAccum = 0, snapAccum = 0, invAccum = 0;
+let currentAmb = null;
+let groanT = 3;
 
 renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -1397,6 +1477,21 @@ renderer.setAnimationLoop(() => {
     }
     updateDayNight();
     updateNightVision(dt);
+
+    // Audio: listener follows the camera; ambience tracks level mood;
+    // random horde groans keep the pressure audible.
+    audio.updateListener(camera);
+    const desiredAmb = !isPlaying() ? null : (level.lighting.dark ? 'dark' : 'day');
+    if (desiredAmb !== currentAmb) { currentAmb = desiredAmb; audio.ambience(desiredAmb); }
+    groanT -= dt;
+    if (groanT <= 0) {
+      groanT = 2.5 + Math.random() * 3.5;
+      if (isPlaying() && zombieVisuals.size) {
+        const arr = [...zombieVisuals.values()];
+        const v = arr[(Math.random() * arr.length) | 0];
+        audio.play('groan', v.group.position);
+      }
+    }
     // Elevator doors: open while boarding, closed otherwise.
     const doorTarget = lastWave && lastWave.ph === 'elevator' ? 1 : (lastWave && (lastWave.ph === 'night' || lastWave.ph === 'ride') ? 0 : doorT);
     doorT += (doorTarget - doorT) * Math.min(1, dt * 3);
@@ -1419,6 +1514,7 @@ renderer.setAnimationLoop(() => {
   updateExplosions(dt);
   updatePings(dt);
   updateEffectVisuals(dt);
+  updateCasings(dt);
 
   renderer.render(scene, mapActive && !(vrInput && vrInput.active) ? mapCam : camera);
 });

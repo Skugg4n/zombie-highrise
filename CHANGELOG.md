@@ -1,5 +1,23 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.6.1 - 2026-08-22 20:25
+
+Phase 3 pass 1: soundscape + combat feel. Why: projectplan Phase 3 items
+(audio, weapon feel, hit reactions).
+
+- Full procedural WebAudio soundscape (no asset files, everything is
+  synthesized): per-weapon gunshots, dry-fire, reload, machete whoosh,
+  explosions, zombie hit/death/random groans (positional), player hurt
+  and heal, pickups and purchases, pings, smoke hiss, molotov ignite,
+  elevator doors, and minor/major synth stingers at night/day. Wind
+  ambience outdoors, low drone in dark levels. Positional one-shots via
+  equal-power panners; listener follows the camera; unlocks on the first
+  gesture (iOS rule).
+- Weapon feel: per-weapon recoil kick (flat modes), ejected shell
+  casings with physics, viewmodel kick retained.
+- Zombie hit reactions: torso flinch on hit; deaths now topple backward
+  ragdoll-light and sink away instead of shrinking.
+
 ## v0.6.0 - 2026-08-22 19:40
 
 Phase 2 complete: roles and depth. Why: projectplan Phase 2 items.

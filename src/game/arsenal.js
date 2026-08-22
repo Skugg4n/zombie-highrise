@@ -85,7 +85,11 @@ export class Arsenal {
     if (w === 'machete') return this.swing(origin, dir);
     const def = this.def(w);
     const a = this.ammo[w];
-    if (!a || a.mag <= 0) { this.reload(); return false; }
+    if (!a || a.mag <= 0) {
+      if (this.effects.dry) this.effects.dry();
+      this.reload();
+      return false;
+    }
     a.mag--;
     this.cooldown = def.fireCooldown;
     this.dispatch({ t: 'shoot', w, o: origin.toArray(), d: dir.toArray() });
@@ -111,6 +115,7 @@ export class Arsenal {
     if (!a || a.mag >= def.magazine || a.reserve <= 0) return;
     this.reloading = true;
     this.reloadT = def.reloadTime;
+    if (this.effects.reload) this.effects.reload();
     this.onHudChange();
   }
 
