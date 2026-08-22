@@ -4,7 +4,7 @@
 // data), ?autohost=1 / ?autojoin=CODE (smoke test hooks), ?seed=N.
 import * as THREE from 'three';
 import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY, PLAY_SIZES, setPlayArea } from './config.js';
-import { buildLevel, disposeLevel, MATS } from './world/levelgen.js';
+import { buildLevel, disposeLevel, MATS, makeHelicopter, FINAL_LEVEL } from './world/levelgen.js';
 import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
 import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
@@ -896,6 +896,23 @@ $('btn-go-lobby').addEventListener('click', () => {
   $('panel-gameover').classList.add('hidden');
   leaveToMenu();
 });
+$('btn-win-again').addEventListener('click', () => {
+  $('panel-victory').classList.add('hidden');
+  if (sim) {
+    // A fresh run on a fresh building.
+    clearFinale();
+    runSeed = ((Math.random() * 1e9) >>> 0);
+    loadLevel(1);
+    sim.newRun();
+    $('hud').classList.remove('hidden');
+  } else {
+    leaveToMenu();
+  }
+});
+$('btn-win-lobby').addEventListener('click', () => {
+  $('panel-victory').classList.add('hidden');
+  leaveToMenu();
+});
 
 // ---- Elevator shop ------------------------------------------------------
 let shopOpen = false;
@@ -1274,6 +1291,8 @@ function resetSession() {
   refreshWeaponHud();
   lastSnapAt = 0; lastWave = null;
   presentedPhase = null;
+  clearFinale();
+  $('panel-victory').classList.add('hidden');
   nvOn = false;
   nvBattery = TUNING.weapons.nightVision.batterySeconds;
   $('nv-overlay').classList.add('hidden');
@@ -1566,6 +1585,21 @@ function handleEvents(evs) {
         closeShop();
         break;
       }
+      case 'finale':
+        startFinale();
+        break;
+      case 'victory': {
+        const st = ev.stats || {};
+        meta.recordRun({ ...st, won: true });
+        $('menu-meta').textContent = meta.summaryLine();
+        const wn = st.nights || 0, wk = st.kills || 0;
+        $('win-stats').textContent =
+          `${wn} night${wn === 1 ? '' : 's'} survived. ${wk} zombie${wk === 1 ? '' : 's'} down. `
+          + `${st.scrap || 0} scrap left unspent.`;
+        $('btn-win-again').style.display = role === 'client' ? 'none' : '';
+        audio.stinger('day');
+        break;
+      }
       case 'gameover': {
         const s = ev.stats || {};
         meta.recordRun(s);
@@ -1635,6 +1669,37 @@ function pulseDamageVignette() {
 }
 function updateLowHpVignette() {
   $('dmg-vignette').classList.toggle('lowhp', isPlaying() && myHp <= 25);
+}
+
+// ---- Roof finale ------------------------------------------------------
+// The extraction helicopter flies in over the arena while the survivors
+// hold their ground; when it lifts away the run is won.
+let heli = null;
+let finaleT = 0;
+function startFinale() {
+  if (heli) return;
+  heli = makeHelicopter();
+  scene.add(heli.group);
+  finaleT = 0;
+  showCenterText('EXTRACTION', 2.0);
+  showToast('Chopper coming in from the west. Hold the roof!', 5000);
+  audio.play('doors');
+}
+function clearFinale() {
+  if (!heli) return;
+  removeAndDispose(heli.group);
+  heli = null;
+  finaleT = 0;
+}
+function updateFinale(dt) {
+  if (!heli) return;
+  const dur = TUNING.pacing.finaleDuration;
+  finaleT = Math.min(dur, finaleT + dt);
+  heli.update(finaleT / dur, dt);
+  // Rotor wash: a low rumble while it hovers overhead.
+  if (Math.random() < dt * 3) {
+    audio.play('doors', heli.group.position);
+  }
 }
 
 // Hit marker: white ticks on a confirmed hit, red on a kill.
@@ -1791,6 +1856,19 @@ function presentPhase(ph) {
       if (level.type === 'wagon') closeShop();
       else openShop();
       break;
+    case 'finale':
+      nightTarget = 0.0;    // dawn breaks over the roof: you made it
+      toggleMap(false);
+      closeShop();
+      $('panel-gameover').classList.add('hidden');
+      $('panel-victory').classList.add('hidden');
+      break;
+    case 'victory':
+      toggleMap(false);
+      closeShop();
+      $('hud').classList.add('hidden');
+      $('panel-victory').classList.remove('hidden');
+      break;
     case 'gameover':
       toggleMap(false);
       closeShop();
@@ -1827,6 +1905,8 @@ function updateWaveHud(w) {
         : 'GOING UP - floor ' + (w.lv + 1));
       if (shopOpen && w.t !== lastRideT) { lastRideT = w.t; refreshShop(); }
       break;
+    case 'finale': hud.setWave('EXTRACTION INBOUND'); break;
+    case 'victory': hud.setWave('EXTRACTED'); break;
     case 'gameover': hud.setWave('GAME OVER'); break;
     default: hud.setWave('');
   }
@@ -2004,6 +2084,7 @@ renderer.setAnimationLoop(() => {
     }
     updateDayNight();
     updateNightVision(dt);
+    updateFinale(dt);
 
     // Audio: listener follows the camera; ambience tracks level mood;
     // random horde groans keep the pressure audible.
@@ -2099,6 +2180,19 @@ window.__zhr = {
   debugGotoLevel: (n) => {
     if (sim) sim.wave.level = n;
     loadLevel(n);
+  },
+  // Jump straight to the final floor's boss night (ending test hook).
+  debugGotoFinal: () => {
+    if (!sim) return;
+    sim.wave.level = FINAL_LEVEL;
+    loadLevel(FINAL_LEVEL);
+    sim.wave.nightInLevel = 0;
+    sim.forceNight();
+  },
+  debugKillAll: () => {
+    if (!sim) return;
+    sim.wave.queue = [];
+    for (const z of [...sim.zombies.values()]) sim.damageZombie(z, 9999, false, 'H');
   },
   levelType: () => level.type,
   elevatorZone: () => (level.elevatorZone ? { x: level.elevatorZone.x, z: level.elevatorZone.z } : null),

@@ -11,7 +11,7 @@
 // UI critic gallery; in that mode nothing is wired to the network.
 const $ = (id) => document.getElementById(id);
 
-const PANELS = ['panel-menu', 'panel-hosting', 'panel-joining', 'panel-connected', 'panel-shop', 'panel-gameover', 'panel-error'];
+const PANELS = ['panel-menu', 'panel-hosting', 'panel-joining', 'panel-connected', 'panel-shop', 'panel-gameover', 'panel-victory', 'panel-error'];
 
 export class LobbyUI {
   constructor(handlers) {
@@ -174,6 +174,7 @@ export class LobbyUI {
       case 'hud': $('hud').classList.remove('hidden'); this.state = 'playing'; break;
       case 'shop': $('panel-shop').classList.remove('hidden'); this.state = 'playing'; break;
       case 'gameover': $('panel-gameover').classList.remove('hidden'); this.state = 'playing'; break;
+      case 'victory': $('panel-victory').classList.remove('hidden'); this.state = 'playing'; break;
       case 'connected': $('panel-connected').classList.remove('hidden'); this.state = 'connected'; break;
       default: $('panel-menu').classList.remove('hidden'); this.state = 'menu';
     }

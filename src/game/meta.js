@@ -7,7 +7,7 @@ const KEY = 'zhr-meta';
 const SCHEMA_VERSION = 1;
 
 function defaults() {
-  return { v: SCHEMA_VERSION, bestNights: 0, bestLevel: 1, totalKills: 0, runs: 0 };
+  return { v: SCHEMA_VERSION, bestNights: 0, bestLevel: 1, totalKills: 0, runs: 0, wins: 0 };
 }
 
 let state = load();
@@ -39,6 +39,7 @@ export const meta = {
 
   recordRun(stats) {
     state.runs++;
+    if (stats.won) state.wins = (state.wins || 0) + 1;
     state.bestNights = Math.max(state.bestNights, stats.nights || 0);
     state.bestLevel = Math.max(state.bestLevel, stats.level || 1);
     state.totalKills += stats.kills || 0;
@@ -56,6 +57,7 @@ export const meta = {
     if (state.runs === 0) return '';
     const bonus = this.scrapBonus();
     return `Best: ${state.bestNights} night${state.bestNights === 1 ? '' : 's'} (floor ${state.bestLevel}) - ${state.totalKills} kills total`
+      + (state.wins ? ` - ${state.wins} extraction${state.wins === 1 ? '' : 's'}` : '')
       + (bonus ? ` - veteran bonus +${bonus} scrap` : '');
   },
 };

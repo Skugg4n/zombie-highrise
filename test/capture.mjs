@@ -49,7 +49,7 @@ for (const [w, h] of [[1920, 1080], [800, 600]]) {
 }
 for (const [name, w, h] of [['phone', 390, 844], ['laptop', 1280, 720], ['desktop', 1920, 1080]]) {
   await page.setViewportSize({ width: w, height: h });
-  for (const state of ['lobby', 'hosting', 'joining', 'connected', 'hud', 'shop', 'gameover']) {
+  for (const state of ['lobby', 'hosting', 'joining', 'connected', 'hud', 'shop', 'gameover', 'victory']) {
     await page.goto(`${BASE}/?uistate=${state}`);
     await page.waitForFunction(() => !!window.__zhr, null, { timeout: 15000 });
     await page.waitForTimeout(350);

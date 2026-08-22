@@ -133,6 +133,7 @@ export const TUNING = {
     },
     spawnDistanceFromPlayer: { min: 12, max: 22 },
     nightsPerLevel: 2,
+    finaleDuration: 14,   // roof extraction beat before the victory screen
   },
 
   // ---- 6. Player --------------------------------------------------------

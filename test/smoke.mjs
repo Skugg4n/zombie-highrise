@@ -235,7 +235,7 @@ const VIEWPORTS = [
   { name: 'laptop', width: 1280, height: 720 },
   { name: 'desktop', width: 1920, height: 1080 },
 ];
-const UISTATES = ['lobby', 'hosting', 'joining', 'connected', 'hud', 'shop', 'gameover'];
+const UISTATES = ['lobby', 'hosting', 'joining', 'connected', 'hud', 'shop', 'gameover', 'victory'];
 
 const galleryCtx = await browser.newContext();
 await galleryCtx.addInitScript(XR_STUB);

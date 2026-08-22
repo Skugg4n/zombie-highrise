@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
-import { levelTypeFor } from '../world/levelgen.js';
+import { levelTypeFor, FINAL_LEVEL } from '../world/levelgen.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 'screamer', 'butcher'];
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
@@ -89,7 +89,7 @@ export class HostSim {
     this.events.push({ e: 'leave', id });
     // If the departed player was the last one standing, the run is over
     // for the downed survivors (otherwise: permanent softlock).
-    const active = this.wave.phase !== 'lobby' && this.wave.phase !== 'gameover';
+    const active = !['lobby', 'gameover', 'victory', 'finale'].includes(this.wave.phase);
     if (active && this.players.size > 0 && this.standingCount() === 0) {
       this.wave.phase = 'gameover';
       this.events.push({
@@ -349,7 +349,7 @@ export class HostSim {
 
   // ---- Wave director ---------------------------------------------------
   startRun() {
-    if (this.wave.phase !== 'lobby' && this.wave.phase !== 'gameover') return;
+    if (!['lobby', 'gameover', 'victory'].includes(this.wave.phase)) return;
     this.kills = 0;
     for (const p of this.players.values()) { p.hp = TUNING.player.maxHp; p.down = false; }
     this._enterDay();
@@ -496,7 +496,11 @@ export class HostSim {
     // night is beaten, the ride simply arrives.
     const npl = (this.level.type === 'wagon' || this.level.type === 'boss') ? 1 : TUNING.pacing.nightsPerLevel;
     if (this.wave.nightInLevel >= npl) {
-      if (this.level.type === 'wagon' || !this.level.elevatorZone) {
+      // Beating the Butcher on the final floor ends the run: the roof
+      // finale plays out and the survivors are extracted.
+      if (this.wave.level >= FINAL_LEVEL) {
+        this._enterFinale();
+      } else if (this.level.type === 'wagon' || !this.level.elevatorZone) {
         this._enterRide();
       } else {
         this.wave.phase = 'elevator';
@@ -505,6 +509,62 @@ export class HostSim {
     } else {
       this._enterDay();
     }
+  }
+
+  // ---- The ending -------------------------------------------------------
+  // Roof finale: the elevator carries the squad to the roof, a helicopter
+  // comes in, and the run is WON. Everyone still down is pulled aboard.
+  _enterFinale() {
+    this.wave.phase = 'finale';
+    this.wave.t = TUNING.pacing.finaleDuration;
+    for (const [id, p] of this.players) {
+      if (p.down) {
+        p.down = false; p.reviveT = 0;
+        p.hp = TUNING.player.revivedAtHp;
+        this.events.push({ e: 'revive', id, hp: p.hp });
+      }
+    }
+    this.events.push({ e: 'finale' });
+  }
+
+  // Start a brand new run after a victory (kit and scrap reset).
+  newRun() {
+    this.zombies.clear();
+    this.grenades.clear();
+    this.clouds.length = 0;
+    this.fires.length = 0;
+    this.drones.clear();
+    this.items.clear();
+    this.mines.clear();
+    this.kills = 0;
+    this.mod = null;
+    this.surge = false;
+    this.wave.night = 0;
+    this.wave.nightInLevel = 0;
+    this.wave.nightStarted = false;
+    this.wave.level = 1;
+    for (const p of this.players.values()) {
+      p.hp = TUNING.player.maxHp; p.down = false; p.reviveT = 0;
+      p.inv.w = ['pistol', 'machete'];
+      p.inv.active = 'pistol';
+      p.inv.a = { pistol: [TUNING.weapons.pistol.magazine, -1] };
+      p.inv.g = 1; p.inv.gs = 0; p.inv.gm = 0;
+      p.inv.k = 0; p.inv.m = 0; p.inv.nv = false;
+      p.inv.s = TUNING.economy.startingScrap;
+    }
+    this.wave.phase = 'lobby';
+    this.startRun();
+  }
+
+  _win() {
+    this.wave.phase = 'victory';
+    this.events.push({
+      e: 'victory',
+      stats: {
+        nights: this.wave.night, kills: this.kills, level: this.wave.level,
+        scrap: [...this.players.values()].reduce((n, p) => n + p.inv.s, 0),
+      },
+    });
   }
 
   _enterRide() {
@@ -704,6 +764,10 @@ export class HostSim {
       case 'ride':
         wave.t -= dt;
         if (wave.t <= 0) this._arrive();
+        break;
+      case 'finale':
+        wave.t -= dt;
+        if (wave.t <= 0) this._win();
         break;
       default:
         break;

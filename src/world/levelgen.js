@@ -37,6 +37,9 @@ export const LEVEL_TYPES = [
   'ground', 'basement', 'upper', 'ground', 'trench', 'wagon',
   'ground', 'basement', 'upper', 'ground', 'trench', 'boss',
 ];
+// A run is exactly FINAL_LEVEL floors long: floor 12 is the Butcher's
+// arena, and beating it triggers the roof finale (the run's win state).
+export const FINAL_LEVEL = LEVEL_TYPES.length;
 export function levelTypeFor(levelIndex) {
   return LEVEL_TYPES[(levelIndex - 1) % LEVEL_TYPES.length];
 }
@@ -1006,8 +1009,8 @@ function buildBossArena(level, rng) {
   level.floorY = 0;
   level.heightAt = () => 0;
   level.lighting = {
-    daySky: 0x3a2c3c, dayHaze: 0x4a3040,
-    fogNear: 14, fogFar: 80, sunDay: 0.9, hemiDay: 0.55, dark: false,
+    daySky: 0x6a5a72, dayHaze: 0x8a6a5c,
+    fogNear: 18, fogFar: 120, sunDay: 1.5, hemiDay: 0.85, dark: false,
   };
 
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 2, A + 2), MATS.concrete);
@@ -1065,6 +1068,84 @@ function buildBossArena(level, rng) {
     new THREE.Vector3(-qb, 0, qb), new THREE.Vector3(0, 0, qb + 2),
     new THREE.Vector3(qb, 0, qb + 2),
   ];
+}
+
+// ---- The extraction helicopter (roof finale) ----------------------------
+// Flies in from the horizon, hovers over the arena, and lifts away. Built
+// once per finale and animated by main.js via api.update(t).
+export function makeHelicopter() {
+  const g = new THREE.Group();
+  const bodyMat = mat(0x39433a, 0.7, 0.3);
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x203038, roughness: 0.2, metalness: 0.6 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.9, 2.2, 4, 8), bodyMat);
+  body.rotation.z = Math.PI / 2;
+  g.add(body);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.85, 8, 6), glassMat);
+  nose.position.x = 1.7;
+  nose.scale.set(1.1, 0.85, 0.9);
+  g.add(nose);
+  const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.3, 3.2, 6), bodyMat);
+  tail.rotation.z = Math.PI / 2;
+  tail.position.x = -2.4;
+  g.add(tail);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.5), bodyMat);
+  fin.position.set(-3.7, 0.5, 0);
+  g.add(fin);
+  // Skids
+  for (const dz of [-0.7, 0.7]) {
+    const skid = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 3.0, 5), bodyMat);
+    skid.rotation.z = Math.PI / 2;
+    skid.position.set(0, -1.0, dz);
+    g.add(skid);
+  }
+  // Rotors (spun by update)
+  const mainRotor = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.05, 0.35),
+      new THREE.MeshBasicMaterial({ color: 0x2a2f2b, transparent: true, opacity: 0.55 }));
+    blade.rotation.y = (i / 4) * Math.PI * 2;
+    mainRotor.add(blade);
+  }
+  mainRotor.position.y = 1.15;
+  g.add(mainRotor);
+  const tailRotor = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.6, 0.2),
+      new THREE.MeshBasicMaterial({ color: 0x2a2f2b, transparent: true, opacity: 0.55 }));
+    blade.rotation.x = (i / 3) * Math.PI * 2;
+    tailRotor.add(blade);
+  }
+  tailRotor.position.set(-3.7, 0.5, 0.3);
+  g.add(tailRotor);
+  // Searchlight pointing down at the roof
+  const spot = new THREE.SpotLight(0xfff0d0, 6, 40, 0.5, 0.6, 1.0);
+  spot.position.set(1.2, -0.7, 0);
+  const target = new THREE.Object3D();
+  target.position.set(1.2, -20, 0);
+  g.add(spot, target);
+  spot.target = target;
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5),
+    new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2010, emissiveIntensity: 2 }));
+  beacon.position.set(-1.0, -1.05, 0);
+  g.add(beacon);
+
+  return {
+    group: g,
+    // t: 0..1 across the finale. Approach, hover, lift away.
+    update(t, dt) {
+      mainRotor.rotation.y += dt * 26;
+      tailRotor.rotation.x += dt * 34;
+      beacon.material.emissiveIntensity = 1.2 + Math.sin(performance.now() / 120) * 1.2;
+      const approach = Math.min(1, t / 0.35);
+      const leave = Math.max(0, (t - 0.75) / 0.25);
+      const x = -70 + 70 * approach * approach + leave * 40;
+      const y = 22 - 8 * approach + leave * 30;
+      g.position.set(x, y, -6 + leave * -20);
+      g.rotation.z = -0.12 * (1 - approach) - 0.18 * leave;
+      g.rotation.y = 0.15 * leave;
+      spot.intensity = 6 * approach * (1 - leave);
+    },
+  };
 }
 
 // ---- Entry point --------------------------------------------------------
