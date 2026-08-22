@@ -59,9 +59,15 @@ export function makeWeaponMesh(kind) {
       part(g, new THREE.BoxGeometry(0.02, 0.03, 0.02), metal(), 0, 0.06, 0);
       break;
     }
-    default: {  // pistol
-      part(g, new THREE.BoxGeometry(0.035, 0.045, 0.16), metal(), 0, 0.015, -0.05);
-      part(g, new THREE.BoxGeometry(0.032, 0.09, 0.045), wood(), 0, -0.045, 0.02, 0.25);
+    default: {  // pistol: slide + barrel + front sight + trigger guard + taped grip
+      part(g, new THREE.BoxGeometry(0.034, 0.038, 0.15), metal(), 0, 0.022, -0.05);   // slide
+      part(g, new THREE.BoxGeometry(0.03, 0.02, 0.13), metal(), 0, 0.0, -0.055);      // frame
+      part(g, new THREE.CylinderGeometry(0.008, 0.008, 0.03, 6), metal(), 0, 0.022, -0.135, Math.PI / 2);
+      part(g, new THREE.BoxGeometry(0.006, 0.012, 0.008), metal(), 0, 0.047, -0.115); // front sight
+      part(g, new THREE.BoxGeometry(0.012, 0.008, 0.006), metal(), 0, 0.045, 0.01);   // rear sight
+      const guard = part(g, new THREE.BoxGeometry(0.006, 0.03, 0.045), metal(), 0, -0.028, -0.015);
+      guard.rotation.x = 0.15;
+      part(g, new THREE.BoxGeometry(0.034, 0.085, 0.042), tape(), 0, -0.05, 0.022, 0.22); // taped grip
       break;
     }
   }

@@ -1,0 +1,91 @@
+// Deterministic game-feel clips (?feelclip=N): scripted input over a
+// fixed-seed solo session, captured on video for the feel-critic loop.
+// The api is implemented in main.js:
+//   spawnAt(type, x, z)   spawn a zombie at an exact position
+//   grant(weapon)         give + equip a weapon with full ammo
+//   equip(weapon)         switch active weapon
+//   aim()                 snap yaw/pitch onto the nearest zombie's torso
+//   fire()                one trigger pull
+//   hold(seconds)         hold the trigger from now for N seconds (auto)
+//   throwGrenade()        throw the selected throwable
+//   setHp(n)              set own hp (for the damage clip)
+//
+// 1 pistol vs walker   2 SMG spraying a group   3 shotgun on a brute
+// 4 machete swing      5 grenade throw + boom   6 taking damage, downed
+export const FEEL_CLIPS = {
+  1: {
+    duration: 5.5,
+    actions: [
+      [0.1, (a) => a.spawnAt('walker', 0, -8)],
+      [0.7, (a) => a.aim()],
+      [1.0, (a) => { a.aim(); a.fire(); }],
+      [1.7, (a) => { a.aim(); a.fire(); }],
+      [2.4, (a) => { a.aim(); a.fire(); }],
+      [3.4, (a) => a.aim()],
+    ],
+  },
+  2: {
+    duration: 6.5,
+    actions: [
+      [0.1, (a) => {
+        a.grant('smg');
+        a.spawnAt('walker', -2.5, -8);
+        a.spawnAt('walker', -0.8, -9.5);
+        a.spawnAt('walker', 1.0, -8.5);
+        a.spawnAt('walker', 2.6, -7.5);
+      }],
+      [0.8, (a) => a.aim()],
+      [1.0, (a) => { a.aim(); a.hold(3.2); }],
+      [1.5, (a) => a.aim()],
+      [2.0, (a) => a.aim()],
+      [2.5, (a) => a.aim()],
+      [3.0, (a) => a.aim()],
+      [3.6, (a) => a.aim()],
+      [4.4, (a) => a.aim()],
+    ],
+  },
+  3: {
+    duration: 6,
+    actions: [
+      [0.1, (a) => { a.grant('shotgun'); a.spawnAt('brute', 0, -2.6); }],
+      [0.8, (a) => a.aim()],
+      [1.1, (a) => { a.aim(); a.fire(); }],
+      [2.3, (a) => { a.aim(); a.fire(); }],
+      [3.5, (a) => { a.aim(); a.fire(); }],
+      [4.5, (a) => { a.aim(); a.fire(); }],
+    ],
+  },
+  4: {
+    duration: 4.5,
+    actions: [
+      [0.1, (a) => { a.equip('machete'); a.spawnAt('walker', 0, -1.5) }],
+      [0.8, (a) => a.aim()],
+      [1.1, (a) => { a.aim(); a.fire(); }],
+      [2.2, (a) => { a.aim(); a.fire(); }],
+    ],
+  },
+  5: {
+    duration: 6.5,
+    actions: [
+      [0.1, (a) => {
+        a.spawnAt('walker', -1, -8);
+        a.spawnAt('walker', 0.6, -8.8);
+        a.spawnAt('walker', 0, -7.2);
+      }],
+      [0.8, (a) => a.aim()],
+      [1.2, (a) => a.throwGrenade()],
+      [4.8, (a) => a.aim()],
+    ],
+  },
+  6: {
+    duration: 7,
+    actions: [
+      [0.1, (a) => {
+        a.setHp(25);
+        a.spawnAt('runner', -1.2, -1.6);
+        a.spawnAt('runner', 1.2, -1.8);
+      }],
+      [0.6, (a) => a.aim()],
+    ],
+  },
+};

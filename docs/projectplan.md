@@ -58,6 +58,26 @@ expensive.
 - [ ] UI polish: HUD, menus, elevator shop, all in English
 - [ ] Performance gate: 72 fps on Quest 2 in the worst scene
 
+### Feel critic loop (screenshots cannot judge how the game FEELS)
+
+- [ ] ?feelclip=N deterministic gameplay clips (scripted input, fixed
+      seed): pistol firing at a walker, SMG spraying a group, shotgun
+      point-blank on a brute, machete swing, grenade throw and explosion,
+      taking damage and going downed
+- [ ] Capture each as video (Playwright recordVideo) AND as a frame strip;
+      a SEPARATE critic sub-agent judges them 1-10 on game feel against
+      the reference games in docs/vision.md: does firing feel punchy, is
+      there weight and consequence, does the zombie react visibly to being
+      hit, is the feedback loop readable within 100 ms of the trigger?
+      Loop until 9+ like the visual critics (same 6-round cap per pass).
+- [ ] Minimum feel requirements before that loop can pass: muzzle flash
+      that briefly lights the surroundings, camera/weapon recoil kick
+      with recovery, hit reactions on enemies (flinch, knockback on
+      shotgun), hit markers or clear damage feedback, shell casings,
+      screen shake on explosions, and a full WebAudio layer (fire,
+      reload, impact, empty click, enemy sounds, wave stingers)
+      synthesized in code so there are no asset downloads
+
 ## Phase 4 - Release
 
 - [ ] GitHub Pages deploy documented in README

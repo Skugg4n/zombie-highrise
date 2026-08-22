@@ -14,6 +14,8 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeRng } from '../util/rng.js';
+import { noiseTexture, plankTexture, metalTexture, sandbagTexture } from './textures.js';
+import { mergeStaticMeshes } from './merge.js';
 
 export const PALETTE = {
   daySky: 0xa8c8e0, dayHaze: 0xd6c9a8,
@@ -35,9 +37,47 @@ export function levelTypeFor(levelIndex) {
 
 const mat = (color, rough = 0.9, metal = 0.0) =>
   new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+const matT = (map, rough = 0.9, metal = 0.0, color = 0xffffff) =>
+  new THREE.MeshStandardMaterial({ map, color, roughness: rough, metalness: metal });
+
+// Shared procedural materials (built once, reused by every level build).
+const MATS = {
+  get sandGround() { return this._sg || (this._sg = matT(noiseTexture('sand-ground', 0xc9b088, [0xb89e76, 0xd8c29a, 0xa8906a], { repeat: 90, density: 1200 }), 1.0)); },
+  get concrete() { return this._co || (this._co = matT(noiseTexture('concrete', 0x9a938a, [0x8a847c, 0xa8a29a, 0x7e7870], { repeat: 5, density: 1400, alpha: 0.2 }), 0.95)); },
+  get sandbag() { return this._sb || (this._sb = matT(sandbagTexture('sandbag', 0xb0a070), 1.0)); },
+  get crate() { return this._cr || (this._cr = matT(plankTexture('crate', 0x8a6f4d, 0x5c4630), 0.95)); },
+  get basementWall() { return this._bw || (this._bw = matT(noiseTexture('bwall', 0x6e6a63, [0x5c584f, 0x7c786f, 0x4c4841], { repeat: 3, density: 1600, alpha: 0.22 }), 1.0)); },
+  get basementFloor() { return this._bf || (this._bf = matT(noiseTexture('bfloor', 0x55524c, [0x45423c, 0x63605a, 0x39362f], { repeat: 8, density: 1600, alpha: 0.25 }), 1.0)); },
+  get plaster() { return this._pl || (this._pl = matT(noiseTexture('plaster', 0x8f8274, [0x7f7264, 0x9f9284, 0x6f6254], { repeat: 3, density: 900, alpha: 0.15 }), 0.95)); },
+  get parquet() { return this._pq || (this._pq = matT(plankTexture('parquet', 0x7a6a52, 0x54462f, { planks: 8, repeat: 1 }), 0.9)); },
+  get metalShell() { return this._ms || (this._ms = matT(metalTexture('elev', 0x5a5d63), 0.55, 0.5)); },
+  get metalDoor() { return this._md || (this._md = matT(metalTexture('door', 0x42454b), 0.6, 0.4)); },
+  get dirt() { return this._di || (this._di = matT(noiseTexture('dirt', 0x4e4436, [0x3e3628, 0x5e5244, 0x2f2a1f], { repeat: 4, density: 1800, alpha: 0.25 }), 1.0)); },
+  get planksOld() { return this._po || (this._po = matT(plankTexture('oldplanks', 0x6e5a40, 0x463a26, { planks: 6, repeat: 2 }), 1.0)); },
+};
+
+// Boxes scale their UVs by physical size so a tiling texture has ONE
+// world-space scale everywhere (mismatched tiling across differently
+// sized walls was the most-flagged texture flaw in the critic pass).
+// BoxGeometry vertex order: +x,-x (d*h faces), +y,-y (w*d), +z,-z (w*h).
+function scaleBoxUVs(geo, w, h, d) {
+  const uv = geo.attributes.uv;
+  const faceDims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) {
+    const [uw, vh] = faceDims[f];
+    for (let v = 0; v < 4; v++) {
+      const i = f * 4 + v;
+      uv.setXY(i, uv.getX(i) * uw * 0.5, uv.getY(i) * vh * 0.5);
+    }
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
 
 function box(group, w, h, d, material, x, y, z, ry = 0) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  const geo = new THREE.BoxGeometry(w, h, d);
+  if (material.map) scaleBoxUVs(geo, w, h, d);
+  const m = new THREE.Mesh(geo, material);
   m.position.set(x, y, z);
   m.rotation.y = ry;
   group.add(m);
@@ -49,8 +89,8 @@ function box(group, w, h, d, material, x, y, z, ry = 0) {
 // and the transition between levels; it sits at the edge of the play area.
 export function makeElevator() {
   const g = new THREE.Group();
-  const shell = mat(PALETTE.metal, 0.6, 0.5);
-  const dark = mat(PALETTE.metalDark, 0.7, 0.3);
+  const shell = MATS.metalShell;
+  const dark = MATS.metalDoor;
   const W = 2.6, H = 2.5, D = 2.2, T = 0.08;
 
   box(g, W, T, D, dark, 0, T / 2, 0);                    // floor
@@ -60,11 +100,46 @@ export function makeElevator() {
   box(g, T, H, D, shell, W / 2, H / 2, 0);               // right
   // Door frame header
   box(g, W, 0.35, T, shell, 0, H - 0.175, D / 2);
-  // Sliding doors (front, facing +Z)
+  // Sliding doors (front, facing +Z); dynamic: excluded from merging
   const doorL = box(g, W / 2 - 0.05, H - 0.35, 0.06, dark, -W / 4, (H - 0.35) / 2, D / 2);
   const doorR = box(g, W / 2 - 0.05, H - 0.35, 0.06, dark, W / 4, (H - 0.35) / 2, D / 2);
-  // Rusty accent strips and a button panel
-  box(g, 0.3, 0.5, 0.03, mat(PALETTE.rust, 0.8), W / 2 - 0.16, 1.3, D / 2 - 0.35);
+  doorL.userData.dynamic = true;
+  doorR.userData.dynamic = true;
+  // Flickering fluorescent tube (the lamp's visible source)
+  const tube = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 0.05, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0xf8f4e8, emissive: 0xfff4d8, emissiveIntensity: 1.4 }));
+  tube.position.set(0, H - 0.12, 0);
+  g.add(tube);
+  // Button panel with two glowing buttons
+  box(g, 0.22, 0.5, 0.03, MATS.metalDoor, W / 2 - 0.16, 1.25, D / 2 - 0.35);
+  for (const [by, on] of [[1.35, true], [1.18, false]]) {
+    const btn = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.03, 0.02, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0x202020, emissive: on ? 0xffa030 : 0x203020, emissiveIntensity: on ? 1.2 : 0.4,
+      }));
+    btn.rotation.x = Math.PI / 2;
+    btn.position.set(W / 2 - 0.16, by, D / 2 - 0.33);
+    g.add(btn);
+  }
+  // Hazard stripe across the door sill
+  const stripeC = document.createElement('canvas');
+  stripeC.width = 64; stripeC.height = 16;
+  const sc = stripeC.getContext('2d');
+  sc.fillStyle = '#c8a020'; sc.fillRect(0, 0, 64, 16);
+  sc.fillStyle = '#1c1c1c';
+  for (let i = -1; i < 5; i++) {
+    sc.beginPath();
+    sc.moveTo(i * 16, 16); sc.lineTo(i * 16 + 8, 0);
+    sc.lineTo(i * 16 + 16, 0); sc.lineTo(i * 16 + 8, 16);
+    sc.fill();
+  }
+  const stripeTex = new THREE.CanvasTexture(stripeC);
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(W, 0.02, 0.18),
+    new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.8 }));
+  sill.position.set(0, T + 0.02, D / 2 - 0.06);
+  g.add(sill);
   const lamp = new THREE.PointLight(0xfff2d0, 1.1, 5);
   lamp.position.set(0, H - 0.25, 0);
   g.add(lamp);
@@ -100,11 +175,54 @@ function buildWasteland(group, rng, { ruinCount = 5, hillCount = 6 }) {
     group.add(hill);
   }
   const ruinMat = mat(0x8f8578);
+  const holeMat = mat(0x1a1712, 1.0);
   for (let i = 0; i < ruinCount; i++) {
     const ang = rng.range(0, Math.PI * 2);
     const dist = rng.range(38, 80);
     const w = rng.range(6, 12), h = rng.range(7, 22), d = rng.range(6, 12);
-    box(group, w, h, d, ruinMat, Math.cos(ang) * dist, h / 2, Math.sin(ang) * dist, rng.range(0, Math.PI));
+    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+    const ry = rng.range(0, Math.PI);
+    const body = box(group, w, h, d, ruinMat, x, h / 2, z, ry);
+    // Broken roofline: a second, offset shorter block on top
+    box(group, w * rng.range(0.35, 0.6), rng.range(1.5, 3.5), d * rng.range(0.5, 0.9),
+      ruinMat, x + rng.range(-w / 4, w / 4), h + 1, z, ry);
+    // Dark window holes on the facade facing the base (rows of dark quads)
+    const rows = Math.max(1, Math.floor(h / 5));
+    for (let r = 0; r < rows; r++) {
+      for (let cIdx = 0; cIdx < 2; cIdx++) {
+        const win = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 2), holeMat);
+        const lx = (cIdx - 0.5) * w * 0.4;
+        const lyy = 2.5 + r * 5;
+        win.position.set(
+          x + Math.cos(ry) * lx - Math.sin(ry) * (d / 2 + 0.02),
+          lyy,
+          z - Math.sin(ry) * lx - Math.cos(ry) * (d / 2 + 0.02));
+        win.rotation.y = ry + Math.PI;
+        group.add(win);
+      }
+    }
+    // Exposed rebar on the roof edge
+    for (let rb = 0; rb < 3; rb++) {
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, rng.range(0.8, 1.6), 4),
+        mat(0x4a3626, 0.9));
+      bar.position.set(x + rng.range(-w / 2, w / 2), h + rng.range(0.3, 0.7), z + rng.range(-d / 3, d / 3));
+      bar.rotation.z = rng.range(-0.3, 0.3);
+      group.add(bar);
+    }
+    void body;
+  }
+  // A wrecked car in the midground: the classic wasteland anchor prop
+  {
+    const cx = rng.range(-30, 30), cz = rng.pick([-1, 1]) * rng.range(18, 30);
+    const bodyMat = mat(rng.pick([0x7d4a38, 0x4a5a68, 0x6a6a52]), 0.6, 0.3);
+    box(group, 3.6, 0.75, 1.7, bodyMat, cx, 0.55, cz, rng.range(0, Math.PI));
+    box(group, 2.0, 0.55, 1.5, bodyMat, cx, 1.15, cz, rng.range(0, Math.PI));
+    for (const [dx, dz] of [[-1.2, -0.85], [1.2, -0.85], [-1.2, 0.85], [1.2, 0.85]]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.22, 8), mat(0x1f1f1f, 1.0));
+      wheel.rotation.x = Math.PI / 2;
+      wheel.position.set(cx + dx, 0.3, cz + dz);
+      group.add(wheel);
+    }
   }
   const treeMat = mat(0x6b5a44);
   for (let i = 0; i < 5; i++) {
@@ -129,7 +247,7 @@ function buildGround(level, rng, quality) {
   };
 
   // Ground plane and a road
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), mat(PALETTE.sand));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), MATS.sandGround);
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02;
   ground.receiveShadow = quality === 'DESKTOP';
   g.add(ground);
@@ -139,13 +257,13 @@ function buildGround(level, rng, quality) {
   g.add(road);
 
   // Base floor
-  const floor = box(g, A, 0.2, A, mat(PALETTE.concrete), 0, 0, 0);
+  const floor = box(g, A, 0.2, A, MATS.concrete, 0, 0, 0);
   floor.receiveShadow = quality === 'DESKTOP';
 
   // Sandbag perimeter with a gap per side (entries). Sandbags are LOW:
   // they block walking but not bullets. Everything scales with the chosen
   // play-area footprint (SMALL layouts skip clutter entirely).
-  const wallMat = mat(PALETTE.sandbag);
+  const wallMat = MATS.sandbag;
   const H = 1.0, T = 0.6;
   const gap = Math.min(3, Math.max(1.2, A / 5));
   const segLen = (A - gap) / 2;
@@ -168,7 +286,7 @@ function buildGround(level, rng, quality) {
 
   // Crates and barrels inside (only when the footprint has room)
   if (A >= 8) {
-    const crateMat = mat(PALETTE.wood);
+    const crateMat = MATS.crate;
     const barrelMat = mat(PALETTE.rust, 0.7, 0.2);
     for (let i = 0; i < Math.round(A / 3); i++) {
       const s = rng.range(0.6, 1.1);
@@ -184,6 +302,32 @@ function buildGround(level, rng, quality) {
       g.add(b);
       level.colliders.push({ x, z, hx: 0.35, hz: 0.35, tall: false });
     }
+  }
+
+  // Foreground scatter: debris ring just outside the walls so every shot
+  // has a near layer (critic pass: "no foreground layer at all").
+  const debrisMat = MATS.planksOld;
+  const rockMat = mat(0x9a8d76, 1.0);
+  for (let i = 0; i < 10; i++) {
+    const ang = rng.range(0, Math.PI * 2);
+    const dist = half + rng.range(1.5, 9);
+    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+    if (rng.chance(0.5)) {
+      box(g, rng.range(0.6, 1.4), 0.06, rng.range(0.15, 0.3), debrisMat, x, 0.03, z, rng.range(0, Math.PI));
+    } else {
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rng.range(0.15, 0.45), 0), rockMat);
+      rock.position.set(x, 0.12, z);
+      rock.rotation.set(rng.range(0, 3), rng.range(0, 3), 0);
+      g.add(rock);
+    }
+  }
+  // Tire tracks on the road: two long dark strips
+  for (const off of [-1.1, 1.1]) {
+    const track = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 600),
+      new THREE.MeshBasicMaterial({ color: 0x55514a, transparent: true, opacity: 0.5, depthWrite: false }));
+    track.rotation.x = -Math.PI / 2;
+    track.position.set(road.position.x + off, 0.012, 0);
+    g.add(track);
   }
 
   buildWasteland(g, rng, {});
@@ -221,12 +365,12 @@ function buildBasement(level, rng) {
   level.floorY = 0.0;
   level.heightAt = () => 0;
   level.lighting = {
-    daySky: 0x07090c, dayHaze: 0x0a0c10,
-    fogNear: 4, fogFar: 26, sunDay: 0.0, hemiDay: 0.25, dark: true,
+    daySky: 0x0a1018, dayHaze: 0x101828,
+    fogNear: 5, fogFar: 30, sunDay: 0.0, hemiDay: 0.42, dark: true,
   };
 
-  const floorMat = mat(PALETTE.basementFloor, 1.0);
-  const wallMat = mat(PALETTE.basementWall, 0.95);
+  const floorMat = MATS.basementFloor;
+  const wallMat = MATS.basementWall;
   const ceilMat = mat(0x4a4741, 1.0);
 
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(A, A), floorMat);
@@ -295,7 +439,7 @@ function buildBasement(level, rng) {
     }
   }
   if (A >= 10) {
-    const shelfMat = mat(PALETTE.wood, 1.0);
+    const shelfMat = MATS.crate;
     for (let i = 0; i < 4; i++) {
       const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
       if (Math.abs(x) < 2.5 && Math.abs(z) < 2.5) continue;
@@ -352,8 +496,8 @@ function buildUpper(level, rng, quality) {
     fogNear: 70, fogFar: 300, sunDay: 2.0, hemiDay: 0.8, dark: false,
   };
 
-  const floorMat = mat(PALETTE.interiorFloor, 0.95);
-  const wallMat = mat(PALETTE.interiorWall, 0.95);
+  const floorMat = MATS.parquet;
+  const wallMat = MATS.plaster;
 
   // Room floor and ceiling
   const floor = box(g, A, 0.2, A, floorMat, 0, -0.1, 0);
@@ -362,8 +506,8 @@ function buildUpper(level, rng, quality) {
   // Interior fill: window bounce light (the sun itself cannot reach in
   // without shadows, so the room needs its own warmth to stay readable).
   for (const lx of [-3, 3]) {
-    const fill = new THREE.PointLight(0xffeecd, 0.85, 14);
-    fill.position.set(lx, 2.3, 1.5);
+    const fill = new THREE.PointLight(0xffeecd, 1.4, 18);
+    fill.position.set(lx, 2.2, 2.0);
     g.add(fill);
   }
 
@@ -384,6 +528,26 @@ function buildUpper(level, rng, quality) {
   level.colliders.push({ x: 0, z: half, hx: half, hz: 0.125, tall: false });
   // Window headers
   box(g, A, 0.5, 0.25, wallMat, 0, 2.55, half);
+  // Window frames (dark trim around each opening) + warm light pools on
+  // the floor under the windows to sell the light coming in.
+  const frameMat = mat(0x4a4038, 0.85);
+  let fx = -half + pierW + winW / 2;
+  for (let i = 0; i < nWin; i++) {
+    box(g, winW + 0.12, 0.08, 0.3, frameMat, fx, sillH + 0.02, half);        // sill trim
+    box(g, winW + 0.12, 0.08, 0.3, frameMat, fx, 2.52, half);                // top trim
+    box(g, 0.08, 1.6, 0.3, frameMat, fx - winW / 2, sillH + 0.78, half);
+    box(g, 0.08, 1.6, 0.3, frameMat, fx + winW / 2, sillH + 0.78, half);
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(winW * 1.2, 2.6),
+      new THREE.MeshBasicMaterial({ color: 0xffe8b8, transparent: true, opacity: 0.16, depthWrite: false }));
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(fx, 0.015, half - 1.6);
+    g.add(pool);
+    fx += winW + pierW;
+  }
+  // Baseboards where floor meets the walls
+  for (const [bx, bz, bw, brot] of [[0, -half + 0.15, A, 0], [-half + 0.15, 0, A, 1], [half - 0.15, 0, A, 1]]) {
+    box(g, brot ? 0.06 : bw, 0.14, brot ? bw : 0.06, frameMat, bx, 0.07, bz);
+  }
 
   // Balcony outside the window wall with a railing
   const balc = box(g, A * 0.6, 0.15, 2.2, mat(PALETTE.concrete), 0, -0.075, half + 1.35);
@@ -423,7 +587,7 @@ function buildUpper(level, rng, quality) {
 
   // Interior clutter: desks, filing cabinets (skipped in tight footprints)
   if (A >= 9) {
-    const deskMat = mat(PALETTE.wood, 0.9);
+    const deskMat = MATS.crate;
     for (let i = 0; i < 4; i++) {
       const x = rng.range(-half + 2, half - 3), z = rng.range(-half + 2, half - 3);
       if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;
@@ -481,11 +645,11 @@ function buildTrenchSmall(level, rng) {
   level.floorY = 0;
   level.heightAt = () => 0;
   level.lighting = {
-    daySky: 0x141d30, dayHaze: 0x18223a,
-    fogNear: 6, fogFar: 55, sunDay: 0.0, hemiDay: 0.32, dark: true,
+    daySky: 0x16203a, dayHaze: 0x1b2742,
+    fogNear: 8, fogFar: 60, sunDay: 0.35, hemiDay: 0.5, dark: true,
   };
-  const dirtMat = mat(0x4e4436, 1.0);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + 2, half * 2 + 2), mat(0x3c352b, 1.0));
+  const dirtMat = MATS.dirt;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + 2, half * 2 + 2), MATS.basementFloor);
   floor.rotation.x = -Math.PI / 2;
   g.add(floor);
   const field = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(0x2c3226, 1.0));
@@ -528,12 +692,12 @@ function buildTrench(level, rng) {
   level.floorY = 0;
   level.heightAt = () => 0;
   level.lighting = {
-    daySky: 0x141d30, dayHaze: 0x18223a,
-    fogNear: 6, fogFar: 55, sunDay: 0.0, hemiDay: 0.32, dark: true,
+    daySky: 0x16203a, dayHaze: 0x1b2742,
+    fogNear: 8, fogFar: 60, sunDay: 0.35, hemiDay: 0.5, dark: true,
   };
 
-  const dirtMat = mat(0x4e4436, 1.0);
-  const floorMat = mat(0x3c352b, 1.0);
+  const dirtMat = MATS.dirt;
+  const floorMat = MATS.basementFloor;
 
   // Floor of the whole trench area + raised field beyond
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 2, A + 2), floorMat);
@@ -583,19 +747,36 @@ function buildTrench(level, rng) {
     }
   }
 
-  // Duckboards, crates, a flare or two
-  for (let i = 0; i < 3; i++) {
-    const lane = rng.int(0, 2);
-    const x = rng.range(-half + 2, half - 2);
-    box(g, 1.2, 0.06, 1.8, mat(PALETTE.wood, 1.0), x, 0.04, laneZ[lane]);
+  // Duckboard runs along every lane (intentional foreground layer),
+  // overhead support beams, sandbag silhouettes on the trench rim.
+  for (const lz of laneZ) {
+    box(g, A - 2, 0.06, 1.6, MATS.planksOld, 0, 0.04, lz);
   }
+  const beamMat = mat(0x3c332a, 1.0);
+  for (const lz of laneZ) {
+    for (const bx of [-half / 2, half / 2]) {
+      box(g, 0.18, 0.18, 2.6, beamMat, bx, 2.3, lz);
+      box(g, 0.15, 2.3, 0.15, beamMat, bx - 1.0, 1.15, lz + 1.05);
+      box(g, 0.15, 2.3, 0.15, beamMat, bx + 1.0, 1.15, lz - 1.05);
+    }
+  }
+  for (let i = 0; i < 8; i++) {
+    const along = rng.range(-half, half);
+    const side = rng.pick([-1, 1]);
+    box(g, rng.range(0.7, 1.1), 0.45, 0.5, MATS.sandbag, along, 2.55, side * (half + 0.7), rng.range(-0.2, 0.2));
+  }
+  // Flares: warm pools of light with visible sticks
   for (const i of [0, 1]) {
     const x = rng.range(-half + 2, half - 2);
     const z = laneZ[rng.int(0, 2)];
-    const flare = new THREE.PointLight(0xff7030, 1.6, 8);
+    const flare = new THREE.PointLight(0xff7030, 2.6, 10, 1.6);
     flare.position.set(x, 0.3, z);
     g.add(flare);
-    box(g, 0.05, 0.25, 0.05, mat(0xff5020, 0.5), x, 0.12, z);
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.25, 5),
+      new THREE.MeshStandardMaterial({ color: 0xff5020, emissive: 0xff4010, emissiveIntensity: 1.5 }));
+    stick.position.set(x, 0.12, z);
+    stick.rotation.z = 0.4;
+    g.add(stick);
   }
 
   // Entries: the two open lane-ends without the elevator; elevator takes
@@ -641,7 +822,7 @@ function buildWagon(level, rng) {
   };
 
   // Bed, rails, wheels
-  const bed = box(g, W, 0.24, L, mat(PALETTE.wood, 0.95), 0, 0.38, 0);
+  const bed = box(g, W, 0.24, L, MATS.planksOld, 0, 0.38, 0);
   bed.receiveShadow = false;
   const railMat = mat(PALETTE.metalDark, 0.5, 0.6);
   for (const dx of [-0.8, 0.8]) {
@@ -661,7 +842,7 @@ function buildWagon(level, rng) {
     level.colliders.push({ x: dx, z: 0, hx: 0.06, hz: L / 2, tall: false });
   }
   // A crate to duck behind
-  box(g, 1.0, 0.9, 1.0, mat(PALETTE.wood), 0, 0.95, 0);
+  box(g, 1.0, 0.9, 1.0, MATS.crate, 0, 0.95, 0);
   level.colliders.push({ x: 0, z: 0, hx: 0.5, hz: 0.5, tall: false });
   // Lantern on a pole
   const lamp = new THREE.PointLight(0xffd9a0, 1.2, 10);
@@ -675,7 +856,7 @@ function buildWagon(level, rng) {
   const segs = [];
   for (let i = 0; i < 2; i++) {
     const seg = new THREE.Group();
-    const groundPlane = new THREE.Mesh(new THREE.PlaneGeometry(400, SEG), mat(PALETTE.sand));
+    const groundPlane = new THREE.Mesh(new THREE.PlaneGeometry(400, SEG), MATS.sandGround);
     groundPlane.rotation.x = -Math.PI / 2;
     groundPlane.position.y = -0.02;
     seg.add(groundPlane);
@@ -699,6 +880,7 @@ function buildWagon(level, rng) {
       seg.add(pole);
     }
     seg.position.z = -i * SEG;
+    seg.traverse((o) => { o.userData.dynamic = true; });   // scrolls; never merge
     g.add(seg);
     segs.push(seg);
   }
@@ -746,6 +928,14 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
   else if (type === 'upper') buildUpper(level, rng, quality);
   else if (type === 'trench') buildTrench(level, rng);
   else buildWagon(level, rng);
+  // Bake all static geometry into one mesh per material (draw-call diet;
+  // Quest 2 budget). Doors and scrolling scenery are marked dynamic.
+  mergeStaticMeshes(level.group);
+  if (quality === 'DESKTOP') {
+    level.group.traverse((o) => {
+      if (o.isMesh && o.userData.merged) { o.castShadow = true; o.receiveShadow = true; }
+    });
+  }
   scene.add(level.group);
   return level;
 }

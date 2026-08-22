@@ -16,13 +16,19 @@ export class Hud {
   //         grenades, packs }
   setWeapon(info) {
     $('hud-weapon').textContent = info.name;
+    const ammoEl = $('hud-ammo');
     if (info.mag === null) {
-      $('hud-ammo').textContent = 'MELEE';
+      ammoEl.textContent = 'MELEE';
+      ammoEl.style.color = '';
     } else if (info.reloading) {
-      $('hud-ammo').textContent = 'RELOADING...';
+      ammoEl.textContent = 'RELOADING...';
+      ammoEl.style.color = 'var(--accent)';
     } else {
       const res = info.reserve < 0 ? '∞' : info.reserve;
-      $('hud-ammo').textContent = `${info.mag} / ${res}`;
+      ammoEl.textContent = `${info.mag} / ${res}`;
+      // Low-ammo state: amber at a quarter mag, red when empty.
+      ammoEl.style.color = info.mag === 0 ? 'var(--danger)'
+        : info.magMax && info.mag <= info.magMax * 0.25 ? 'var(--accent)' : '';
     }
     $('hud-items').textContent = `${(info.throwSel || 'frag').toUpperCase()} x${info.throwCount ?? info.grenades}  P ${info.packs}  M ${info.mines || 0}`;
   }

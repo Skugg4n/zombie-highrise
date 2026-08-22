@@ -269,6 +269,8 @@ export class HostSim {
     this.events.push({ e: 'shot', id, w: m.w, o: m.o });
     const dir = new THREE.Vector3().fromArray(m.d).normalize();
     const spread = THREE.MathUtils.degToRad(def.spreadDeg || 0);
+    // Shotgun pellets shove their target (feel: weight and consequence).
+    const knockback = m.w === 'shotgun' ? 0.28 : 0;
     for (let i = 0; i < (def.pellets || 1); i++) {
       const d = dir.clone();
       if (spread > 0) {
@@ -277,7 +279,7 @@ export class HostSim {
         d.z += (Math.random() - 0.5) * spread;
         d.normalize();
       }
-      this.shootRay(m.o, d.toArray(), def.damage, id);
+      this.shootRay(m.o, d.toArray(), def.damage, id, knockback);
     }
   }
 
@@ -513,7 +515,7 @@ export class HostSim {
 
   // Hitscan: ray vs every living zombie's torso sphere, nearest first,
   // occluded by tall colliders. Returns the zombie hit or null.
-  shootRay(origin, dir, damage = 1, byId = null) {
+  shootRay(origin, dir, damage = 1, byId = null, knockback = 0) {
     const o = new THREE.Vector3().fromArray(origin);
     const d = new THREE.Vector3().fromArray(dir).normalize();
     let best = null, bestT = Infinity;
@@ -532,6 +534,11 @@ export class HostSim {
     const hit = o.clone().addScaledVector(d, bestT);
     const tall = this._tall();
     if (segmentBlocked(o.x, o.z, hit.x, hit.z, tall)) return null;
+    if (knockback > 0) {
+      const shove = knockback * (best.type === 'brute' ? 0.35 : 1);
+      best.pos.addScaledVector(new THREE.Vector3(d.x, 0, d.z).normalize(), shove);
+      resolveCircle(best.pos, TUNING.enemies[best.type].radius * 0.8, this.level.colliders);
+    }
     this.damageZombie(best, damage, false, byId);
     return best;
   }
@@ -557,7 +564,7 @@ export class HostSim {
       this.zombies.delete(z.id);
       this._maybeDrop(z);
     } else {
-      this.events.push({ e: 'zhit', id: z.id });
+      this.events.push({ e: 'zhit', id: z.id, by: byId });
     }
   }
 

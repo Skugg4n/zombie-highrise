@@ -10,7 +10,7 @@ import { applyDebugAtlas } from '../world/debugatlas.js';
 
 const STATIC_PRESETS = {
   1: { pos: [10, 1.7, 12], look: [0, 1.2, 0] },
-  4: { pos: [0, 42, 0.01], look: [0, 0, 0] },
+  4: { pos: [0, 26, 0.01], look: [0, 0, 0] },
   5: { pos: [-4, 1.6, -5], look: [-20, 1.0, 18] },   // looking out at the approach
   7: { pos: [3, 1.4, -4], look: [-8, 0.6, -4] },   // down a trench lane, flare-lit
   8: { pos: [1, 1.7, 5], look: [-8, 1.0, -6] },
@@ -32,8 +32,8 @@ export function applyPhotomode(n, { camera, scene, level }) {
     camera.lookAt(e.localToWorld(new THREE.Vector3(0, 1.1, 4)));
   } else if (n === 6) {
     // Upper floor: from the room, out through the windows and down.
-    camera.position.set(0, 1.7, 2);
-    camera.lookAt(4, -5, 30);
+    camera.position.set(0, 1.7, 1.5);
+    camera.lookAt(2, -6, 25);
   } else {
     const p = STATIC_PRESETS[n] || STATIC_PRESETS[1];
     camera.position.set(...p.pos);

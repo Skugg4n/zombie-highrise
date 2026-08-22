@@ -5,9 +5,12 @@
 import * as THREE from 'three';
 import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY, PLAY_SIZES, setPlayArea } from './config.js';
 import { buildLevel, disposeLevel } from './world/levelgen.js';
+import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
+import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
 import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
+import { FEEL_CLIPS } from './views/feelclips.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
 import { HostSim, ZOMBIE_TYPES, ITEM_KINDS } from './game/state.js';
@@ -65,7 +68,7 @@ function removeAndDispose(obj) {
 const hemi = new THREE.HemisphereLight(0xcfe5ff, 0x8a7a5a, 0.9);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe8c0, 2.2);
-sun.position.set(40, 60, 25);
+sun.position.set(45, 30, 20);   // low warm sun = long readable shadows
 scene.add(sun);
 if (QUALITY === 'DESKTOP') {
   sun.castShadow = true;
@@ -84,38 +87,60 @@ flashlight.position.set(0, 0.05, 0.05);
 flashlight.target = flashlightTarget;
 let flashlightOn = false;
 
+// Sky dome, sun glow sprite and dust motes (art-direction details).
+const sky = makeSkyDome();
+sky.dome.userData.noAtlas = true;
+scene.add(sky.dome);
+const sunGlow = makeSunGlow();
+scene.add(sunGlow);
+const dust = makeDustMotes();
+scene.add(dust.points);
+
 // Day/night: nightT 0 = full day, 1 = full night. Lerped smoothly.
 let nightT = 0, nightTarget = 0;
 const colDaySky = new THREE.Color(), colNightSky = new THREE.Color(0x101a2e);
 const colDayHaze = new THREE.Color(), colNightHaze = new THREE.Color(0x18223a);
+const colNightGround = new THREE.Color(0x0c111e);
 const colTmp = new THREE.Color(), colTmp2 = new THREE.Color();
+const colDayGround = new THREE.Color();
 
 function applyLevelLighting(level) {
   const L = level.lighting;
   colDaySky.setHex(L.daySky);
   colDayHaze.setHex(L.dayHaze);
-  scene.background = new THREE.Color(L.daySky);
+  colDayGround.setHex(L.dark ? 0x0a0c10 : 0xcabb96);
+  scene.background = null;   // the dome paints the sky
   scene.fog = new THREE.Fog(L.dayHaze, L.fogNear, L.fogFar);
   flashlightOn = L.dark;
+  sky.dome.visible = true;
+  sunGlow.visible = !L.dark;
+  dust.points.visible = !L.dark;
   updateDayNight(true);
 }
 
 function updateDayNight(force = false) {
   const L = level.lighting;
-  if (L.dark) {   // basements ignore the sky entirely
+  if (L.dark) {   // basements/trenches: the sky barely matters
     sun.intensity = 0;
     hemi.intensity = L.hemiDay;
+    sky.uniforms.uTop.value.setHex(0x05070c);
+    sky.uniforms.uHorizon.value.setHex(0x0a0e18);
+    sky.uniforms.uGround.value.setHex(0x05060a);
     return;
   }
   const speed = force ? 1 : 0.02;
   nightT += (nightTarget - nightT) * (force ? 1 : Math.min(1, speed));
   colTmp.copy(colDaySky).lerp(colNightSky, nightT);
   colTmp2.copy(colDayHaze).lerp(colNightHaze, nightT);
-  scene.background.copy(colTmp);
+  sky.uniforms.uTop.value.copy(colTmp);
+  sky.uniforms.uHorizon.value.copy(colTmp2);
+  sky.uniforms.uGround.value.copy(colDayGround).lerp(colNightGround, nightT);
   scene.fog.color.copy(colTmp2);
   sun.intensity = L.sunDay * (1 - nightT * 0.92);
   sun.color.setHex(nightT > 0.5 ? 0xa8c0e8 : 0xffe8c0);   // moonlight is cool
   hemi.intensity = L.hemiDay * (1 - nightT * 0.72);
+  sunGlow.material.opacity = 1 - nightT * 0.55;   // the moon still glows
+  sunGlow.position.copy(sun.position).normalize().multiplyScalar(290);
 }
 
 // ---- Level lifecycle ----------------------------------------------------
@@ -173,9 +198,12 @@ for (const evName of ['pointerdown', 'touchstart', 'keydown']) {
   document.addEventListener(evName, () => audio.unlock(), { once: true, passive: true });
 }
 
-// ---- Zombie visuals pool ------------------------------------------------
-const zombieVisuals = new Map();  // id -> {group, prev:V3, animT, flashT, type}
-const dyingZombies = [];          // [{group, t}] short shrink-out corpses
+// ---- Zombie horde (instanced) -------------------------------------------
+// The live horde renders through HordeRenderer (7 instanced draw calls
+// total); this pool only tracks per-zombie animation state.
+const horde = new HordeRenderer(scene, 40, QUALITY === 'DESKTOP');
+const zombieStates = new Map();   // id -> {type,x,y,z,rotY,animT,staggerT,flashT}
+const dyingStates = [];           // corpses toppling out: {..., t}
 const tmpV = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion();
 
@@ -184,8 +212,8 @@ function poseZombie(group, animT) {
   const parts = group.userData.parts;
   parts.legL.rotation.x = s * 0.45;
   parts.legR.rotation.x = -s * 0.45;
-  parts.armL.position.y = 1.22 + s * 0.03;
-  parts.armR.position.y = 1.22 - s * 0.03;
+  parts.armL.rotation.x = -0.12 + s * 0.1;    // shoulder sway
+  parts.armR.rotation.x = -0.12 - s * 0.1;
   parts.torso.rotation.z = s * 0.06;
 }
 
@@ -193,22 +221,11 @@ function poseZombie(group, animT) {
 // 120 ms-delayed interpolation still carrying their row.
 const recentlyDeadZ = new Map();   // id -> ignore-until timestamp
 
-function ensureZombieVisual(id, type) {
-  let v = zombieVisuals.get(id);
-  if (!v) {
-    v = { group: makeZombieMesh(type), prev: new THREE.Vector3(), animT: Math.random() * 6, flashT: 0, type };
-    zombieVisuals.set(id, v);
-    scene.add(v.group);
-  }
-  return v;
-}
-
 function clearZombieVisuals() {
-  for (const v of zombieVisuals.values()) removeAndDispose(v.group);
-  zombieVisuals.clear();
-  for (const d of dyingZombies) removeAndDispose(d.group);
-  dyingZombies.length = 0;
+  zombieStates.clear();
+  dyingStates.length = 0;
   recentlyDeadZ.clear();
+  horde.update([]);
 }
 
 // rows: [id, typeIndex, x, y, z, hp][]
@@ -222,50 +239,49 @@ function updateZombieVisuals(rows, dt) {
     const [id, ti, x, y, z] = r;
     if (recentlyDeadZ.has(id)) continue;
     keep.add(id);
-    const v = ensureZombieVisual(id, ZOMBIE_TYPES[ti] || 'walker');
-    v.prev.copy(v.group.position);
-    v.group.position.set(x, y, z);
-    const dx = x - v.prev.x, dz = z - v.prev.z;
+    let v = zombieStates.get(id);
+    if (!v) {
+      v = {
+        type: ZOMBIE_TYPES[ti] || 'walker', x, y, z, rotY: 0,
+        animT: Math.random() * 6, staggerT: 0, flashT: 0,
+        scale: 0.93 + Math.random() * 0.14,   // silhouette variation
+      };
+      zombieStates.set(id, v);
+    }
+    const dx = x - v.x, dz = z - v.z;
     if (dx * dx + dz * dz > 1e-8) {
-      v.group.rotation.y = Math.atan2(dx, dz);
+      v.rotY = Math.atan2(dx, dz);
       v.animT += dt * (v.type === 'runner' ? 11 : v.type === 'brute' ? 3.5 : 5.5);
-      poseZombie(v.group, v.animT);
     }
-    if (v.flashT > 0) {
-      v.flashT -= dt;
-      if (v.flashT <= 0) setZombieEmissive(v.group, 0x000000, 0);
-    }
-    // Hit reaction: a quick backward flinch of the torso.
-    if (v.staggerT > 0) {
-      v.staggerT -= dt;
-      v.group.userData.parts.torso.rotation.x = -0.35 * Math.max(0, v.staggerT / 0.18);
-    }
+    v.x = x; v.y = y; v.z = z;
+    if (v.flashT > 0) v.flashT -= dt;
+    if (v.staggerT > 0) v.staggerT -= dt;
   }
-  for (const [id, v] of zombieVisuals) {
-    if (!keep.has(id)) { removeAndDispose(v.group); zombieVisuals.delete(id); }
+  for (const id of zombieStates.keys()) {
+    if (!keep.has(id)) zombieStates.delete(id);
   }
-  // Ragdoll-light death: the corpse topples backward, rests briefly, then
-  // sinks into the ground.
-  for (let i = dyingZombies.length - 1; i >= 0; i--) {
-    const d = dyingZombies[i];
+  // Corpses topple backward, rest briefly, then sink away.
+  const entries = [];
+  for (const v of zombieStates.values()) {
+    entries.push({
+      x: v.x, y: v.y, z: v.z, rotY: v.rotY, type: v.type, animT: v.animT,
+      stagger: Math.max(0, v.staggerT / 0.18), flash: v.flashT, fall: 0, sink: 0,
+      scale: v.scale,
+    });
+  }
+  for (let i = dyingStates.length - 1; i >= 0; i--) {
+    const d = dyingStates[i];
     d.t -= dt;
-    const T = 1.1;                       // total corpse lifetime
-    const elapsed = T - d.t;
-    const fall = Math.min(1, elapsed / 0.35);
-    d.group.rotation.x = -Math.PI / 2 * (fall * fall);
-    if (elapsed > 0.7) d.group.position.y -= dt * 0.9;   // sink away
-    if (d.t <= 0) { removeAndDispose(d.group); dyingZombies.splice(i, 1); }
+    if (d.t <= 0) { dyingStates.splice(i, 1); continue; }
+    const elapsed = 1.1 - d.t;
+    entries.push({
+      x: d.x, y: d.y, z: d.z, rotY: d.rotY, type: d.type, animT: d.animT,
+      stagger: 0, flash: 0, scale: d.scale,
+      fall: Math.min(1, elapsed / 0.35),
+      sink: elapsed > 0.7 ? (elapsed - 0.7) * 0.9 : 0,
+    });
   }
-}
-
-function setZombieEmissive(group, hex, intensity) {
-  // Only the torso's accent material is unique per zombie; skin/pants are
-  // shared across the horde and must never be flashed.
-  const torso = group.userData.parts.torso;
-  if (torso && torso.material.emissive) {
-    torso.material.emissive.setHex(hex);
-    torso.material.emissiveIntensity = intensity;
-  }
+  horde.update(entries);
 }
 
 // ---- Remote player avatars ----------------------------------------------
@@ -357,13 +373,25 @@ function updateItemVisuals(rows, dt) {
     keep.add(id);
     let v = itemVisuals.get(id);
     if (!v) {
-      v = { group: makeItemMesh(ITEM_KINDS[ki]), kind: ITEM_KINDS[ki], bobT: Math.random() * 6 };
+      const group = makeItemMesh(ITEM_KINDS[ki]);
+      // Pickup language: soft glowing ground ring under every item.
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(0.32, 0.42, 20),
+        new THREE.MeshBasicMaterial({ color: 0xe0a33c, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.name = 'ring';
+      group.add(ring);
+      v = { group, ring, kind: ITEM_KINDS[ki], bobT: Math.random() * 6 };
       itemVisuals.set(id, v);
       scene.add(v.group);
     }
     v.bobT += dt * 2;
     v.group.position.set(x, y + 0.12 + Math.sin(v.bobT) * 0.06, z);
     v.group.rotation.y += dt * 1.2;
+    // Ring stays glued to the ground while the item bobs.
+    v.ring.position.y = -(v.group.position.y - y) + 0.02;
+    v.ring.rotation.z += dt;
+    v.ring.material.opacity = 0.35 + Math.sin(v.bobT * 1.5) * 0.15;
   }
   for (const [id, v] of itemVisuals) {
     if (!keep.has(id)) { removeAndDispose(v.group); itemVisuals.delete(id); }
@@ -644,14 +672,14 @@ function refreshShop() {
   const P = TUNING.economy.shopPrices;
   const labels = {
     shotgun: 'SHOTGUN', smg: 'SMG',
-    ammoRefillShotgun: 'SHELLS +25', ammoRefillSmg: 'SMG AMMO +120',
+    ammoRefillShotgun: 'SHELLS +25', ammoRefillSmg: 'SMG +120',
     healthPack: 'HEALTH PACK', grenadePack: '2 GRENADES', mine: 'MINE',
-    ak: 'AK', ammoRefillAk: 'AK AMMO +90', akimbo: 'DUAL PISTOLS',
+    ak: 'AK', ammoRefillAk: 'AK +90', akimbo: 'DUAL PISTOLS',
     smokePack: '2 SMOKES', molotovPack: '2 MOLOTOVS', nightVision: 'NIGHT VISION',
   };
   for (const btn of document.querySelectorAll('.shop-item')) {
     const item = btn.dataset.item;
-    let label = `${labels[item]} - ${P[item]}`;
+    let label = `${labels[item]}  ·  ${P[item]}`;
     let blocked = scrap < P[item];
     if (item === 'shotgun' && arsenal.owned.includes('shotgun')) { label = 'SHOTGUN - OWNED'; blocked = true; }
     if (item === 'smg' && arsenal.owned.includes('smg')) { label = 'SMG - OWNED'; blocked = true; }
@@ -714,6 +742,7 @@ viewmodel.position.set(0.28, -0.24, -0.5);
 camera.add(viewmodel);
 let viewmodelKick = 0;
 let lastActiveWeapon = null;
+let recoilRecover = 0;   // accumulated recoil that eases back down
 
 function aimRay() {
   if (vrInput && vrInput.active) return vrInput.getAimRay();
@@ -733,9 +762,12 @@ function makeArsenal() {
         flash.position.copy(o).addScaledVector(d, 0.3);
         viewmodelKick = 0.06;
         audio.play(w || 'pistol');
-        // Recoil (flat modes): a per-weapon upward kick the player rides.
+        // Recoil (flat modes): a per-weapon upward kick, most of which
+        // eases back down over the next frames (recovery).
         if (!(vrInput && vrInput.active)) {
-          rig.pitch += { pistol: 0.010, akimbo: 0.008, shotgun: 0.028, smg: 0.005, ak: 0.011 }[w] || 0.01;
+          const kick = { pistol: 0.012, akimbo: 0.010, shotgun: 0.034, smg: 0.006, ak: 0.013 }[w] || 0.012;
+          rig.pitch += kick;
+          recoilRecover += kick * 0.7;
         }
         spawnCasing(o, d);
       },
@@ -849,13 +881,14 @@ function toggleMap(force) {
   if (next === mapActive) return;
   mapActive = next;
   $('map-ui').classList.toggle('hidden', !mapActive);
+  $('map-grid').classList.toggle('hidden', !mapActive);
   // On touch devices the stick/look zones cover the canvas; they must let
   // taps through to the map while it is open.
   $('touch-ui').classList.toggle('map-open', mapActive);
   if (mapActive) {
     setMapMode('ping');
     if (document.pointerLockElement) document.exitPointerLock();
-    const ext = CONFIG.PLAY_AREA * 0.8 + 10;
+    const ext = CONFIG.PLAY_AREA * 0.7 + 6;
     const aspect = innerWidth / innerHeight;
     if (aspect >= 1) {
       mapCam.top = ext; mapCam.bottom = -ext;
@@ -1047,22 +1080,23 @@ function handleEvents(evs) {
   for (const ev of evs) {
     switch (ev.e) {
       case 'zhit': {
-        const v = zombieVisuals.get(ev.id);
+        const v = zombieStates.get(ev.id);
         if (v) {
           v.flashT = 0.12;
-          setZombieEmissive(v.group, 0xff5040, 0.8);
           v.staggerT = 0.18;   // hit reaction: brief flinch
-          audio.play('zhit', v.group.position);
+          audio.play('zhit', v);
         }
+        if (ev.by === (role === 'client' ? net?.myId : 'H')) showHitmarker(false);
         break;
       }
       case 'zdie': {
         recentlyDeadZ.set(ev.id, performance.now() + 600);
+        if (ev.by === (role === 'client' ? net?.myId : 'H')) showHitmarker(true);
         if (Array.isArray(ev.p)) audio.play('zdie', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
-        const v = zombieVisuals.get(ev.id);
+        const v = zombieStates.get(ev.id);
         if (v) {
-          zombieVisuals.delete(ev.id);
-          dyingZombies.push({ group: v.group, t: 1.1 });
+          zombieStates.delete(ev.id);
+          dyingStates.push({ ...v, t: 1.1 });
         }
         break;
       }
@@ -1077,10 +1111,13 @@ function handleEvents(evs) {
         }
         break;
       }
-      case 'boom':
+      case 'boom': {
         spawnExplosion(ev.p);
         audio.play('explosion', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
+        const d = camera.getWorldPosition(tmpV).distanceTo(new THREE.Vector3(...ev.p));
+        if (d < 18) addShake(0.012 + 0.05 * (1 - d / 18));
         break;
+      }
       case 'smoke':
         spawnSmokeVisual(ev.p, ev.d || 8);
         audio.play('smoke', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
@@ -1186,6 +1223,23 @@ function handleEvents(evs) {
   }
 }
 
+// Hit marker: white ticks on a confirmed hit, red on a kill.
+let hitmarkerTimer = 0;
+function showHitmarker(kill) {
+  const el = $('hitmarker');
+  el.classList.toggle('kill', !!kill);
+  el.classList.add('show');
+  clearTimeout(hitmarkerTimer);
+  hitmarkerTimer = setTimeout(() => el.classList.remove('show'), kill ? 220 : 120);
+}
+
+// Screen shake (flat modes ONLY; never in VR, comfort rule).
+let shakeT = 0, shakeAmp = 0;
+function addShake(amp) {
+  shakeAmp = Math.max(shakeAmp, amp);
+  shakeT = 0.35;
+}
+
 // Big centre text with auto-hide.
 let centerT = 0;
 function showCenterText(text, seconds) {
@@ -1252,26 +1306,30 @@ function buildPose() {
 
 // ---- Special boots ------------------------------------------------------
 if (PHOTOMODE) {
+  // Dressed zombies render through the same instanced horde as live play.
+  const photoEntries = [];
   for (const [type, x, z, fx, fz, animT] of (PHOTO_ZOMBIES[PHOTOMODE] || [])) {
-    const g = makeZombieMesh(type);
-    g.position.set(x, level.heightAt(x, z), z);
-    g.rotation.y = Math.atan2(fx - x, fz - z);
-    poseZombie(g, animT);
-    scene.add(g);
+    photoEntries.push({
+      x, y: level.heightAt(x, z), z, rotY: Math.atan2(fx - x, fz - z),
+      type, animT, stagger: 0, flash: 0, fall: 0, sink: 0,
+      scale: 0.93 + ((x * 13 + z * 7) % 10) / 70,   // deterministic variation
+    });
   }
   updateAvatar('photobot', { p: [-2, level.floorY, -1], ry: 2.3, rx: 0, vr: false, hp: 100 });
   if (PHOTOMODE === 2) { nightTarget = 0; flashlightOn = true; }
+  viewmodel.visible = PHOTOMODE === 8;   // no floating pistol in scenic shots
   const wantHud = applyPhotomode(PHOTOMODE, { camera, scene, level });
   if (PHOTOMODE === 2 && level.entries.length) {
     // Basement shot: a walker between the camera and the doorway it
     // stares at, lit by the flashlight cone.
     const e = level.entries[0];
-    const g = makeZombieMesh('walker');
-    g.position.set(e.x * 0.45, 0, e.z * 0.45);
-    g.rotation.y = Math.atan2(camera.position.x - g.position.x, camera.position.z - g.position.z);
-    poseZombie(g, 0.8);
-    scene.add(g);
+    photoEntries.push({
+      x: e.x * 0.45, y: 0, z: e.z * 0.45,
+      rotY: Math.atan2(camera.position.x - e.x * 0.45, camera.position.z - e.z * 0.45),
+      type: 'walker', animT: 0.8, stagger: 0, flash: 0, fall: 0, sink: 0, scale: 1,
+    });
   }
+  horde.update(photoEntries);
   scene.remove(rig.group);
   scene.add(camera);
   if (wantHud) lobby.applyUIState('hud');
@@ -1366,8 +1424,23 @@ renderer.setAnimationLoop(() => {
     const inVR = !!(vrInput && vrInput.active);
     if (!inVR) {
       if (!isPlaying()) rig.yaw += dt * 0.02;  // slow menu drift
+      // Recoil recovery: the kick eases back toward the aim point.
+      if (recoilRecover > 0) {
+        const rec = Math.min(recoilRecover, dt * 0.22);
+        rig.pitch -= rec;
+        recoilRecover -= rec;
+      }
       rig.group.rotation.y = rig.yaw;
       camera.rotation.x = rig.pitch;
+      camera.rotation.z = 0;
+      // Screen shake (explosions), flat modes only.
+      if (shakeT > 0) {
+        shakeT -= dt;
+        const k = shakeAmp * (shakeT / 0.35);
+        camera.rotation.x += (Math.random() - 0.5) * k;
+        camera.rotation.z = (Math.random() - 0.5) * k * 0.7;
+        if (shakeT <= 0) shakeAmp = 0;
+      }
       // Downed players sink to the floor (flat modes).
       const eyeTarget = myDown ? 0.55 : CONFIG.PLAYER_HEIGHT;
       camera.position.y += (eyeTarget - camera.position.y) * Math.min(1, dt * 6);
@@ -1385,7 +1458,8 @@ renderer.setAnimationLoop(() => {
     rig.group.position.y = level.heightAt(ref.x, ref.z);
 
     // Weapons: auto fire + reload timing, predicted locally.
-    const fireHeld = inputs.some((i) => i.fireHeld);
+    stepFeelClip(dt);
+    const fireHeld = inputs.some((i) => i.fireHeld) || (clipDef && clipT < clipHoldUntil);
     arsenal.update(dt, fireHeld && canAct(), aimRay);
     if (viewmodelKick > 0) {
       viewmodelKick = Math.max(0, viewmodelKick - dt * 0.4);
@@ -1501,16 +1575,24 @@ renderer.setAnimationLoop(() => {
     groanT -= dt;
     if (groanT <= 0) {
       groanT = 2.5 + Math.random() * 3.5;
-      if (isPlaying() && zombieVisuals.size) {
-        const arr = [...zombieVisuals.values()];
+      if (isPlaying() && zombieStates.size) {
+        const arr = [...zombieStates.values()];
         const v = arr[(Math.random() * arr.length) | 0];
-        audio.play('groan', v.group.position);
+        audio.play('groan', v);
       }
     }
-    // Elevator doors: open while boarding, closed otherwise.
+    // Elevator doors: open while boarding, closed otherwise. The cab lamp
+    // flickers like the worn fluorescent it is.
     const doorTarget = lastWave && lastWave.ph === 'elevator' ? 1 : (lastWave && (lastWave.ph === 'night' || lastWave.ph === 'ride') ? 0 : doorT);
     doorT += (doorTarget - doorT) * Math.min(1, dt * 3);
-    if (level.elevator) level.elevator.setDoors(doorT);
+    if (level.elevator) {
+      level.elevator.setDoors(doorT);
+      level.elevator.lamp.intensity = 1.05
+        + Math.sin(now * 0.011) * 0.06
+        + (Math.random() < 0.015 ? -0.7 : 0);
+    }
+    // Dust motes drift around the player outdoors.
+    if (dust.points.visible) dust.update(dt, camera.getWorldPosition(tmpV));
     // Moving-platform levels scroll their scenery.
     if (level.tick) level.tick(dt);
   }
@@ -1557,7 +1639,7 @@ window.__zhr = {
   },
   zombies: () => {
     const out = [];
-    for (const [id, v] of zombieVisuals) out.push({ id, type: v.type, pos: v.group.position.toArray() });
+    for (const [id, v] of zombieStates) out.push({ id, type: v.type, pos: [v.x, v.y, v.z] });
     return out;
   },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
@@ -1576,9 +1658,9 @@ window.__zhr = {
   elevatorZone: () => (level.elevatorZone ? { x: level.elevatorZone.x, z: level.elevatorZone.z } : null),
   shopOpen: () => shopOpen,
   debugShootZombie: () => {
-    const first = zombieVisuals.values().next().value;
+    const first = zombieStates.values().next().value;
     if (!first) return false;
-    const c = first.group.position.clone(); c.y += 1.1;
+    const c = new THREE.Vector3(first.x, first.y + 1.1, first.z);
     const o = camera.getWorldPosition(new THREE.Vector3());
     const d = c.sub(o).normalize();
     arsenal.fire(o, d);
@@ -1588,6 +1670,73 @@ window.__zhr = {
   renderInfo: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }),
 };
 
-// Smoke test hooks.
+// ---- Feel clips (?feelclip=N): scripted deterministic gameplay ----------
+const FEELCLIP = parseInt(PARAMS.get('feelclip') || '0', 10) || 0;
+const clipDef = FEEL_CLIPS[FEELCLIP];
+let clipT = 0, clipIdx = 0, clipHoldUntil = 0, clipDone = false;
+let clipZid = 9000;
+const clipApi = {
+  spawnAt(type, x, z) {
+    const stats = TUNING.enemies[type];
+    sim.zombies.set(clipZid, {
+      id: clipZid++, type,
+      pos: new THREE.Vector3(x, level.heightAt(x, z), z),
+      hp: stats.hp, alive: true, biteT: 0, targetId: null, retargetT: 0, stuckT: 0,
+    });
+  },
+  grant(w) {
+    const p = sim.players.get('H');
+    if (!p.inv.w.includes(w)) {
+      p.inv.w.push(w);
+      p.inv.a[w] = [TUNING.weapons[w].magazine, 999];
+    }
+    arsenal.syncFromHost(p.inv);
+    arsenal.switchTo(w);
+  },
+  equip(w) { arsenal.switchTo(w); },
+  aim() {
+    let best = null, bd = Infinity;
+    for (const z of sim.zombies.values()) {
+      const d = z.pos.distanceToSquared(rig.group.position);
+      if (d < bd) { bd = d; best = z; }
+    }
+    if (!best) return;
+    const dx = best.pos.x - rig.group.position.x;
+    const dz = best.pos.z - rig.group.position.z;
+    rig.yaw = Math.atan2(-dx, -dz);
+    const dist = Math.hypot(dx, dz);
+    const targetY = best.pos.y + (best.type === 'brute' ? 1.2 : 1.0);
+    rig.pitch = Math.atan2(targetY - (rig.group.position.y + CONFIG.PLAYER_HEIGHT), dist);
+  },
+  fire() { actions.fire(); },
+  hold(sec) { clipHoldUntil = clipT + sec; },
+  throwGrenade() { actions.grenade(); },
+  setHp(n) {
+    const p = sim.players.get('H');
+    p.hp = n; myHp = n; hud.setHealth(n);
+  },
+};
+function stepFeelClip(dt) {
+  if (!clipDef || !isPlaying() || clipDone) return;
+  clipT += dt;
+  const acts = clipDef.actions;
+  while (clipIdx < acts.length && acts[clipIdx][0] <= clipT) {
+    acts[clipIdx][1](clipApi);
+    clipIdx++;
+  }
+  if (clipT >= clipDef.duration) clipDone = true;
+}
+
+// Smoke test hooks + feel-clip boot.
 if (PARAMS.get('autohost')) startHosting();
 else if (PARAMS.get('autojoin')) startJoining(PARAMS.get('autojoin').toUpperCase());
+else if (clipDef) {
+  startSolo();
+  // A held night: zombies act, the sentinel queue entry never spawns
+  // (spawnT stays at Infinity), and the night never clears mid-clip.
+  sim.wave.phase = 'night';
+  sim.wave.queue = ['walker'];
+  sim.wave.spawnT = Infinity;
+  sim.wave.night = 1;
+}
+window.__zhr.clipDone = () => clipDone;

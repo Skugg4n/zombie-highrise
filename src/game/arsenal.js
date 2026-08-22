@@ -208,7 +208,7 @@ export class Arsenal {
     }
     const a = this.ammo[w] || { mag: 0, reserve: 0 };
     return {
-      name: this.def(w).name, mag: a.mag,
+      name: this.def(w).name, mag: a.mag, magMax: this.def(w).magazine,
       reserve: a.reserve === Infinity ? -1 : a.reserve,
       reloading: this.reloading, ...common,
     };

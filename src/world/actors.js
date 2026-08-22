@@ -57,8 +57,12 @@ export function makeZombieMesh(type = 'walker') {
   const shirt = new THREE.MeshStandardMaterial({ color: look.accent, roughness: 0.95 });
   const pants = sharedPants;
 
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.16 * look.scaleX, 0.75, 0.16), pants);
-  legL.position.set(-0.11 * look.scaleX, 0.375, 0);
+  // Legs pivot at the hip, arms at the shoulder (geometry translated so
+  // rotations read as joints, not center spins).
+  const legGeo = new THREE.BoxGeometry(0.16 * look.scaleX, 0.75, 0.16);
+  legGeo.translate(0, -0.375, 0);
+  const legL = new THREE.Mesh(legGeo, pants);
+  legL.position.set(-0.11 * look.scaleX, 0.75, 0);
   const legR = legL.clone(); legR.position.x = 0.11 * look.scaleX;
 
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44 * look.scaleX, 0.6 * look.scaleY, 0.24 * look.scaleX), shirt);
@@ -70,8 +74,10 @@ export function makeZombieMesh(type = 'walker') {
   head.position.z = look.lean * 0.3;
   head.rotation.x = 0.25;
 
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, look.armLen), skin);
-  armL.position.set(-0.28 * look.scaleX, 1.22, 0.28);
+  const armGeo = new THREE.BoxGeometry(0.11, 0.11, look.armLen);
+  armGeo.translate(0, 0, look.armLen / 2);
+  const armL = new THREE.Mesh(armGeo, skin);
+  armL.position.set(-0.28 * look.scaleX, 1.22, 0.05);
   const armR = armL.clone(); armR.position.x = 0.28 * look.scaleX;
 
   const shadow = makeBlobShadow(type === 'brute' ? 0.65 : 0.45);
