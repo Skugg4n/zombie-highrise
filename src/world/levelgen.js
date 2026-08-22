@@ -79,6 +79,12 @@ export function makeElevator() {
   return api;
 }
 
+// The cab blocks movement and bullets as one solid block (the doors face
+// the boarding zone; boarding is standing in front of the open doors).
+function addElevatorColliders(level, x, z) {
+  level.colliders.push({ x, z, hx: 1.35, hz: 1.2, tall: true });
+}
+
 // ---- Wasteland backdrop (ground + upper share it) -----------------------
 function buildWasteland(group, rng, { ruinCount = 5, hillCount = 6 }) {
   const hillMat = mat(PALETTE.hills);
@@ -179,11 +185,15 @@ function buildGround(level, rng, quality) {
 
   buildWasteland(g, rng, {});
 
-  // Elevator at the north edge, doors facing into the base
+  // Elevator just beyond the north gap, doors facing into the base. The
+  // BOARDING ZONE sits inside the footprint (roomscale players can only
+  // physically reach the playable area): standing in front of the open
+  // doors counts as boarding.
   level.elevator = makeElevator();
   level.elevator.group.position.set(0, 0.1, -half - 1.2);
   g.add(level.elevator.group);
-  level.elevatorZone = { x: 0, z: -half - 1.2, hx: 1.2, hz: 1.0 };
+  addElevatorColliders(level, 0, -half - 1.2);
+  level.elevatorZone = { x: 0, z: -half + 0.9, hx: 1.3, hz: 0.9 };
 
   // Spawns (fractions of the footprint so every play size works)
   const q = half * 0.3;
@@ -223,8 +233,11 @@ function buildBasement(level, rng) {
   ceil.rotation.x = Math.PI / 2; ceil.position.y = 2.6;
   g.add(ceil);
 
-  // Perimeter walls with 3 doorway entries (dark openings).
-  const doorSides = [0, 1, 2, 3].sort(() => rng.next() - 0.5).slice(0, 3);
+  // Perimeter walls with 3 doorway entries (dark openings). The north
+  // side (index 0) hosts the elevator and stays solid. NOTE: an earlier
+  // version shuffled sides with Array.sort and a random comparator, which
+  // is ENGINE-DEFINED and desynced peers on different browsers.
+  const doorSides = [1, 2, 3];
   const sides = [
     { x: 0, z: -half, hx: half, hz: 0.15, rot: 0 },
     { x: 0, z: half, hx: half, hz: 0.15, rot: 0 },
@@ -265,11 +278,15 @@ function buildBasement(level, rng) {
     }
   });
 
-  // Pillar grid + shelving clutter
+  // Pillar grid + shelving clutter (never near the elevator or its zone)
   const pillarMat = mat(0x5e5a52, 1.0);
+  const elevX = 0, elevZ = -half + 1.3;
+  const zoneZ = Math.max(-CONFIG.PLAY_AREA / 2 + 0.9, -half + 3.0);
   for (const px of [-half / 2, half / 2]) {
     for (const pz of [-half / 2, half / 2]) {
       const x = px + rng.range(-1, 1), z = pz + rng.range(-1, 1);
+      if (Math.hypot(x - elevX, z - elevZ) < 2.6) continue;
+      if (Math.hypot(x - elevX, z - zoneZ) < 2.2) continue;
       box(g, 0.6, 2.6, 0.6, pillarMat, x, 1.3, z);
       level.colliders.push({ x, z, hx: 0.3, hz: 0.3, tall: true });
     }
@@ -293,12 +310,15 @@ function buildBasement(level, rng) {
     box(g, 0.25, 0.1, 0.25, mat(0x333333), x, 2.45, z);
   }
 
-  // Elevator recessed into a corner
+  // Elevator against the north wall, doors facing into the room (+Z is
+  // the cab's door side; no rotation needed). Boarding zone inside the
+  // play footprint so roomscale players can reach it.
+  const playHalf = CONFIG.PLAY_AREA / 2;
   level.elevator = makeElevator();
-  level.elevator.group.position.set(half - 2.2, 0, -half + 1.4);
-  level.elevator.group.rotation.y = Math.PI;   // doors face into the room
+  level.elevator.group.position.set(0, 0, -half + 1.3);
   g.add(level.elevator.group);
-  level.elevatorZone = { x: half - 2.2, z: -half + 1.4, hx: 1.2, hz: 1.0 };
+  addElevatorColliders(level, 0, -half + 1.3);
+  level.elevatorZone = { x: 0, z: Math.max(-playHalf + 0.9, -half + 3.0), hx: 1.3, hz: 0.9 };
 
   const qb = half * 0.28;
   level.playerSpawns = [
@@ -416,12 +436,14 @@ function buildUpper(level, rng, quality) {
   // Our own building's facade below the balcony
   box(g, A + 6, STOREY, 3, mat(PALETTE.interiorWall), 0, streetY + STOREY / 2 - 0.2, half + 0.5 - 1.5 + 1.5);
 
-  // Elevator on the windowless east wall
+  // Elevator on the windowless east wall, doors facing -X into the room.
+  // Boarding zone in front of the doors, inside the play footprint.
   level.elevator = makeElevator();
   level.elevator.group.position.set(half - 1.6, 0, half / 2);
   level.elevator.group.rotation.y = -Math.PI / 2;
   g.add(level.elevator.group);
-  level.elevatorZone = { x: half - 1.6, z: half / 2, hx: 1.1, hz: 1.2 };
+  addElevatorColliders(level, half - 1.6, half / 2);
+  level.elevatorZone = { x: half - 3.2, z: half / 2, hx: 1.3, hz: 1.1 };
 
   const qu = half * 0.3;
   level.playerSpawns = [
@@ -429,12 +451,11 @@ function buildUpper(level, rng, quality) {
     new THREE.Vector3(-qu, 0, 0), new THREE.Vector3(0, 0, -qu),
     new THREE.Vector3(-qu, 0, qu),
   ];
-  // Street-level spawns for the "sniping down" fantasy: some zombies
-  // appear on the street and are pure target practice through windows,
-  // real pressure comes through the stairwell doors.
-  for (let i = 0; i < 4; i++) {
-    level.zombieSpawns.push(new THREE.Vector3(rng.range(-20, 20), streetY, half + rng.range(6, 25)));
-  }
+  // NOTE: street-level "target practice" spawns were removed: the sim's
+  // heightAt() would teleport them to room height where they float at the
+  // windows and bite through the sill (review find). Street ambience
+  // returns as pure visuals in the Phase 3 polish pass; all real pressure
+  // comes through the stairwell doors.
 }
 
 // ---- Entry point --------------------------------------------------------

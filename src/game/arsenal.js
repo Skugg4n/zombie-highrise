@@ -40,9 +40,11 @@ export class Arsenal {
     for (const [w, pair] of Object.entries(inv.a)) {
       const mine = this.ammo[w] || (this.ammo[w] = { mag: 0, reserve: 0 });
       // While a local reload is in flight the local mag view is ahead of
-      // the host; otherwise the host wins.
+      // the host; otherwise take min(local, host) for the magazine: local
+      // shots the host has not processed yet must not bounce the counter
+      // back up, while host corrections still land.
       if (!this.reloading || w !== this.active) {
-        mine.mag = pair[0];
+        mine.mag = w === this.active ? Math.min(mine.mag, pair[0]) : pair[0];
         mine.reserve = pair[1] < 0 ? Infinity : pair[1];
       }
     }

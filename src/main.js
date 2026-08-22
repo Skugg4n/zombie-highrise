@@ -121,6 +121,7 @@ function loadLevel(idx) {
   applyLevelLighting(level);
   nightTarget = 0; nightT = 0;
   doorT = 0;
+  toggleMap(false);
   const spawn = level.playerSpawns[0];
   rig.group.position.copy(spawn);
   rig.group.rotation.y = rig.yaw = 0;
@@ -167,6 +168,10 @@ function poseZombie(group, animT) {
   parts.torso.rotation.z = s * 0.06;
 }
 
+// Zombies killed by an instant event must not be resurrected by the
+// 120 ms-delayed interpolation still carrying their row.
+const recentlyDeadZ = new Map();   // id -> ignore-until timestamp
+
 function ensureZombieVisual(id, type) {
   let v = zombieVisuals.get(id);
   if (!v) {
@@ -182,13 +187,19 @@ function clearZombieVisuals() {
   zombieVisuals.clear();
   for (const d of dyingZombies) scene.remove(d.group);
   dyingZombies.length = 0;
+  recentlyDeadZ.clear();
 }
 
 // rows: [id, typeIndex, x, y, z, hp][]
 function updateZombieVisuals(rows, dt) {
   const keep = new Set();
+  const now = performance.now();
+  for (const [id, until] of recentlyDeadZ) {
+    if (now > until) recentlyDeadZ.delete(id);
+  }
   for (const r of rows) {
     const [id, ti, x, y, z] = r;
+    if (recentlyDeadZ.has(id)) continue;
     keep.add(id);
     const v = ensureZombieVisual(id, ZOMBIE_TYPES[ti] || 'walker');
     v.prev.copy(v.group.position);
@@ -217,11 +228,12 @@ function updateZombieVisuals(rows, dt) {
 }
 
 function setZombieEmissive(group, hex, intensity) {
-  for (const part of Object.values(group.userData.parts)) {
-    if (part.material.emissive) {
-      part.material.emissive.setHex(hex);
-      part.material.emissiveIntensity = intensity;
-    }
+  // Only the torso's accent material is unique per zombie; skin/pants are
+  // shared across the horde and must never be flashed.
+  const torso = group.userData.parts.torso;
+  if (torso && torso.material.emissive) {
+    torso.material.emissive.setHex(hex);
+    torso.material.emissiveIntensity = intensity;
   }
 }
 
@@ -454,6 +466,7 @@ function openShop() {
   $('btn-shop-ready').textContent = 'READY - NEXT FLOOR';
   $('panel-shop').classList.remove('hidden');
   $('hud').classList.add('hidden');   // the shop is modal; HUD returns after
+  if (document.pointerLockElement) document.exitPointerLock();
   refreshShop();
 }
 function closeShop() {
@@ -468,7 +481,7 @@ function refreshShop() {
   const labels = {
     shotgun: 'SHOTGUN', smg: 'SMG',
     ammoRefillShotgun: 'SHELLS +25', ammoRefillSmg: 'SMG AMMO +120',
-    healthPack: 'HEALTH PACK', grenadePack: '2 GRENADES',
+    healthPack: 'HEALTH PACK', grenadePack: '2 GRENADES', mine: 'MINE',
   };
   for (const btn of document.querySelectorAll('.shop-item')) {
     const item = btn.dataset.item;
@@ -480,6 +493,7 @@ function refreshShop() {
     if (item === 'ammoRefillSmg' && !arsenal.owned.includes('smg')) blocked = true;
     if (item === 'healthPack' && arsenal.packs >= 2) { label = 'HEALTH PACK - FULL'; blocked = true; }
     if (item === 'grenadePack' && arsenal.grenades >= 5) { label = '2 GRENADES - FULL'; blocked = true; }
+    if (item === 'mine' && arsenal.mines >= 3) { label = 'MINE - FULL'; blocked = true; }
     btn.textContent = label;
     btn.disabled = blocked;
   }
@@ -619,6 +633,9 @@ function toggleMap(force) {
   if (next === mapActive) return;
   mapActive = next;
   $('map-ui').classList.toggle('hidden', !mapActive);
+  // On touch devices the stick/look zones cover the canvas; they must let
+  // taps through to the map while it is open.
+  $('touch-ui').classList.toggle('map-open', mapActive);
   if (mapActive) {
     setMapMode('ping');
     if (document.pointerLockElement) document.exitPointerLock();
@@ -668,6 +685,7 @@ function resetSession() {
   lastActiveWeapon = null;
   refreshWeaponHud();
   lastSnapAt = 0; lastWave = null;
+  presentedPhase = null;
   closeShop();
   toggleMap(false);
   clearTransientVisuals();
@@ -732,6 +750,9 @@ function startJoining(code) {
       if (typeof w.seed === 'number') runSeed = w.seed;
       loadLevel(w.level || 1);
     }
+    // Someone who entered VR while the join was still connecting would be
+    // dead-ended in the invisible 2D lobby: start playing now.
+    if (vrInput && vrInput.active) startPlaying();
   };
   net.onSnapshot = (snap) => {
     lastSnapAt = performance.now();
@@ -767,6 +788,7 @@ function startPlaying() {
   lobby.setState('playing');
   hud.setHealth(myHp);
   refreshWeaponHud();
+  presentedPhase = null;   // re-apply phase side effects for this session
   if (sim && (sim.wave.phase === 'lobby' || sim.wave.phase === 'gameover')) sim.startRun();
 }
 
@@ -805,6 +827,7 @@ function handleEvents(evs) {
         break;
       }
       case 'zdie': {
+        recentlyDeadZ.set(ev.id, performance.now() + 600);
         const v = zombieVisuals.get(ev.id);
         if (v) {
           zombieVisuals.delete(ev.id);
@@ -847,26 +870,25 @@ function handleEvents(evs) {
           myHp = ev.hp; hud.setHealth(myHp);
         }
         break;
+      // Phase SIDE EFFECTS (lighting, shop, panels) are driven from the
+      // wave block by presentPhase() so late joiners land in the right
+      // state; events only carry the one-shot announcements.
       case 'day':
-        nightTarget = 0;
-        $('panel-gameover').classList.add('hidden');
-        closeShop();
-        showCenterText('DAY', 1.6);
+        if (isPlaying()) showCenterText('DAY', 1.6);
         break;
       case 'countdown':
         break;   // ticking text driven from the wave block each frame
       case 'night':
-        nightTarget = 1;
-        showCenterText('NIGHT ' + ev.n, 2.0);
+        if (isPlaying()) showCenterText('NIGHT ' + ev.n, 2.0);
         break;
       case 'elevator':
-        nightTarget = 0.35;
-        showCenterText('CLEARED', 1.6);
-        showToast('Board the elevator!', 5000);
+        if (isPlaying()) {
+          showCenterText('CLEARED', 1.6);
+          showToast('Board the elevator!', 5000);
+        }
         break;
       case 'ride':
-        showCenterText('GOING UP', 1.4);
-        openShop();
+        if (isPlaying()) showCenterText('GOING UP', 1.4);
         break;
       case 'level': {
         const areaChanged = typeof ev.area === 'number' && ev.area !== CONFIG.PLAY_AREA;
@@ -881,9 +903,7 @@ function handleEvents(evs) {
           `You survived ${s.nights || 0} night${s.nights === 1 ? '' : 's'} and reached level ${s.level || 1}. ` +
           `${s.kills || 0} zombies down.`;
         $('btn-go-retry').style.display = role === 'client' ? 'none' : '';
-        closeShop();
-        $('panel-gameover').classList.remove('hidden');
-        break;
+        break;   // the panel itself is shown by presentPhase
       }
       case 'ping':
         spawnPing(ev.p);
@@ -920,6 +940,7 @@ const inputCtx = {
   actions,
   isPlaying: canAct,
   isMapActive: () => mapActive,
+  isModalOpen: () => shopOpen || !$('panel-gameover').classList.contains('hidden'),
   getLocoMode: () => lobby.locoMode,
   onSessionChange: (active) => {
     if (active) {
@@ -979,6 +1000,16 @@ if (PHOTOMODE) {
   updateAvatar('photobot', { p: [-2, level.floorY, -1], ry: 2.3, rx: 0, vr: false, hp: 100 });
   if (PHOTOMODE === 2) { nightTarget = 0; flashlightOn = true; }
   const wantHud = applyPhotomode(PHOTOMODE, { camera, scene, level });
+  if (PHOTOMODE === 2 && level.entries.length) {
+    // Basement shot: a walker between the camera and the doorway it
+    // stares at, lit by the flashlight cone.
+    const e = level.entries[0];
+    const g = makeZombieMesh('walker');
+    g.position.set(e.x * 0.45, 0, e.z * 0.45);
+    g.rotation.y = Math.atan2(camera.position.x - g.position.x, camera.position.z - g.position.z);
+    poseZombie(g, 0.8);
+    scene.add(g);
+  }
   scene.remove(rig.group);
   scene.add(camera);
   if (wantHud) lobby.applyUIState('hud');
@@ -990,6 +1021,45 @@ if (PHOTOMODE) {
   scene.add(camera);
 } else {
   lobby.setState('menu');
+}
+
+// ---- Phase presentation -------------------------------------------------
+// Applied whenever the observed wave phase changes (and once on entering
+// playing). Idempotent, so a client joining mid-game lands correctly in
+// night lighting, an open shop, or the gameover screen.
+let presentedPhase = null;
+function presentPhase(ph) {
+  presentedPhase = ph;
+  switch (ph) {
+    case 'lobby':
+    case 'day':
+      nightTarget = 0;
+      closeShop();
+      $('panel-gameover').classList.add('hidden');
+      break;
+    case 'countdown':
+      nightTarget = 0;
+      break;
+    case 'night':
+      nightTarget = 1;
+      closeShop();
+      break;
+    case 'elevator':
+      nightTarget = 0.35;
+      closeShop();
+      break;
+    case 'ride':
+      toggleMap(false);
+      openShop();
+      break;
+    case 'gameover':
+      toggleMap(false);
+      closeShop();
+      $('panel-gameover').classList.remove('hidden');
+      break;
+    default:
+      break;
+  }
 }
 
 // ---- HUD phase text -----------------------------------------------------
@@ -1140,7 +1210,10 @@ renderer.setAnimationLoop(() => {
     }
 
     // Wave-driven presentation.
-    if (isPlaying()) updateWaveHud(lastWave);
+    if (isPlaying()) {
+      if (lastWave && lastWave.ph !== presentedPhase) presentPhase(lastWave.ph);
+      updateWaveHud(lastWave);
+    }
     updateDayNight();
     // Elevator doors: open while boarding, closed otherwise.
     const doorTarget = lastWave && lastWave.ph === 'elevator' ? 1 : (lastWave && (lastWave.ph === 'night' || lastWave.ph === 'ride') ? 0 : doorT);

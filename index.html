@@ -157,6 +157,8 @@
     background: rgba(240,232,216,0.55); transform: translate(-50%, -50%); display: none;
   }
   #look-zone { position: absolute; right: 0; bottom: 0; width: 55%; height: 100%; pointer-events: auto; }
+  /* Tactical map open: taps must reach the canvas, not the game zones */
+  #touch-ui.map-open #stick-zone, #touch-ui.map-open #look-zone { pointer-events: none; }
   #btn-fire {
     position: absolute; right: max(18px, env(safe-area-inset-right));
     bottom: calc(max(14px, env(safe-area-inset-bottom)) + 104px);

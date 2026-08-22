@@ -46,13 +46,13 @@ export function applyPhotomode(n, { camera, scene, level }) {
 // Deterministic zombie dressing per mode: [type, x, z, faceX, faceZ, animT]
 export const PHOTO_ZOMBIES = {
   1: [['walker', -10, 8, 0, 0, 1.2], ['walker', -13, 11, 0, 0, 2.6]],
-  2: [['walker', 0, 6, 0, 0, 0.8]],
+  2: [],   // placed dynamically in main.js: in front of the mode-2 camera
   3: [],
   4: [['walker', -6, 6, 0, 0, 1.0], ['runner', 5, -7, 0, 0, 2.0]],
   5: [['walker', -14, 12, 0, 0, 0.5], ['walker', -17, 15, 0, 0, 1.7],
       ['runner', -12, 16, 0, 0, 2.4], ['walker', -20, 10, 0, 0, 3.1],
       ['brute', -16, 19, 0, 0, 0.2], ['walker', -22, 14, 0, 0, 1.1]],
-  6: [['runner', -2, -3, 0, 0, 1.4]],
+  6: [['runner', 2.5, 4.5, 0, 2, 1.4]],
   7: [['walker', -12, 10, 0, 0, 0.9]],
   8: [['walker', -6, -4, 1, 5, 1.5], ['runner', -8, -7, 1, 5, 0.4]],
   9: [['walker', 2, 2, 8, 10, 1.0]],

@@ -42,12 +42,18 @@ const ZOMBIE_LOOKS = {
   brute: { accent: 0x6e1f18, scaleX: 1.7, scaleY: 1.05, lean: 0.18, armLen: 0.65 },
 };
 
+// Skin and pants materials are SHARED across every zombie (Quest 2 is
+// draw-call/material bound); only the accent shirt is unique per zombie
+// so the hit flash can pulse one zombie without lighting up the horde.
+const sharedSkin = new THREE.MeshStandardMaterial({ color: 0xb8bdb4, roughness: 0.95 });
+const sharedPants = new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.95 });
+
 export function makeZombieMesh(type = 'walker') {
   const look = ZOMBIE_LOOKS[type] || ZOMBIE_LOOKS.walker;
   const g = new THREE.Group();
-  const skin = new THREE.MeshStandardMaterial({ color: 0xb8bdb4, roughness: 0.95 });
+  const skin = sharedSkin;
   const shirt = new THREE.MeshStandardMaterial({ color: look.accent, roughness: 0.95 });
-  const pants = new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.95 });
+  const pants = sharedPants;
 
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.16 * look.scaleX, 0.75, 0.16), pants);
   legL.position.set(-0.11 * look.scaleX, 0.375, 0);

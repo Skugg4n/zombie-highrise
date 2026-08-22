@@ -33,6 +33,7 @@ export class KeyboardInput {
       if (e.button !== 0) return;
       if (!ctx.isPlaying()) return;
       if (ctx.isMapActive && ctx.isMapActive()) return;   // map owns clicks
+      if (ctx.isModalOpen && ctx.isModalOpen()) return;   // shop/gameover own clicks
       if (document.pointerLockElement !== ctx.dom) {
         ctx.dom.requestPointerLock();
         return;

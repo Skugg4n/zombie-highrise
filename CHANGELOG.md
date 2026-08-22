@@ -1,5 +1,45 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.5.1 - 2026-08-22 18:30
+
+Fixes from the 35-agent adversarial review of Phase 1 (28 confirmed
+findings, scoreboard in QUALITY.md). Why: harden the loop before Phase 2.
+
+- CRITICAL: cross-browser desync killed: basement doors were shuffled with
+  a random-comparator Array.sort (engine-defined order); doors are now
+  fixed to the three non-elevator walls.
+- CRITICAL: elevator boarding zones moved INSIDE the play footprint on all
+  three level types (roomscale VR players could never physically reach
+  them: guaranteed softlock on every ground floor). The basement cab moved
+  to the solid north wall with its doors actually facing the room; cabs
+  now also have colliders.
+- CRITICAL: if the last standing player disconnects while teammates are
+  down, the run now ends in game over instead of softlocking.
+- Day loot no longer vanishes on floor arrival (it spawned against the old
+  level and was wiped by the level switch).
+- Upper-floor street spawns removed (they teleported to room height and
+  floated at the windows, biting through the sill); street ambience
+  returns as visuals in Phase 3.
+- Zombies: bites now require line of sight (no chewing through walls),
+  spawn jitter reduced so nobody spawns behind a wall, an 8 s stuck
+  failsafe re-enters via a doorway, and the spawn timer no longer builds
+  a backlog at the alive-cap that dumped the whole queue in one frame.
+- Late joiners now land in the correct phase presentation (night lighting,
+  open shop, gameover) via idempotent phase side effects; shop/gameover
+  panels no longer pop over the connected-lobby of a client who has not
+  pressed START.
+- Client ammo counter no longer bounces on every shot; killed zombies no
+  longer reappear as 120 ms interpolation ghosts.
+- Tactical map: taps now work on touch devices (stick/look zones release
+  the canvas), the map closes on level load/ride/gameover, and clicking
+  during the shop no longer swallows the cursor into pointer lock.
+- Entering VR while a join is connecting starts the game on welcome.
+- Shop MINE button shows its real label and a FULL state; mine kills now
+  pay scrap to the mine's owner.
+- Photomode 2 and 6 now actually show their zombies. Zombie skin/pants
+  materials shared across the horde (draw-call diet; full instancing
+  lands in the Phase 3 performance pass).
+
 ## v0.5.0 - 2026-08-22 17:25
 
 Phase 1 Pass D: mines, the tactical map and pings. Phase 1 core loop is

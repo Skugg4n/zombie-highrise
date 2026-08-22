@@ -1,5 +1,23 @@
 # QUALITY - scoreboard and open flaws
 
+## Phase 1 adversarial code review - 2026-08-22 (v0.5.1)
+
+Method: 5 domain reviewers (sim, netcode, levels, input/UI, spec audit) +
+one adversarial verifier per finding, 35 agents. 30 findings raised, 28
+confirmed, 2 refuted. All confirmed findings fixed in v0.5.1 except the
+two deliberately deferred items below. Smoke green after fixes.
+
+Deferred (tracked, not forgotten):
+- Draw-call budget: 20 zombies x 7 meshes still exceeds the ~100 draw
+  call budget on paper (~190 with a level). v0.5.1 shares skin/pants
+  materials as a stopgap; the real fix (instancing/merging) is the
+  Phase 3 performance pass. Measured photomode scenes stay under budget
+  because photomode dresses fewer zombies; the live night must be
+  re-measured on Quest 2.
+- Elevator boarding is "stand in front of the open doors" rather than
+  physically inside the cab (the cab is solid). Revisit in Phase 3 if the
+  boarding fantasy needs the interior.
+
 ## Phase 0 adversarial code review - 2026-08-22 (v0.1.1)
 
 Method: 5 domain reviewer agents (netcode, VR, input/UI, spec audit, sim)

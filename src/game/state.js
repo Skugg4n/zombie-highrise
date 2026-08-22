@@ -48,6 +48,10 @@ export class HostSim {
     for (const p of this.players.values()) {
       p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
     }
+    if (this.pendingDayLoot) {
+      this.pendingDayLoot = false;
+      this._spawnDayLoot();
+    }
   }
 
   // ---- Players ---------------------------------------------------------
@@ -68,7 +72,18 @@ export class HostSim {
   }
 
   removePlayer(id) {
-    if (this.players.delete(id)) this.events.push({ e: 'leave', id });
+    if (!this.players.delete(id)) return;
+    this.events.push({ e: 'leave', id });
+    // If the departed player was the last one standing, the run is over
+    // for the downed survivors (otherwise: permanent softlock).
+    const active = this.wave.phase !== 'lobby' && this.wave.phase !== 'gameover';
+    if (active && this.players.size > 0 && this.standingCount() === 0) {
+      this.wave.phase = 'gameover';
+      this.events.push({
+        e: 'gameover',
+        stats: { nights: this.wave.night, kills: this.kills, level: this.wave.level },
+      });
+    }
   }
 
   updatePose(id, m) {
@@ -136,7 +151,7 @@ export class HostSim {
       p.inv.m--;
     }
     const mid = this.nextMid++;
-    this.mines.set(mid, { id: mid, pos, armT: 1.0 });
+    this.mines.set(mid, { id: mid, pos, armT: 1.0, owner: id });
     this.events.push({ e: 'mined', id: mid, by: id });
   }
 
@@ -288,11 +303,14 @@ export class HostSim {
     this._enterDay();
   }
 
-  _enterDay() {
+  _enterDay(spawnLoot = true) {
     this.wave.phase = 'day';
     this.wave.t = TUNING.pacing.dayPhaseDuration;
     this.events.push({ e: 'day', n: this.wave.night + 1 });
-    this._spawnDayLoot();
+    // On floor arrival the loot must spawn AFTER setLevel wipes the item
+    // list (setLevel spawns it via pendingDayLoot), never before.
+    if (spawnLoot) this._spawnDayLoot();
+    else this.pendingDayLoot = true;
   }
 
   _spawnDayLoot() {
@@ -377,7 +395,7 @@ export class HostSim {
       }
     }
     this.events.push({ e: 'level', index: this.wave.level });
-    this._enterDay();
+    this._enterDay(false);
   }
 
   forceNight() {  // test hook
@@ -392,11 +410,13 @@ export class HostSim {
     const s = spawns[Math.floor(Math.random() * spawns.length)];
     const id = this.nextZid++;
     const stats = TUNING.enemies[type];
+    // Small jitter only: +-0.4 m keeps spawns inside 1.6 m doorways
+    // (larger jitter put zombies behind tall walls where they got stuck).
     this.zombies.set(id, {
       id, type,
-      pos: s.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2)),
+      pos: s.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.8)),
       hp: stats.hp, alive: true,
-      biteT: 0, targetId: null, retargetT: 0,
+      biteT: 0, targetId: null, retargetT: 0, stuckT: 0,
     });
     this.events.push({ e: 'zspawn', id });
   }
@@ -501,7 +521,10 @@ export class HostSim {
         const P = TUNING.pacing;
         const players = Math.max(1, this.players.size);
         const interval = P.spawnInterval(wave.night) / TUNING.coopScaling.spawnIntervalDivisor(players);
-        wave.spawnT -= dt;
+        // Clamp the spawn debt: while the alive cap blocks spawning, the
+        // timer must not accumulate a backlog that later dumps the whole
+        // queue in one frame (keeps the trickle a trickle).
+        wave.spawnT = Math.max(wave.spawnT - dt, -interval);
         while (wave.spawnT <= 0 && wave.queue.length && this.zombies.size < TUNING.waves.maxAlive) {
           wave.spawnCount++;
           const burst = wave.night >= P.burst.startNight && wave.spawnCount % P.burst.everyNthSpawn === 0
@@ -597,7 +620,11 @@ export class HostSim {
 
       const dist = z.pos.distanceTo(target.pos);
       const reach = stats.radius + 0.55;
-      if (goal !== target.pos || dist > reach) {
+      // Bites require line of sight: a wall between mouth and target means
+      // keep walking, never chew through the masonry.
+      const canBite = goal === target.pos && dist <= reach && !losBlocked;
+      if (!canBite) {
+        const before = z.pos.clone();
         const to = goal.clone().sub(z.pos); to.y = 0;
         if (to.lengthSq() > 1e-6) {
           to.normalize().multiplyScalar(stats.speed * dt);
@@ -605,6 +632,18 @@ export class HostSim {
           resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
         }
         z.biteT = 0;
+        // Failsafe against any residual stuck case (pinned on geometry far
+        // from everyone): after 8 s of no progress, re-enter via a doorway.
+        const moved = z.pos.distanceToSquared(before);
+        if (moved < (stats.speed * dt * 0.25) ** 2 && dist > 3) {
+          z.stuckT += dt;
+          if (z.stuckT > 8 && this.level.entries.length) {
+            z.stuckT = 0;
+            z.pos.copy(this.level.entries[Math.floor(Math.random() * this.level.entries.length)]);
+          }
+        } else {
+          z.stuckT = 0;
+        }
       } else {
         z.biteT += dt;
         if (z.biteT >= stats.biteInterval) {
@@ -661,7 +700,7 @@ export class HostSim {
       this.mines.delete(mine.id);
       this.events.push({ e: 'boom', p: mine.pos.toArray() });
       for (const z of [...this.zombies.values()]) {
-        if (z.pos.distanceTo(mine.pos) <= M.blastRadius) this.damageZombie(z, M.damage, false, null);
+        if (z.pos.distanceTo(mine.pos) <= M.blastRadius) this.damageZombie(z, M.damage, false, mine.owner);
       }
     }
   }
