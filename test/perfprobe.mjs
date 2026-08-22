@@ -21,7 +21,7 @@ await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
 await page.click('#btn-solo');
 await page.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
 // Force night 8 (heavy mix) and let the horde fill to the cap
-await page.evaluate(() => { window.__zhr.forceNight(9); });
+await page.evaluate(() => { window.__zhr.forceNight(12); });
 for (let i = 0; i < 8; i++) {
   await page.waitForTimeout(1000);
   const n = await page.evaluate(() => window.__zhr.zombies().length);

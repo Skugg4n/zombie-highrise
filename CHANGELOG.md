@@ -1,5 +1,46 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.8.2 - 2026-08-23 (run wrap-up)
+
+Budget-driven landing: critic loops stopped, ending shipped. Why: the
+account hit its monthly spend limit; the goal became a finishable game
+rather than a perfect one.
+
+- Placeholder purge on the critical path: consistent shop labels
+  (OWNED/FULL states, dot separators), readable purchase toasts instead
+  of raw item keys, HUD markup defaults matching the live formats, and
+  a shop status line that names the floor you are heading to.
+- README rewritten for a finished project (play, deploy, develop, files).
+- TEST-ON-DEVICE.md rewritten around the full 12-floor run.
+- Performance gate: 61 draw calls / 3.8k triangles with 16 zombies alive
+  at VR quality (budgets ~100 calls, ~250k triangles).
+
+## v0.8.1 - 2026-08-23
+
+- Explosive barrels: red drums near the level entrances, 2 hits to pop,
+  4 m blast that chains to nearby barrels, throws corpses and hurts you
+  if you stand too close. Grenades set them off too.
+- FIXED: night modifiers never actually applied for the host (the
+  host-side wave mirror dropped the `mod` field, so fog/blackout lighting
+  and the announcement never fired). Verified: fog, frenzy, blackout and
+  harvest all roll across nights 3-14.
+- forceNight is now robust from any non-terminal phase (test hook).
+
+## v0.8.0 - 2026-08-23
+
+THE ENDING. The run can now be won.
+
+- A run is exactly 12 floors. Floor 12 is the Butcher's arena (dawn-lit
+  roof slaughteryard with cover pillars and its own barrels).
+- Killing the Butcher on the final floor triggers the ROOF FINALE: a
+  helicopter flies in from the west, hovers with a searchlight while the
+  survivors hold the roof, then lifts away and the run is WON.
+- Victory screen (EXTRACTED) with nights survived, kills and unspent
+  scrap; RUN IT AGAIN starts a fresh run on a newly seeded building.
+- Anyone still downed is pulled aboard at the finale (no one is left).
+- Meta progression records extractions; the menu line shows them.
+- Verified end to end by test/endingprobe.mjs.
+
 ## v0.7.0 - 2026-08-22 22:40
 
 Phase 3 pass 2: the critic loops begin. Why: visual critic round 1 scored

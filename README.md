@@ -1,42 +1,54 @@
-# ZOMBIE HIGH RISE - Kickoff package
+# ZOMBIE HIGH RISE
 
 Co-op zombie wave defense in Three.js for Quest 2/3 (WebXR, room scale or
 stationary), mobile and desktop. Multiplayer via 4-character room codes,
 no server, GitHub Pages.
 
-## Getting started
+## Play it
 
-1. Create a new empty repo on GitHub (e.g. `zombie-high-rise`).
-2. Put the contents of this folder in the repo root and push to `main`.
-3. Enable GitHub Pages: Settings, Pages, Deploy from branch, `main`, `/ (root)`.
-4. Open a terminal in the repo folder and start `claude` (Claude Code reads
-   CLAUDE.md automatically).
-5. Paste the contents of KICKOFF-PROMPT.md (everything below the line).
-6. Claude Code builds Phase 0 and tells you when it is time to test on real
-   devices. Test on a Quest, a phone and a desktop before moving on. This
-   matters: polishing before the foundation works burns credits for nothing.
+Live build: **https://skugg4n.github.io/zombie-highrise/**
+
+Host a room on a desktop, share the 4-character code, friends join from
+their own devices (phone, desktop, Quest browser). Or press PRACTICE SOLO.
+A full run is 12 floors ending with the Butcher and a roof extraction.
+
+## Deploy
+
+The site is a static build with no build step: GitHub Pages serves the
+repo root.
+
+1. `git push` to `main` on https://github.com/Skugg4n/zombie-highrise
+2. Pages is already configured (Settings, Pages, deploy from branch
+   `main`, folder `/ (root)`). A push is the whole deploy.
+3. Hard-reload on Quest after a deploy; its browser caches aggressively.
+   The version tag in the top-right corner tells you which build you are
+   actually running.
+
+## Develop
+
+    npm install            # Playwright, test-only dependency
+    npx playwright install chromium
+    node test/smoke.mjs    # the always-green gate: run after EVERY change
+
+Other tooling: `test/capture.mjs` (photomode + UI screenshot gallery),
+`test/feelcapture.mjs` (scripted gameplay clips), `test/perfprobe.mjs`
+(draw-call/triangle budget), `test/endingprobe.mjs` (the win state).
+
+Runtime deps are vendored and pinned in `vendor/` (Three.js r170, PeerJS
+1.5.4); there is no CDN at runtime and no build step.
 
 ## The files
 
-- KICKOFF-PROMPT.md: the master prompt (sub-agent fan-out, critic loop, photo mode)
-- CLAUDE.md: conventions applied to every Claude Code session
-- docs/vision.md: the game idea, the elevator trick, the pillars
-- docs/technical-spec.md: architecture, PeerJS, WebXR, locomotion modes, budgets
-- docs/art-direction.md: "zombies in daylight", palette, the quality bar
-- docs/projectplan.md: phases with checkboxes, Phase 0 first
-- docs/TODO.md: parked ideas (co-located VR, night travel, train levels, PvP)
-- LESSONS.md: pre-seeded with known pitfalls, including the crew's previous
-  classics (flipped textures, the lobby that could not both host and enter
-  VR, UI elements rendering under each other)
-- CHANGELOG.md: version log
-
-## Credits tips
-
-- Claude Code is instructed to never stall waiting for you: it caps critic
-  loops per pass, writes scores to QUALITY.md, parks questions in
-  OPEN-QUESTIONS.md and keeps working. The only hard stops are phase
-  boundaries where real devices must be tested.
-- Keep it honest about phase order. If it starts polishing before Phase 0
-  is verified on real devices, tell it to stop.
-- If something gets stuck: tell it to re-read LESSONS.md and add what it
-  learns.
+- `index.html` - boot, lobby, HUD, all UI states (documented z-index scale)
+- `src/main.js` - bootstrap, frame loop, VFX, netcode glue
+- `src/game/` - host-authoritative sim, tuning sheet, arsenal, meta saves
+- `src/world/` - level generator, instanced horde, procedural textures
+- `src/net/` - PeerJS transport + wire protocol
+- `src/input/` - keyboard, touch and WebXR layers
+- `src/audio/` - fully procedural WebAudio (no sound files)
+- `docs/` - vision, technical spec, art direction, project plan, TODO
+- `HANDOFF.md` - state of the build and what to pick up next
+- `TEST-ON-DEVICE.md` - what to verify on real hardware
+- `LESSONS.md` - known pitfalls and their solutions (read before debugging)
+- `QUALITY.md` - critic-loop scoreboards and accepted flaws
+- `CHANGELOG.md` - version log
