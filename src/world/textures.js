@@ -126,8 +126,8 @@ export function sandbagTexture(key, base, { size = 256, repeat = 2 } = {}) {
       ctx.fillStyle = shift(base, rng.range(-12, 12) | 0);
       roundRect(ctx, x + 2, y + 2, bw - 4, bh - 4, 9);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+      ctx.lineWidth = 1;
       roundRect(ctx, x + 2, y + 2, bw - 4, bh - 4, 9);
       ctx.stroke();
     }

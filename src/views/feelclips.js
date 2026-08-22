@@ -14,7 +14,7 @@
 // 4 machete swing      5 grenade throw + boom   6 taking damage, downed
 export const FEEL_CLIPS = {
   1: {
-    duration: 5.5,
+    duration: 4.4,
     actions: [
       [0.1, (a) => a.spawnAt('walker', 8, 1.5)],
       [0.7, (a) => a.aim()],
@@ -25,7 +25,7 @@ export const FEEL_CLIPS = {
     ],
   },
   2: {
-    duration: 6.5,
+    duration: 5.6,
     actions: [
       [0.1, (a) => {
         a.grant('smg');
@@ -45,18 +45,17 @@ export const FEEL_CLIPS = {
     ],
   },
   3: {
-    duration: 6,
+    duration: 5.2,
     actions: [
       [0.1, (a) => { a.grant('shotgun'); a.spawnAt('brute', 3.0, 1.8); }],
       [0.8, (a) => a.aim()],
       [1.1, (a) => { a.aim(); a.fire(); }],
       [2.3, (a) => { a.aim(); a.fire(); }],
       [3.5, (a) => { a.aim(); a.fire(); }],
-      [4.5, (a) => { a.aim(); a.fire(); }],
     ],
   },
   4: {
-    duration: 4.5,
+    duration: 3.6,
     actions: [
       [0.1, (a) => { a.equip('machete'); a.spawnAt('walker', 1.8, 1.8) }],
       [0.8, (a) => a.aim()],
@@ -68,9 +67,9 @@ export const FEEL_CLIPS = {
     duration: 6.5,
     actions: [
       [0.1, (a) => {
-        a.spawnAt('walker', 7.2, 1.0);
-        a.spawnAt('walker', 8.6, 2.0);
-        a.spawnAt('walker', 7.8, 3.0);
+        a.spawnAt('walker', 10.6, 1.0);
+        a.spawnAt('walker', 11.8, 2.2);
+        a.spawnAt('walker', 11.0, 3.2);
       }],
       [0.8, (a) => a.aim()],
       [1.2, (a) => a.throwGrenade()],

@@ -270,7 +270,7 @@ export class HostSim {
     const dir = new THREE.Vector3().fromArray(m.d).normalize();
     const spread = THREE.MathUtils.degToRad(def.spreadDeg || 0);
     // Shotgun pellets shove their target (feel: weight and consequence).
-    const knockback = m.w === 'shotgun' ? 0.28 : 0;
+    const knockback = m.w === 'shotgun' ? 0.5 : 0;
     for (let i = 0; i < (def.pellets || 1); i++) {
       const d = dir.clone();
       if (spread > 0) {
@@ -535,9 +535,10 @@ export class HostSim {
     const tall = this._tall();
     if (segmentBlocked(o.x, o.z, hit.x, hit.z, tall)) return null;
     if (knockback > 0) {
-      const shove = knockback * (best.type === 'brute' ? 0.35 : 1);
+      const shove = knockback * (best.type === 'brute' ? 0.5 : 1);
       best.pos.addScaledVector(new THREE.Vector3(d.x, 0, d.z).normalize(), shove);
       resolveCircle(best.pos, TUNING.enemies[best.type].radius * 0.8, this.level.colliders);
+      best.stunT = Math.max(best.stunT || 0, 0.3);   // a visible pause: weight
     }
     this.damageZombie(best, damage, false, byId);
     return best;
@@ -686,6 +687,8 @@ export class HostSim {
   _stepZombies(dt) {
     for (const z of this.zombies.values()) {
       const stats = TUNING.enemies[z.type];
+      // Stunned (shotgun impact): stand and take it for a beat.
+      if (z.stunT > 0) { z.stunT -= dt; continue; }
       // Aggro: nearest standing player, re-evaluated every 2 s.
       z.retargetT -= dt;
       let target = z.targetId ? this.players.get(z.targetId) : null;

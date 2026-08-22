@@ -4,7 +4,7 @@
 // data), ?autohost=1 / ?autojoin=CODE (smoke test hooks), ?seed=N.
 import * as THREE from 'three';
 import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY, PLAY_SIZES, setPlayArea } from './config.js';
-import { buildLevel, disposeLevel } from './world/levelgen.js';
+import { buildLevel, disposeLevel, MATS } from './world/levelgen.js';
 import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
 import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
@@ -139,6 +139,8 @@ function updateDayNight(force = false) {
   sun.intensity = L.sunDay * (1 - nightT * 0.92);
   sun.color.setHex(nightT > 0.5 ? 0xa8c0e8 : 0xffe8c0);   // moonlight is cool
   hemi.intensity = L.hemiDay * (1 - nightT * 0.72);
+  // Windows in the skyline only glow after dark.
+  MATS.facade.emissiveIntensity = 0.02 + nightT * 0.6;
   sunGlow.material.opacity = 1 - nightT * 0.55;   // the moon still glows
   sunGlow.position.copy(sun.position).normalize().multiplyScalar(290);
 }
@@ -356,7 +358,7 @@ function spawnCasing(origin, dir) {
   const vel = right.multiplyScalar(0.9 + Math.random() * 0.6)
     .add(new THREE.Vector3(0, 1.4 + Math.random() * 0.6, 0));
   scene.add(mesh);
-  casings.push({ mesh, vel, t: 0.9, spin: (Math.random() - 0.5) * 20 });
+  casings.push({ mesh, vel, t: 0.55, spin: (Math.random() - 0.5) * 24 });
 }
 
 // Muzzle flash sprite: a bright star at the muzzle for ~2 frames, paired
@@ -388,9 +390,9 @@ function spawnMuzzleSprite(origin, dir) {
     blending: THREE.AdditiveBlending, rotation: Math.random() * Math.PI,
   }));
   s.position.copy(origin).addScaledVector(dir, 0.55);
-  s.scale.setScalar(0.3 + Math.random() * 0.12);
+  s.scale.setScalar(0.42 + Math.random() * 0.14);
   scene.add(s);
-  muzzleSprites.push({ s, t: 0.055 });
+  muzzleSprites.push({ s, t: 0.09 });
 }
 
 // Tracers: brief additive streaks so every shot visibly goes somewhere.
@@ -407,9 +409,69 @@ function spawnTracer(origin, dir) {
   m.scale.z = len;
   m.lookAt(m.position.clone().add(dir));
   scene.add(m);
-  tracers.push({ m, t: 0.08 });
+  tracers.push({ m, t: 0.15 });
 }
+// Blood puffs: a dark red burst wherever a zombie takes a hit.
+const bloodTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 48;
+  const x = c.getContext('2d');
+  for (let i = 0; i < 9; i++) {
+    x.fillStyle = `rgba(${120 + Math.random() * 60 | 0},${12 + Math.random() * 14 | 0},10,${0.5 + Math.random() * 0.4})`;
+    x.beginPath();
+    x.arc(24 + (Math.random() - 0.5) * 26, 24 + (Math.random() - 0.5) * 26, 3 + Math.random() * 6, 0, Math.PI * 2);
+    x.fill();
+  }
+  return new THREE.CanvasTexture(c);
+})();
+const bloodPuffs = [];
+function spawnBloodPuff(x, y, z) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: bloodTex, transparent: true, depthWrite: false, rotation: Math.random() * Math.PI,
+  }));
+  s.position.set(x, y + 1.1, z);
+  s.scale.setScalar(0.5);
+  scene.add(s);
+  bloodPuffs.push({ s, t: 0.28 });
+}
+
+// Machete swing trail: a fading arc ribbon so the swing exists on screen.
+const trailGeo = new THREE.RingGeometry(0.55, 1.0, 12, 1, -0.4, 2.1);
+let swingTrail = null;
+function spawnSwingTrail() {
+  if (swingTrail) { camera.remove(swingTrail.m); swingTrail.m.material.dispose(); }
+  const m = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({
+    color: 0xe8e2d2, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  m.position.set(0.05, -0.05, -0.9);
+  m.rotation.set(0.15, 0.35, -0.6);
+  camera.add(m);
+  swingTrail = { m, t: 0.28 };
+}
+
 function updateShotVfx(dt) {
+  for (let i = bloodPuffs.length - 1; i >= 0; i--) {
+    const b = bloodPuffs[i];
+    b.t -= dt;
+    b.s.scale.setScalar(0.5 + (0.28 - b.t) * 2.2);
+    b.s.material.opacity = Math.max(0, b.t / 0.28);
+    if (b.t <= 0) {
+      scene.remove(b.s);
+      b.s.material.dispose();
+      bloodPuffs.splice(i, 1);
+    }
+  }
+  if (swingTrail) {
+    swingTrail.t -= dt;
+    swingTrail.m.material.opacity = 0.55 * Math.max(0, swingTrail.t / 0.28);
+    swingTrail.m.rotation.z -= dt * 6;
+    if (swingTrail.t <= 0) {
+      camera.remove(swingTrail.m);
+      swingTrail.m.material.dispose();
+      swingTrail = null;
+    }
+  }
   for (let i = muzzleSprites.length - 1; i >= 0; i--) {
     const f = muzzleSprites[i];
     f.t -= dt;
@@ -422,7 +484,7 @@ function updateShotVfx(dt) {
   for (let i = tracers.length - 1; i >= 0; i--) {
     const tr = tracers[i];
     tr.t -= dt;
-    tr.m.material.opacity = 0.8 * Math.max(0, tr.t / 0.08);
+    tr.m.material.opacity = 0.85 * Math.max(0, tr.t / 0.15);
     if (tr.t <= 0) {
       scene.remove(tr.m);
       tr.m.material.dispose();
@@ -434,7 +496,7 @@ function updateCasings(dt) {
   for (let i = casings.length - 1; i >= 0; i--) {
     const c = casings[i];
     c.t -= dt;
-    c.vel.y -= 9.8 * dt;
+    c.vel.y -= 16 * dt;
     c.mesh.position.addScaledVector(c.vel, dt);
     c.mesh.rotation.x += c.spin * dt;
     c.mesh.rotation.z += c.spin * 0.7 * dt;
@@ -690,9 +752,9 @@ function updateExplosions(dt) {
     const ex = explosions[i];
     ex.t -= dt;
     const age = ex.T - ex.t;
-    const flashK = Math.max(0, 1 - age / 0.45);   // fireball: first 0.45 s
+    const flashK = Math.max(0, 1 - age / 0.6);    // fireball: first 0.6 s
     ex.light.intensity = 42 * flashK;
-    ex.shell.scale.setScalar(0.4 + (1 - flashK) * 3.0);
+    ex.shell.scale.setScalar(0.4 + (1 - flashK) * 4.4);
     ex.shell.material.opacity = 0.9 * flashK;
     ex.shell.visible = flashK > 0;
     // Smoke rises and thins over the full lifetime.
@@ -886,7 +948,7 @@ function makeArsenal() {
         }
         spawnCasing(o, d);
       },
-      swing: () => { viewmodelSwingT = 0.22; audio.play('machete'); },
+      swing: () => { viewmodelSwingT = 0.22; spawnSwingTrail(); audio.play('machete'); },
       throw: () => audio.play('throw'),
       reload: () => audio.play('reload'),
       dry: () => audio.play('dryfire'),
@@ -1266,6 +1328,7 @@ function handleEvents(evs) {
           v.flashT = 0.12;
           v.staggerT = 0.18;   // hit reaction: brief flinch
           audio.play('zhit', v);
+          spawnBloodPuff(v.x, v.y, v.z);
         }
         if (ev.by === (role === 'client' ? net?.myId : 'H')) showHitmarker(false);
         break;
@@ -1273,6 +1336,7 @@ function handleEvents(evs) {
       case 'zdie': {
         recentlyDeadZ.set(ev.id, performance.now() + 600);
         if (ev.by === (role === 'client' ? net?.myId : 'H')) showHitmarker(true);
+        if (Array.isArray(ev.p)) spawnBloodPuff(ev.p[0], ev.p[1], ev.p[2]);
         if (Array.isArray(ev.p)) audio.play('zdie', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
         const v = zombieStates.get(ev.id);
         if (v) {
@@ -1426,7 +1490,7 @@ function pulseDamageVignette() {
   vignettePulseTimer = setTimeout(() => el.classList.remove('pulse'), 140);
 }
 function updateLowHpVignette() {
-  $('dmg-vignette').classList.toggle('lowhp', isPlaying() && !myDown && myHp > 0 && myHp <= 25);
+  $('dmg-vignette').classList.toggle('lowhp', isPlaying() && myHp <= 25);
 }
 
 // Hit marker: white ticks on a confirmed hit, red on a kill.
@@ -1449,6 +1513,7 @@ function addShake(amp) {
 // Big centre text with auto-hide.
 let centerT = 0;
 function showCenterText(text, seconds) {
+  if (typeof clipDef !== 'undefined' && clipDef) return;   // clips stay clean
   const el = $('countdown');
   el.textContent = text;
   el.classList.remove('hidden');
@@ -1569,7 +1634,7 @@ function presentPhase(ph) {
       nightTarget = 0;
       break;
     case 'night':
-      nightTarget = 1;
+      nightTarget = clipDef ? 0 : 1;   // feel clips stay in daylight
       closeShop();
       break;
     case 'elevator':
@@ -1589,7 +1654,10 @@ function presentPhase(ph) {
       // screen admits it (feel-critic: no hard cut from bite to menu).
       clearTimeout(gameoverTimer);
       gameoverTimer = setTimeout(() => {
-        if (presentedPhase === 'gameover') $('panel-gameover').classList.remove('hidden');
+        if (presentedPhase === 'gameover') {
+          $('panel-gameover').classList.remove('hidden');
+          $('hud').classList.add('hidden');
+        }
       }, 1200);
       break;
     default:
@@ -1644,7 +1712,6 @@ renderer.setAnimationLoop(() => {
       }
       rig.group.rotation.y = rig.yaw;
       camera.rotation.x = rig.pitch;
-      camera.rotation.z = 0;
       // Screen shake (explosions), flat modes only.
       if (shakeT > 0) {
         shakeT -= dt;
@@ -1653,9 +1720,11 @@ renderer.setAnimationLoop(() => {
         camera.rotation.z = (Math.random() - 0.5) * k * 0.7;
         if (shakeT <= 0) shakeAmp = 0;
       }
-      // Downed players sink to the floor (flat modes).
+      // Downed players sink to the floor with a sideways slump.
       const eyeTarget = myDown ? 0.55 : CONFIG.PLAYER_HEIGHT;
-      camera.position.y += (eyeTarget - camera.position.y) * Math.min(1, dt * 6);
+      camera.position.y += (eyeTarget - camera.position.y) * Math.min(1, dt * 2.4);
+      const rollTarget = myDown ? 0.16 : 0;
+      camera.rotation.z += (rollTarget - camera.rotation.z) * Math.min(1, dt * 2.4);
     }
     // Collision + terrain under the player (head position in VR).
     const ref = inVR ? camera.getWorldPosition(tmpV) : rig.group.position;
@@ -1872,7 +1941,11 @@ window.__zhr = {
   },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
   debugTeleport: (x, z) => { rig.group.position.x = x; rig.group.position.z = z; },
-  forceNight: () => { if (sim) sim.forceNight(); },
+  forceNight: (n) => {
+    if (!sim) return;
+    if (n) sim.wave.night = n - 1;   // next night becomes n (heavier mix)
+    sim.forceNight();
+  },
   debugClearNight: () => {
     if (!sim) return;
     sim.wave.queue = [];
