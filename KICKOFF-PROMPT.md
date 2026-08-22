@@ -28,8 +28,10 @@ lighting, physics feel, sound, UI, netcode smoothness. Everything.
 Work through docs/projectplan.md phase by phase, checking off items as you
 complete them. Phase 0 (the steel thread) must be COMPLETE and smoke-tested
 before any visual polish work begins. Polish on a broken foundation is
-wasted effort. At the end of Phase 0, stop and tell me to test on real
-devices (Quest, one phone, one desktop) before continuing.
+wasted effort. Do not stop at phase boundaries: real-device testing is
+asynchronous, not a gate. Maintain TEST-ON-DEVICE.md with everything that
+needs human verification per device; Ola tests while you keep building and
+reports breakage as it comes.
 
 ## Sub-agent fan-out
 
@@ -95,9 +97,12 @@ You are expected to run long and autonomously. Therefore:
 - Collect questions and decisions in an OPEN-QUESTIONS.md instead of
   stopping to ask. Make the most reasonable choice, note it, and continue.
   I will answer when I check in.
-- The ONLY hard stops are phase boundaries that need real-device testing.
-  When you hit one, finish everything else that can be finished first, then
-  write exactly what I should test on which device and stop there.
+- There are NO hard stops. The run is finished only when every
+  projectplan item that does not require a human on a device is checked
+  off, the critics score 9+ on all photomode views, and the performance
+  gate passes. Then write the final TEST-ON-DEVICE.md and summarize.
+- Push to main after every completed projectplan item so the latest build
+  is always live on GitHub Pages for asynchronous device testing.
 
 ## Always-green rules
 

@@ -33,6 +33,7 @@ Claude Code reads this file automatically. These rules apply every session.
 - The performance budgets in docs/technical-spec.md are hard requirements.
   Quest 2 is the floor platform.
 - The lobby matrix {host, join} x {flat, VR} must never regress.
-- Ask Ola for real-device tests (Quest, phone, desktop) only at phase
-  boundaries, and be exact about what to check.
+- Never stop to wait for real-device tests: maintain TEST-ON-DEVICE.md
+  with exact per-device checks, keep building, and let Ola test
+  asynchronously against the live Pages build.
 - Deploy: git push to main, GitHub Pages serves from the repo root.
