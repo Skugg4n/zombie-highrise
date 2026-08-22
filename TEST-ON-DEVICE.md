@@ -5,6 +5,35 @@ Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw". Newest checks
 at the top; ticked history stays for regression reference.
 
+## v0.7.0 - Phase 2 + first polish passes (NEW)
+
+### Any platform
+- [ ] Floors now cycle: ground, basement, upper, ground, TRENCH (night,
+      flares, serpentine dirt lanes), WAGON (rolling flatbed: scenery
+      streams past, zombies vault in over the open ends, no shop, single
+      night). Solo through 6 floors touches everything.
+- [ ] New gear in the shop: AK, DUAL PISTOLS, smoke grenades (slowing
+      cloud), molotovs (burning patch), NIGHT VISION (N key / NV button /
+      left-stick press in VR: green view, 30 s battery, recharges by day).
+- [ ] V key (SWAP button / right-stick press) cycles the selected
+      throwable, G/NADE/B throws it.
+- [ ] Tactical map has a DRONE mode (40 scrap): it flies out, hovers and
+      pings zombies every 2 s.
+- [ ] Sound is in: gunshots per weapon, reload, zombie groans around you
+      (positional), explosions, stingers at night/day, wind ambience.
+- [ ] Feel: recoil kicks and recovers, shell casings eject, hit markers
+      tick on hits (red on kills), shotgun shoves zombies, explosions
+      shake the screen (flat only), corpses topple over.
+- [ ] Menu shows your meta record line after a run; surviving 4+ nights
+      earns +25 starting scrap on that device (8+ nights: +50).
+
+### Quest 2 (new checks)
+- [ ] Explosions do NOT shake the view in VR (comfort rule).
+- [ ] The whole horde renders smoothly at night (instanced rendering);
+      report the feel of the frame rate on floor 1 night 2 with 15+
+      zombies visible.
+- [ ] Night vision in VR tints the world green (no screen overlay).
+
 ## v0.5.0 - Phase 1 core loop (NEW)
 
 ### Any platform (solo is enough to verify the loop)

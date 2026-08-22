@@ -1,5 +1,32 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.7.0 - 2026-08-22 22:40
+
+Phase 3 pass 2: the critic loops begin. Why: visual critic round 1 scored
+2-3/10 everywhere; Ola added the feel-critic loop to the plan.
+
+- Visual round 2 (from critic round 1 fix lists): procedural canvas
+  textures everywhere (sand, concrete, sandbags, planks, plaster, worn
+  metal, dirt) with world-space UV scaling so tiling matches across all
+  wall sizes; gradient sky dome + sun glow + soft dust motes; lower warm
+  sun with long shadows (desktop); ruins got broken rooflines, window
+  holes and rebar; wrecked-car midground anchor; foreground debris ring
+  and road tire tracks; upper floor window frames, light pools and
+  baseboards; trench duckboards, support beams, rim sandbags and brighter
+  flares; elevator fluorescent tube, glowing buttons, hazard sill; deep
+  blue dark levels (never pure black); item pickups glow with ground
+  rings; HUD skinned with amber accents and low-ammo colors.
+- Performance gate work: static level geometry merges into one mesh per
+  material; the entire horde renders as SEVEN instanced draw calls (any
+  count) with per-instance accent colors, size variation and shadows.
+  Levels now render at 11-28 draw calls.
+- Feel systems (the new plan section): recoil kick with recovery, shotgun
+  knockback shoves, hit markers (white tick, red on kill), screen shake
+  on explosions (flat modes only, never VR), zombie limb pivots at real
+  joints, corpse topple deaths.
+- ?feelclip=1..6 deterministic scripted gameplay clips + capture tooling
+  (test/feelcapture.mjs: Playwright video + frame strips per clip).
+
 ## v0.6.2 - 2026-08-22 21:15
 
 Fixes from the 26-agent adversarial review of Phase 2 (21 confirmed

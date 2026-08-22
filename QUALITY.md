@@ -1,5 +1,23 @@
 # QUALITY - scoreboard and open flaws
 
+## Critic loop scoreboard
+
+Visual critic (photomode views, target 9+):
+- Round 1 (v0.6.2 art): V1 3, V2 3, V3 3, V4 2, V5 3, V6 2, V7 3, V8 3,
+  V9 PASS. UI: hud 7, shop 6, lobby 7. Verdict: programmer art; top
+  moves: real sun shadows + AO grounding, kill pure black, posed varied
+  zombies.
+- Round 2 (v0.7.0): captured, scoring in progress.
+
+Feel critic (feel clips, target 9+):
+- Round 1 (v0.7.0): captured, scoring in progress.
+
+## Phase 2 adversarial code review - 2026-08-22 (v0.6.2)
+
+26 agents, 21 confirmed findings (1 critical: trench connector sealed by
+the elevator collider in half of all seeds), 1 refuted. All confirmed
+findings fixed in v0.6.2.
+
 ## Phase 1 adversarial code review - 2026-08-22 (v0.5.1)
 
 Method: 5 domain reviewers (sim, netcode, levels, input/UI, spec audit) +
