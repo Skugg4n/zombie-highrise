@@ -25,14 +25,18 @@ export class HostSim {
     this.grenades = new Map();
     this.items = new Map();
     this.mines = new Map();
+    this.drones = new Map();
+    this.clouds = [];          // smoke: {pos, t}
+    this.fires = [];           // molotov: {pos, t, tickT}
     this.nextZid = 1;
     this.nextGid = 1;
     this.nextIid = 1;
     this.nextMid = 1;
+    this.nextDid = 1;
     this.events = [];
     this.kills = 0;
     this.wave = {
-      phase: 'lobby', night: 0, level: level.index,
+      phase: 'lobby', night: 0, nightInLevel: 0, level: level.index,
       t: 0, queue: [], spawnT: 0, spawnCount: 0, left: 0,
     };
   }
@@ -40,10 +44,14 @@ export class HostSim {
   setLevel(level) {
     this.level = level;
     this.wave.level = level.index;
+    this.wave.nightInLevel = 0;
     this.zombies.clear();
     this.grenades.clear();
     this.items.clear();
     this.mines.clear();
+    this.drones.clear();
+    this.clouds.length = 0;
+    this.fires.length = 0;
     let i = 0;
     for (const p of this.players.values()) {
       p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
@@ -55,7 +63,9 @@ export class HostSim {
   }
 
   // ---- Players ---------------------------------------------------------
-  addPlayer(id, name, platform) {
+  addPlayer(id, name, platform, scrapBonus = 0) {
+    // scrapBonus: the joining device's meta-progression perk (0-50).
+    const bonus = Math.max(0, Math.min(50, scrapBonus | 0));
     const spawn = this.level.playerSpawns[this.players.size % this.level.playerSpawns.length];
     this.players.set(id, {
       pos: spawn.clone(), ry: 0, rx: 0, vr: false,
@@ -65,7 +75,9 @@ export class HostSim {
       inv: {
         w: ['pistol', 'machete'], active: 'pistol',
         a: { pistol: [TUNING.weapons.pistol.magazine, -1] },   // -1 = infinite reserve
-        g: 1, k: 0, m: 0, s: TUNING.economy.startingScrap,
+        g: 1, gs: 0, gm: 0,      // throwables: frags, smokes, molotovs
+        k: 0, m: 0, nv: false,   // packs, mines, night vision device
+        s: TUNING.economy.startingScrap + bonus,
       },
     });
     this.events.push({ e: 'join', id, name: name || id });
@@ -119,6 +131,7 @@ export class HostSim {
         break;
       case 'buy': this._actBuy(id, p, m.item); break;
       case 'placeMine': this._actPlaceMine(id, p, m); break;
+      case 'drone': this._actDrone(id, p, m); break;
       case 'ping':
         if (Array.isArray(m.p)) this.events.push({ e: 'ping', p: m.p, by: id });
         break;
@@ -153,6 +166,22 @@ export class HostSim {
     const mid = this.nextMid++;
     this.mines.set(mid, { id: mid, pos, armT: 1.0, owner: id });
     this.events.push({ e: 'mined', id: mid, by: id });
+  }
+
+  // Scout drone from the tactical map: flies to the target, hovers 10 s,
+  // pings the nearest zombie every 2 s.
+  _actDrone(id, p, m) {
+    if (!Array.isArray(m.p)) return;
+    if (p.inv.s < TUNING.economy.droneDeploy) return;
+    p.inv.s -= TUNING.economy.droneDeploy;
+    const did = this.nextDid++;
+    this.drones.set(did, {
+      id: did, owner: id, phase: 'fly',
+      pos: p.pos.clone().add(new THREE.Vector3(0, 3.5, 0)),
+      target: new THREE.Vector3(m.p[0], this.level.heightAt(m.p[0], m.p[2]) + 3.5, m.p[2]),
+      hoverT: 0, pingT: 0,
+    });
+    this.events.push({ e: 'droned', by: id });
   }
 
   _actBuy(id, p, item) {
@@ -194,6 +223,34 @@ export class HostSim {
       case 'mine':
         if ((inv.m || 0) >= 3) return;
         inv.m = (inv.m || 0) + 1;
+        break;
+      case 'ak':
+        if (inv.w.includes('ak')) return;
+        inv.w.push('ak');
+        inv.a.ak = [TUNING.weapons.ak.magazine, 90];
+        break;
+      case 'ammoRefillAk': {
+        const a = inv.a.ak;
+        if (!a || a[1] >= TUNING.weapons.ak.reserveMax) return;
+        a[1] = Math.min(TUNING.weapons.ak.reserveMax, a[1] + 90);
+        break;
+      }
+      case 'akimbo':
+        if (inv.w.includes('akimbo')) return;
+        inv.w.push('akimbo');
+        inv.a.akimbo = [TUNING.weapons.akimbo.magazine, -1];
+        break;
+      case 'smokePack':
+        if ((inv.gs || 0) >= 4) return;
+        inv.gs = Math.min(4, (inv.gs || 0) + 2);
+        break;
+      case 'molotovPack':
+        if ((inv.gm || 0) >= 4) return;
+        inv.gm = Math.min(4, (inv.gm || 0) + 2);
+        break;
+      case 'nightVision':
+        if (inv.nv) return;
+        inv.nv = true;
         break;
       default:
         return;
@@ -240,15 +297,20 @@ export class HostSim {
   }
 
   _actThrow(id, p, m) {
-    if (p.inv.g <= 0) return;
-    p.inv.g--;
+    const kind = ['frag', 'smoke', 'molotov'].includes(m.kind) ? m.kind : 'frag';
+    const counter = { frag: 'g', smoke: 'gs', molotov: 'gm' }[kind];
+    if ((p.inv[counter] || 0) <= 0) return;
+    p.inv[counter]--;
+    const def = kind === 'smoke' ? TUNING.weapons.smokeGrenade
+      : kind === 'molotov' ? TUNING.weapons.molotov
+        : TUNING.weapons.fragGrenade;
     const gid = this.nextGid++;
     const dir = new THREE.Vector3().fromArray(m.d).normalize();
     this.grenades.set(gid, {
-      id: gid, owner: id,
+      id: gid, owner: id, kind,
       pos: new THREE.Vector3().fromArray(m.o).addScaledVector(dir, 0.4),
-      vel: dir.multiplyScalar(TUNING.weapons.fragGrenade.throwSpeed).add(new THREE.Vector3(0, 3.2, 0)),
-      fuse: TUNING.weapons.fragGrenade.fuseTime,
+      vel: dir.multiplyScalar(def.throwSpeed).add(new THREE.Vector3(0, 3.2, 0)),
+      fuse: kind === 'molotov' ? 3.0 : def.fuseTime,   // molotov pops on impact
     });
   }
 
@@ -293,7 +355,8 @@ export class HostSim {
   restartLevel() {
     this.zombies.clear();
     this.grenades.clear();
-    this.wave.night = (this.wave.level - 1) * TUNING.pacing.nightsPerLevel;
+    this.wave.night -= this.wave.nightInLevel;
+    this.wave.nightInLevel = 0;
     let i = 0;
     for (const p of this.players.values()) {
       p.hp = TUNING.player.maxHp; p.down = false; p.reviveT = 0;
@@ -305,7 +368,8 @@ export class HostSim {
 
   _enterDay(spawnLoot = true) {
     this.wave.phase = 'day';
-    this.wave.t = TUNING.pacing.dayPhaseDuration;
+    // On the wagon the prep is short: you are already rolling.
+    this.wave.t = this.level.type === 'wagon' ? 10 : TUNING.pacing.dayPhaseDuration;
     this.events.push({ e: 'day', n: this.wave.night + 1 });
     // On floor arrival the loot must spawn AFTER setLevel wipes the item
     // list (setLevel spawns it via pendingDayLoot), never before.
@@ -369,9 +433,17 @@ export class HostSim {
   }
 
   _nightCleared() {
-    if (this.wave.night % TUNING.pacing.nightsPerLevel === 0) {
-      this.wave.phase = 'elevator';
-      this.events.push({ e: 'elevator' });
+    this.wave.nightInLevel++;
+    // The wagon is a single-night set piece and has no elevator: once the
+    // night is beaten, the ride simply arrives.
+    const npl = this.level.type === 'wagon' ? 1 : TUNING.pacing.nightsPerLevel;
+    if (this.wave.nightInLevel >= npl) {
+      if (this.level.type === 'wagon' || !this.level.elevatorZone) {
+        this._enterRide();
+      } else {
+        this.wave.phase = 'elevator';
+        this.events.push({ e: 'elevator' });
+      }
     } else {
       this._enterDay();
     }
@@ -379,7 +451,7 @@ export class HostSim {
 
   _enterRide() {
     this.wave.phase = 'ride';
-    this.wave.t = 20;
+    this.wave.t = this.level.type === 'wagon' ? 6 : 20;
     for (const p of this.players.values()) p.ready = false;
     this.events.push({ e: 'ride' });
   }
@@ -539,6 +611,7 @@ export class HostSim {
       }
       case 'elevator': {
         const zone = this.level.elevatorZone;
+        if (!zone) { this._enterRide(); break; }
         let boarded = 0, standing = 0;
         for (const p of this.players.values()) {
           if (p.down) continue;
@@ -558,6 +631,7 @@ export class HostSim {
 
     if (wave.phase === 'night' || wave.phase === 'elevator') this._stepZombies(dt);
     this._stepGrenades(dt);
+    this._stepEffects(dt);
     this._stepMines(dt);
     this._stepPickups();
 
@@ -627,7 +701,7 @@ export class HostSim {
         const before = z.pos.clone();
         const to = goal.clone().sub(z.pos); to.y = 0;
         if (to.lengthSq() > 1e-6) {
-          to.normalize().multiplyScalar(stats.speed * dt);
+          to.normalize().multiplyScalar(stats.speed * this._cloudSlowAt(z.pos) * dt);
           z.pos.add(to);
           resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
         }
@@ -656,36 +730,107 @@ export class HostSim {
   }
 
   _stepGrenades(dt) {
-    const G = TUNING.weapons.fragGrenade;
     for (const g of [...this.grenades.values()]) {
       g.vel.y -= 9.8 * dt;
       g.pos.addScaledVector(g.vel, dt);
       const floor = this.level.heightAt(g.pos.x, g.pos.z) + 0.12;
+      let hitGround = false;
       if (g.pos.y < floor) {
         g.pos.y = floor;
         g.vel.y = Math.abs(g.vel.y) * 0.35;
         g.vel.x *= 0.6; g.vel.z *= 0.6;
+        hitGround = true;
       }
       g.fuse -= dt;
-      if (g.fuse <= 0) {
+      // Molotovs shatter on first ground contact; frags and smokes cook.
+      if ((g.kind === 'molotov' && hitGround) || g.fuse <= 0) {
         this.grenades.delete(g.id);
-        this.events.push({ e: 'boom', p: g.pos.toArray() });
-        for (const z of [...this.zombies.values()]) {
-          const dist = z.pos.distanceTo(g.pos);
-          if (dist > G.falloffRadius) continue;
-          const dmg = G.damageCenter + (G.damageAtEdge - G.damageCenter) * (dist / G.falloffRadius);
-          this.damageZombie(z, dmg, false, g.owner);
-        }
-        // Self damage for the thrower only (no friendly fire).
-        const owner = this.players.get(g.owner);
-        if (owner && !owner.down) {
-          const dist = owner.pos.distanceTo(g.pos);
-          if (dist < G.falloffRadius) {
-            this.damagePlayer(g.owner, Math.round(G.selfDamage * (1 - dist / G.falloffRadius)));
-          }
-        }
+        this._detonate(g);
       }
     }
+  }
+
+  _detonate(g) {
+    if (g.kind === 'smoke') {
+      const S = TUNING.weapons.smokeGrenade;
+      this.clouds.push({ pos: g.pos.clone(), t: S.cloudDuration });
+      this.events.push({ e: 'smoke', p: g.pos.toArray(), d: S.cloudDuration });
+      return;
+    }
+    if (g.kind === 'molotov') {
+      const M = TUNING.weapons.molotov;
+      this.fires.push({ pos: g.pos.clone(), t: M.burnDuration, tickT: 0 });
+      this.events.push({ e: 'fire', p: g.pos.toArray(), d: M.burnDuration });
+      return;
+    }
+    const G = TUNING.weapons.fragGrenade;
+    this.events.push({ e: 'boom', p: g.pos.toArray() });
+    for (const z of [...this.zombies.values()]) {
+      const dist = z.pos.distanceTo(g.pos);
+      if (dist > G.falloffRadius) continue;
+      const dmg = G.damageCenter + (G.damageAtEdge - G.damageCenter) * (dist / G.falloffRadius);
+      this.damageZombie(z, dmg, false, g.owner);
+    }
+    // Self damage for the thrower only (no friendly fire).
+    const owner = this.players.get(g.owner);
+    if (owner && !owner.down) {
+      const dist = owner.pos.distanceTo(g.pos);
+      if (dist < G.falloffRadius) {
+        this.damagePlayer(g.owner, Math.round(G.selfDamage * (1 - dist / G.falloffRadius)));
+      }
+    }
+  }
+
+  // Smoke clouds slow, fires burn, drones scout.
+  _stepEffects(dt) {
+    for (let i = this.clouds.length - 1; i >= 0; i--) {
+      this.clouds[i].t -= dt;
+      if (this.clouds[i].t <= 0) this.clouds.splice(i, 1);
+    }
+    const M = TUNING.weapons.molotov;
+    for (let i = this.fires.length - 1; i >= 0; i--) {
+      const f = this.fires[i];
+      f.t -= dt;
+      f.tickT += dt;
+      if (f.tickT >= 1) {
+        f.tickT -= 1;
+        for (const z of [...this.zombies.values()]) {
+          if (z.pos.distanceTo(f.pos) <= M.burnRadius) this.damageZombie(z, M.dps, false, null);
+        }
+      }
+      if (f.t <= 0) this.fires.splice(i, 1);
+    }
+    // Drones: fly to target, hover, ping the horde every 2 s.
+    for (const d of [...this.drones.values()]) {
+      if (d.phase === 'fly') {
+        const to = d.target.clone().sub(d.pos);
+        const dist = to.length();
+        if (dist < 0.4) { d.phase = 'hover'; d.hoverT = 10; d.pingT = 0; }
+        else d.pos.addScaledVector(to.normalize(), Math.min(dist, 8 * dt));
+      } else {
+        d.hoverT -= dt;
+        d.pingT -= dt;
+        if (d.pingT <= 0) {
+          d.pingT = 2;
+          let best = null, bd = Infinity;
+          for (const z of this.zombies.values()) {
+            const dz = z.pos.distanceToSquared(d.pos);
+            if (dz < bd && dz < 81) { bd = dz; best = z; }
+          }
+          if (best) this.events.push({ e: 'ping', p: best.pos.toArray(), by: 'drone' });
+        }
+        if (d.hoverT <= 0) this.drones.delete(d.id);
+      }
+    }
+  }
+
+  _cloudSlowAt(pos) {
+    for (const c of this.clouds) {
+      if (pos.distanceToSquared(c.pos) < TUNING.weapons.smokeGrenade.cloudRadius ** 2) {
+        return TUNING.weapons.smokeGrenade.slowFactor;
+      }
+    }
+    return 1;
   }
 
   _stepMines(dt) {
@@ -758,8 +903,13 @@ export class HostSim {
         +z.pos.x.toFixed(2), +z.pos.y.toFixed(2), +z.pos.z.toFixed(2), z.hp]);
     }
     const gs = [];
+    const GKINDS = ['frag', 'smoke', 'molotov'];
     for (const g of this.grenades.values()) {
-      gs.push([g.id, +g.pos.x.toFixed(2), +g.pos.y.toFixed(2), +g.pos.z.toFixed(2)]);
+      gs.push([g.id, +g.pos.x.toFixed(2), +g.pos.y.toFixed(2), +g.pos.z.toFixed(2), GKINDS.indexOf(g.kind || 'frag')]);
+    }
+    const ds = [];
+    for (const d of this.drones.values()) {
+      ds.push([d.id, +d.pos.x.toFixed(2), +d.pos.y.toFixed(2), +d.pos.z.toFixed(2)]);
     }
     const is = [];
     for (const item of this.items.values()) {
@@ -773,7 +923,7 @@ export class HostSim {
     const ev = this.events; this.events = [];
     const w = this.wave;
     return {
-      t: 'snap', ts, players, zs, gs, is, ms,
+      t: 'snap', ts, players, zs, gs, is, ms, ds,
       wave: { ph: w.phase, n: w.night, lv: w.level, t: Math.max(0, Math.ceil(w.t)), left: w.left },
       ev,
     };

@@ -25,9 +25,12 @@ export const PALETTE = {
   metal: 0x5a5d63, metalDark: 0x3a3d42, rust: 0x7d5636,
 };
 
-export const LEVEL_TYPES = ['ground', 'basement', 'upper'];
+// Six-level cycle keeps "ground roughly every 3rd" while weaving in the
+// Phase 2 set pieces: 1 ground, 2 basement, 3 upper, 4 ground, 5 trench
+// (tight, night, flashlight), 6 wagon (moving platform), then repeat.
+export const LEVEL_TYPES = ['ground', 'basement', 'upper', 'ground', 'trench', 'wagon'];
 export function levelTypeFor(levelIndex) {
-  return LEVEL_TYPES[(levelIndex - 1) % 3];
+  return LEVEL_TYPES[(levelIndex - 1) % LEVEL_TYPES.length];
 }
 
 const mat = (color, rough = 0.9, metal = 0.0) =>
@@ -458,6 +461,209 @@ function buildUpper(level, rng, quality) {
   // comes through the stairwell doors.
 }
 
+// ---- Trench (tight, night, flashlight) ----------------------------------
+// A serpentine dirt trench carved through a raised night field. Corridors
+// are the walkable cells; everything else is dirt wall (tall colliders).
+function buildTrench(level, rng) {
+  const g = level.group;
+  const A = Math.max(CONFIG.PLAY_AREA, 8);   // a trench needs room to zigzag
+  const half = A / 2;
+  level.floorY = 0;
+  level.heightAt = () => 0;
+  level.lighting = {
+    daySky: 0x141d30, dayHaze: 0x18223a,
+    fogNear: 6, fogFar: 55, sunDay: 0.0, hemiDay: 0.32, dark: true,
+  };
+
+  const dirtMat = mat(0x4e4436, 1.0);
+  const floorMat = mat(0x3c352b, 1.0);
+
+  // Floor of the whole trench area + raised field beyond
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 2, A + 2), floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  g.add(floor);
+  const field = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(0x2c3226, 1.0));
+  field.rotation.x = -Math.PI / 2;
+  field.position.y = 2.3;
+  g.add(field);
+  // Carve a hole illusion: the field plane sits above; the trench area is
+  // sunk. Rim walls around the whole area:
+  for (const [x, z, w, d] of [
+    [0, -half - 1, A + 4, 2], [0, half + 1, A + 4, 2],
+    [-half - 1, 0, 2, A + 4], [half + 1, 0, 2, A + 4]]) {
+    box(g, w, 2.4, d, dirtMat, x, 1.2, z);
+    level.colliders.push({ x, z, hx: w / 2, hz: d / 2, tall: true });
+  }
+
+  // Serpentine: three lanes (south, middle, north) joined by connectors at
+  // alternating ends. Dirt blocks fill the gaps between lanes.
+  const laneZ = [-A / 3, 0, A / 3];
+  const laneHalfW = 1.15;
+  const conn = rng.chance(0.5) ? [1, -1] : [-1, 1];   // connector x-sides
+  // Between lane 0-1 and 1-2, place a dirt block covering everything
+  // except the connector opening.
+  for (let i = 0; i < 2; i++) {
+    const zMid = (laneZ[i] + laneZ[i + 1]) / 2;
+    const gapX = conn[i] * (half - 1.6);
+    const blockD = (laneZ[i + 1] - laneZ[i]) - laneHalfW * 2;
+    // Two blocks: from -half to gap-1.4, and gap+1.4 to half
+    const leftW = (gapX - 1.4) - (-half);
+    if (leftW > 0.5) {
+      const cx = -half + leftW / 2;
+      box(g, leftW, 2.4, blockD, dirtMat, cx, 1.2, zMid);
+      level.colliders.push({ x: cx, z: zMid, hx: leftW / 2, hz: blockD / 2, tall: true });
+    }
+    const rightW = half - (gapX + 1.4);
+    if (rightW > 0.5) {
+      const cx = gapX + 1.4 + rightW / 2;
+      box(g, rightW, 2.4, blockD, dirtMat, cx, 1.2, zMid);
+      level.colliders.push({ x: cx, z: zMid, hx: rightW / 2, hz: blockD / 2, tall: true });
+    }
+  }
+
+  // Duckboards, crates, a flare or two
+  for (let i = 0; i < 3; i++) {
+    const lane = rng.int(0, 2);
+    const x = rng.range(-half + 2, half - 2);
+    box(g, 1.2, 0.06, 1.8, mat(PALETTE.wood, 1.0), x, 0.04, laneZ[lane]);
+  }
+  for (const i of [0, 1]) {
+    const x = rng.range(-half + 2, half - 2);
+    const z = laneZ[rng.int(0, 2)];
+    const flare = new THREE.PointLight(0xff7030, 1.6, 8);
+    flare.position.set(x, 0.3, z);
+    g.add(flare);
+    box(g, 0.05, 0.25, 0.05, mat(0xff5020, 0.5), x, 0.12, z);
+  }
+
+  // Entries: the two open lane-ends without the elevator; elevator takes
+  // the south-west lane end.
+  level.elevator = makeElevator();
+  level.elevator.group.position.set(-half + 1.2, 0, laneZ[0]);
+  level.elevator.group.rotation.y = Math.PI / 2;   // doors face +X into the lane
+  g.add(level.elevator.group);
+  addElevatorColliders(level, -half + 1.2, laneZ[0]);
+  level.elevatorZone = { x: -half + 3.0, z: laneZ[0], hx: 1.2, hz: 1.0 };
+
+  for (const e of [[half - 0.6, laneZ[0]], [-half + 0.6, laneZ[2]], [half - 0.6, laneZ[2]]]) {
+    const entry = new THREE.Vector3(e[0], 0, e[1]);
+    level.entries.push(entry);
+    level.zombieSpawns.push(entry.clone());
+  }
+
+  const qt = half * 0.25;
+  level.playerSpawns = [
+    new THREE.Vector3(0, 0, laneZ[1]), new THREE.Vector3(qt, 0, laneZ[1]),
+    new THREE.Vector3(-qt, 0, laneZ[1]), new THREE.Vector3(0, 0, laneZ[0]),
+    new THREE.Vector3(qt, 0, laneZ[0]),
+  ];
+}
+
+// ---- Wagon (moving platform) --------------------------------------------
+// A flatbed rail wagon rolling through the night wasteland. Players stand
+// on the bed; the world scrolls past; zombies lunge in over the open ends.
+function buildWagon(level, rng) {
+  const g = level.group;
+  const A = CONFIG.PLAY_AREA;
+  const W = Math.max(3, Math.min(A * 0.8, 5));    // bed width
+  const L = Math.max(6, A);                       // bed length
+  level.floorY = 0.5;
+  level.heightAt = (x, z) => (Math.abs(x) < W / 2 && Math.abs(z) < L / 2 ? 0.5 : 0);
+  level.lighting = {
+    daySky: 0x2c3450, dayHaze: 0x2a3048,
+    fogNear: 25, fogFar: 160, sunDay: 0.5, hemiDay: 0.5, dark: false,
+  };
+
+  // Bed, rails, wheels
+  const bed = box(g, W, 0.24, L, mat(PALETTE.wood, 0.95), 0, 0.38, 0);
+  bed.receiveShadow = false;
+  const railMat = mat(PALETTE.metalDark, 0.5, 0.6);
+  for (const dx of [-0.8, 0.8]) {
+    box(g, 0.12, 0.1, 400, railMat, dx, 0.05, 0);
+  }
+  for (const dz of [-L / 3, L / 3]) {
+    for (const dx of [-0.8, 0.8]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.1, 10), railMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(dx, 0.28, dz);
+      g.add(wheel);
+    }
+  }
+  // Side railings: low, block walking off the sides (not the ends)
+  for (const dx of [-W / 2, W / 2]) {
+    box(g, 0.08, 0.85, L, mat(PALETTE.rust, 0.8), dx, 0.92, 0);
+    level.colliders.push({ x: dx, z: 0, hx: 0.06, hz: L / 2, tall: false });
+  }
+  // A crate to duck behind
+  box(g, 1.0, 0.9, 1.0, mat(PALETTE.wood), 0, 0.95, 0);
+  level.colliders.push({ x: 0, z: 0, hx: 0.5, hz: 0.5, tall: false });
+  // Lantern on a pole
+  const lamp = new THREE.PointLight(0xffd9a0, 1.2, 10);
+  lamp.position.set(0, 2.4, -L / 4);
+  g.add(lamp);
+  box(g, 0.06, 2.0, 0.06, railMat, 0, 1.4, -L / 4);
+
+  // Scrolling scenery: two long ground segments leapfrogging along Z,
+  // dressed with hills/ruins. level.tick(dt) drives the motion.
+  const SEG = 220;
+  const segs = [];
+  for (let i = 0; i < 2; i++) {
+    const seg = new THREE.Group();
+    const groundPlane = new THREE.Mesh(new THREE.PlaneGeometry(400, SEG), mat(PALETTE.sand));
+    groundPlane.rotation.x = -Math.PI / 2;
+    groundPlane.position.y = -0.02;
+    seg.add(groundPlane);
+    const segRng = makeRng(1000 + i);
+    for (let h = 0; h < 5; h++) {
+      const hill = new THREE.Mesh(
+        new THREE.ConeGeometry(segRng.range(30, 70), segRng.range(10, 24), 7),
+        mat(PALETTE.hills));
+      hill.position.set(segRng.pick([-1, 1]) * segRng.range(40, 120), 0, segRng.range(-SEG / 2, SEG / 2));
+      seg.add(hill);
+    }
+    for (let r = 0; r < 3; r++) {
+      const w = segRng.range(6, 12), hh = segRng.range(6, 16), d = segRng.range(6, 12);
+      const ruin = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), mat(0x6f675c));
+      ruin.position.set(segRng.pick([-1, 1]) * segRng.range(12, 60), hh / 2, segRng.range(-SEG / 2, SEG / 2));
+      seg.add(ruin);
+    }
+    for (let t = 0; t < 4; t++) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 5, 5), mat(0x4a4038));
+      pole.position.set(segRng.pick([-1, 1]) * 3.2, 2.5, segRng.range(-SEG / 2, SEG / 2));
+      seg.add(pole);
+    }
+    seg.position.z = -i * SEG;
+    g.add(seg);
+    segs.push(seg);
+  }
+  const SPEED = 9;   // m/s, forward = -Z
+  level.tick = (dt) => {
+    for (const seg of segs) {
+      seg.position.z += SPEED * dt;
+      if (seg.position.z > SEG) seg.position.z -= SEG * 2;
+    }
+  };
+
+  // No elevator on a wagon: the ride simply arrives (state.js handles it).
+  level.elevator = null;
+  level.elevatorZone = null;
+
+  // Zombies vault in over the open ends of the bed.
+  for (const ez of [-L / 2 - 1.5, L / 2 + 1.5]) {
+    const entry = new THREE.Vector3(0, 0, ez);
+    level.entries.push(entry);
+    level.zombieSpawns.push(entry.clone());
+    level.zombieSpawns.push(new THREE.Vector3(1.5, 0, ez * 1.2));
+    level.zombieSpawns.push(new THREE.Vector3(-1.5, 0, ez * 1.2));
+  }
+
+  level.playerSpawns = [
+    new THREE.Vector3(0, 0.5, 1.5), new THREE.Vector3(0.8, 0.5, -1.5),
+    new THREE.Vector3(-0.8, 0.5, -1.5), new THREE.Vector3(0.8, 0.5, 1.5),
+    new THREE.Vector3(-0.8, 0.5, 2.5),
+  ];
+}
+
 // ---- Entry point --------------------------------------------------------
 export function buildLevel(scene, quality, runSeed, levelIndex) {
   const type = levelTypeFor(levelIndex);
@@ -471,7 +677,9 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
   };
   if (type === 'ground') buildGround(level, rng, quality);
   else if (type === 'basement') buildBasement(level, rng);
-  else buildUpper(level, rng, quality);
+  else if (type === 'upper') buildUpper(level, rng, quality);
+  else if (type === 'trench') buildTrench(level, rng);
+  else buildWagon(level, rng);
   scene.add(level.group);
   return level;
 }

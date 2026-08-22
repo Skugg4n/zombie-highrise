@@ -45,6 +45,17 @@ export const TUNING = {
     smg: { damage: 1, pellets: 1, magazine: 30, reserveMax: 240, fireCooldown: 0.09, reloadTime: 2.0, auto: true, spreadDeg: 2.5, name: 'SMG' },
     machete: { damage: 3, range: 1.75, arcDegrees: 100, swingCooldown: 0.8, name: 'MACHETE' },
     fragGrenade: { fuseTime: 3.0, damageCenter: 15, falloffRadius: 4.0, damageAtEdge: 3, selfDamage: 25, friendlyFire: false, throwSpeed: 12 },
+    // ---- Weapon roster v2 (Phase 2) ------------------------------------
+    // AK: heavier auto than the SMG (2-shots a walker, 10-shots a brute),
+    // the late-run workhorse. Akimbo doubles the pistol's rate with a
+    // bigger pooled mag, still infinite reserve: the broke player's DPS
+    // upgrade. Smoke slows the horde (kiting/revive tool), molotov burns
+    // an area over time (choke-point tool).
+    ak: { damage: 1.5, pellets: 1, magazine: 30, reserveMax: 180, fireCooldown: 0.115, reloadTime: 2.4, auto: true, spreadDeg: 2.0, name: 'AK' },
+    akimbo: { damage: 1, pellets: 1, magazine: 16, reserveMax: Infinity, fireCooldown: 0.2, reloadTime: 2.0, auto: false, spreadDeg: 1.6, name: 'DUAL PISTOLS' },
+    smokeGrenade: { fuseTime: 1.5, cloudRadius: 3.0, cloudDuration: 8, slowFactor: 0.4, throwSpeed: 11 },
+    molotov: { fuseTime: 0.0, burnRadius: 2.2, burnDuration: 5, dps: 3, throwSpeed: 11 },
+    nightVision: { batterySeconds: 30, rechargePerDaySecond: 1.0 },
   },
 
   // ---- 4. Economy -------------------------------------------------------
@@ -64,7 +75,16 @@ export const TUNING = {
       healthPack: 75,
       mine: 50,                    // hand-placed during the day
       grenadePack: 60,             // 2 frags
+      // v2 gear: AK lands at elevator 3-4 for a solo buyer, akimbo is the
+      // cheap slot-1 upgrade, utility throwables stay impulse-priced.
+      ak: 650,                     // comes with a full 90-round load
+      ammoRefillAk: 110,           // +90 rounds
+      akimbo: 300,                 // permanent slot-1 upgrade
+      smokePack: 50,               // 2 smoke grenades
+      molotovPack: 70,             // 2 molotovs
+      nightVision: 500,            // permanent device, battery per night
     },
+    droneDeploy: 40,               // tactical map: scout drone, one flight
     minePlacementFromMap: 65,      // remote placement pays a convenience premium
     mine: { triggerRadius: 0.6, blastRadius: 2.5, damage: 12 },
   },

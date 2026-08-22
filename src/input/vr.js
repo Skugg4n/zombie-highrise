@@ -14,7 +14,7 @@ import { makeWeaponMesh } from '../world/weapons3d.js';
 
 // Quest touch controller gamepad button indices (xr-standard mapping):
 // 0 trigger, 1 squeeze, 3 stick press, 4 A/X, 5 B/Y.
-const BTN_AX = 4, BTN_BY = 5;
+const BTN_STICK = 3, BTN_AX = 4, BTN_BY = 5;
 
 export class VRInput {
   constructor(ctx) {
@@ -181,11 +181,13 @@ export class VRInput {
       this.prevButtons.set(src, now);
       const pressed = (i) => now[i] && !prev[i];
       if (src.handedness === 'right') {
-        if (pressed(BTN_AX)) this.ctx.actions.cycle();      // A
-        if (pressed(BTN_BY)) this._grenadeFrom(src);        // B
+        if (pressed(BTN_AX)) this.ctx.actions.cycle();          // A
+        if (pressed(BTN_BY)) this._grenadeFrom(src);            // B
+        if (pressed(BTN_STICK)) this.ctx.actions.throwCycle();  // R-stick press
       } else if (src.handedness === 'left') {
-        if (pressed(BTN_AX)) this.ctx.actions.pack();       // X
-        if (pressed(BTN_BY)) this.ctx.actions.flashlight(); // Y
+        if (pressed(BTN_AX)) this.ctx.actions.pack();           // X
+        if (pressed(BTN_BY)) this.ctx.actions.flashlight();     // Y
+        if (pressed(BTN_STICK)) this.ctx.actions.nightVision(); // L-stick press
       }
 
       if (gp.axes.length < 4) continue;

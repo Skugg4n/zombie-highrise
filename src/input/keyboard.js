@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { TUNING } from '../game/tuning.js';
 
-const SLOT_KEYS = { Digit1: 'pistol', Digit2: 'shotgun', Digit3: 'smg', Digit4: 'machete' };
+const SLOT_KEYS = { Digit1: 'pistol', Digit2: 'shotgun', Digit3: 'smg', Digit4: 'machete', Digit5: 'ak' };
 
 export class KeyboardInput {
   constructor(ctx) {
@@ -24,6 +24,8 @@ export class KeyboardInput {
       else if (e.code === 'KeyF') act.flashlight();
       else if (e.code === 'KeyM') act.map();
       else if (e.code === 'KeyT') act.mine();
+      else if (e.code === 'KeyV') act.throwCycle();
+      else if (e.code === 'KeyN') act.nightVision();
       else if (SLOT_KEYS[e.code]) act.switchTo(SLOT_KEYS[e.code]);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

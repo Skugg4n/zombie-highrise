@@ -25,7 +25,7 @@ export class TouchInput {
     const fireBtn = document.getElementById('btn-fire');
     this.ui.classList.remove('hidden');
     fireBtn.style.display = 'block';
-    document.getElementById('touch-actions').style.display = 'flex';
+    document.getElementById('touch-actions').style.display = 'grid';
 
     const bind = (id, fn) => {
       document.getElementById(id).addEventListener('touchstart', (e) => {
@@ -37,6 +37,8 @@ export class TouchInput {
     bind('btn-reload', () => ctx.actions.reload());
     bind('btn-grenade', () => ctx.actions.grenade());
     bind('btn-pack', () => ctx.actions.pack());
+    bind('btn-swap', () => ctx.actions.throwCycle());
+    bind('btn-nv', () => ctx.actions.nightVision());
     bind('btn-map', () => ctx.actions.map());
 
     stickZone.addEventListener('touchstart', (e) => {

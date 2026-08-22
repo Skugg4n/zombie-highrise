@@ -32,6 +32,22 @@ export function makeWeaponMesh(kind) {
       part(g, new THREE.BoxGeometry(0.032, 0.09, 0.045), tape(), 0, -0.06, 0.09, 0.25);
       break;
     }
+    case 'ak': {
+      part(g, new THREE.BoxGeometry(0.05, 0.07, 0.42), metal(), 0, 0, -0.1);
+      part(g, new THREE.CylinderGeometry(0.014, 0.014, 0.22, 8), metal(), 0, 0.015, -0.4, Math.PI / 2);
+      part(g, new THREE.BoxGeometry(0.045, 0.06, 0.16), wood(), 0, -0.005, 0.2);       // stock
+      part(g, new THREE.BoxGeometry(0.045, 0.05, 0.14), wood(), 0, -0.01, -0.32);      // foregrip
+      const mag = part(g, new THREE.BoxGeometry(0.035, 0.16, 0.07), metal(), 0, -0.11, -0.06);
+      mag.rotation.x = 0.5;                                                            // curved mag hint
+      break;
+    }
+    case 'akimbo': {
+      for (const dx of [-0.09, 0.09]) {
+        part(g, new THREE.BoxGeometry(0.035, 0.045, 0.16), metal(), dx, 0.015, -0.05);
+        part(g, new THREE.BoxGeometry(0.032, 0.09, 0.045), wood(), dx, -0.045, 0.02, 0.25);
+      }
+      break;
+    }
     case 'machete': {
       part(g, new THREE.BoxGeometry(0.012, 0.07, 0.42), metal(), 0, 0.02, -0.24);
       part(g, new THREE.BoxGeometry(0.03, 0.045, 0.13), tape(), 0, -0.02, 0.05, 0.2);

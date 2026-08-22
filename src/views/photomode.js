@@ -1,10 +1,10 @@
 // Photo mode (?photomode=N): deterministic boot (fixed seed, fixed poses,
 // fixed camera) so the critic loop compares like for like.
 // 1 ground-level exterior day     6 balcony vista (upper floor level)
-// 2 basement corridor flashlight  7 trench at night (placeholder until Phase 2)
+// 2 basement corridor flashlight  7 trench at night (trench level)
 // 3 elevator interior             8 HUD in action
 // 4 tactical view                 9 debug texture atlas check
-// Modes 2 and 6 boot their own level type (see PHOTO_LEVEL in main.js).
+// Modes 2, 6 and 7 boot their own level type (see PHOTO_LEVEL in main.js).
 import * as THREE from 'three';
 import { applyDebugAtlas } from '../world/debugatlas.js';
 
@@ -12,7 +12,7 @@ const STATIC_PRESETS = {
   1: { pos: [10, 1.7, 12], look: [0, 1.2, 0] },
   4: { pos: [0, 42, 0.01], look: [0, 0, 0] },
   5: { pos: [-4, 1.6, -5], look: [-20, 1.0, 18] },   // looking out at the approach
-  7: { pos: [-7, 1.4, 6], look: [-30, 0.8, 20] },
+  7: { pos: [3, 1.4, -4], look: [-8, 0.6, -4] },   // down a trench lane, flare-lit
   8: { pos: [1, 1.7, 5], look: [-8, 1.0, -6] },
   9: { pos: [8, 3.5, 10], look: [0, 0.8, 0] },
 };
@@ -53,7 +53,7 @@ export const PHOTO_ZOMBIES = {
       ['runner', -12, 16, 0, 0, 2.4], ['walker', -20, 10, 0, 0, 3.1],
       ['brute', -16, 19, 0, 0, 0.2], ['walker', -22, 14, 0, 0, 1.1]],
   6: [['runner', 2.5, 4.5, 0, 2, 1.4]],
-  7: [['walker', -12, 10, 0, 0, 0.9]],
+  7: [['walker', -2, -4, 3, -4, 0.9]],
   8: [['walker', -6, -4, 1, 5, 1.5], ['runner', -8, -7, 1, 5, 0.4]],
   9: [['walker', 2, 2, 8, 10, 1.0]],
 };

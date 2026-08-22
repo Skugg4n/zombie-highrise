@@ -7,7 +7,8 @@
 //   desktop R key, mobile RELOAD button, VR grip squeeze.
 import { TUNING } from './tuning.js';
 
-export const GUN_SLOTS = ['pistol', 'shotgun', 'smg', 'machete'];
+export const GUN_SLOTS = ['pistol', 'akimbo', 'shotgun', 'smg', 'ak', 'machete'];
+export const THROWABLES = ['frag', 'smoke', 'molotov'];
 
 export class Arsenal {
   constructor({ dispatch, onHudChange, effects }) {
@@ -20,8 +21,12 @@ export class Arsenal {
       pistol: { mag: TUNING.weapons.pistol.magazine, reserve: Infinity },
     };
     this.grenades = 1;
+    this.smokes = 0;
+    this.molotovs = 0;
+    this.throwSel = 'frag';
     this.packs = 0;
     this.mines = 0;
+    this.nightVision = false;
     this.cooldown = 0;
     this.reloading = false;
     this.reloadT = 0;
@@ -35,8 +40,11 @@ export class Arsenal {
     if (!inv) return;
     this.owned = inv.w.slice();
     this.grenades = inv.g;
+    this.smokes = inv.gs || 0;
+    this.molotovs = inv.gm || 0;
     this.packs = inv.k;
     this.mines = inv.m || 0;
+    this.nightVision = !!inv.nv;
     for (const [w, pair] of Object.entries(inv.a)) {
       const mine = this.ammo[w] || (this.ammo[w] = { mag: 0, reserve: 0 });
       // While a local reload is in flight the local mag view is ahead of
@@ -54,6 +62,8 @@ export class Arsenal {
 
   // ---- Actions ---------------------------------------------------------
   switchTo(w) {
+    // Slot 1 prefers the akimbo upgrade once owned.
+    if (w === 'pistol' && this.owned.includes('akimbo') && this.active !== 'akimbo') w = 'akimbo';
     if (!this.owned.includes(w) || w === this.active) return;
     this.active = w;
     this.reloading = false;
@@ -104,11 +114,31 @@ export class Arsenal {
     this.onHudChange();
   }
 
+  throwCount(kind = this.throwSel) {
+    return kind === 'smoke' ? this.smokes : kind === 'molotov' ? this.molotovs : this.grenades;
+  }
+
+  cycleThrowable() {
+    const idx = THROWABLES.indexOf(this.throwSel);
+    for (let i = 1; i <= THROWABLES.length; i++) {
+      const next = THROWABLES[(idx + i) % THROWABLES.length];
+      if (this.throwCount(next) > 0 || i === THROWABLES.length) {
+        this.throwSel = next;
+        break;
+      }
+    }
+    this.onHudChange();
+  }
+
   throwGrenade(origin, dir) {
-    if (this.grenades <= 0 || this.cooldown > 0) return;
-    this.grenades--;
+    if (this.cooldown > 0) return;
+    if (this.throwCount() <= 0) { this.cycleThrowable(); if (this.throwCount() <= 0) return; }
+    const kind = this.throwSel;
+    if (kind === 'smoke') this.smokes--;
+    else if (kind === 'molotov') this.molotovs--;
+    else this.grenades--;
     this.cooldown = 0.5;
-    this.dispatch({ t: 'throwG', o: origin.toArray(), d: dir.toArray() });
+    this.dispatch({ t: 'throwG', kind, o: origin.toArray(), d: dir.toArray() });
     this.effects.throw();
     this.onHudChange();
   }
@@ -156,14 +186,19 @@ export class Arsenal {
 
   hudInfo() {
     const w = this.active;
+    const common = {
+      grenades: this.grenades, smokes: this.smokes, molotovs: this.molotovs,
+      throwSel: this.throwSel, throwCount: this.throwCount(),
+      packs: this.packs, mines: this.mines, nightVision: this.nightVision,
+    };
     if (!this.isGun(w)) {
-      return { name: 'MACHETE', mag: null, reserve: null, reloading: false, grenades: this.grenades, packs: this.packs, mines: this.mines };
+      return { name: 'MACHETE', mag: null, reserve: null, reloading: false, ...common };
     }
     const a = this.ammo[w] || { mag: 0, reserve: 0 };
     return {
       name: this.def(w).name, mag: a.mag,
       reserve: a.reserve === Infinity ? -1 : a.reserve,
-      reloading: this.reloading, grenades: this.grenades, packs: this.packs, mines: this.mines,
+      reloading: this.reloading, ...common,
     };
   }
 }

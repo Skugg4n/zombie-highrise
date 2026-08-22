@@ -292,6 +292,27 @@ for (const vp of VIEWPORTS) {
 }
 await galleryCtx.close();
 
+// ---- 2b. Every level type generates and renders --------------------------
+console.log('LEVEL TYPES');
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  await ctx.addInitScript(XR_STUB);
+  const page = await newPage(ctx, 'leveltypes', errs);
+  await page.goto(`${BASE}/?seed=42`);
+  await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
+  await page.click('#btn-solo');
+  await page.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
+  for (const [n, expect] of [[2, 'basement'], [3, 'upper'], [4, 'ground'], [5, 'trench'], [6, 'wagon']]) {
+    await page.evaluate((lv) => window.__zhr.debugGotoLevel(lv), n);
+    await page.waitForTimeout(250);
+    const type = await page.evaluate(() => window.__zhr.levelType());
+    const info = await page.evaluate(() => window.__zhr.renderInfo());
+    note(type === expect && info.calls > 0,
+      `level ${n} (${type}) renders (${info.calls} calls, ${info.triangles} tris)`);
+  }
+  await ctx.close();
+}
+
 // ---- 3. Photomode boot ---------------------------------------------------
 console.log('PHOTOMODE');
 const photoCtx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });

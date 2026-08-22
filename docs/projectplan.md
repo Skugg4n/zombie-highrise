@@ -42,12 +42,12 @@ expensive.
 
 ## Phase 2 - Roles and depth
 
-- [ ] Drone the tactician sends to unreachable zones
-- [ ] Moving platform section (train or wagon between areas)
-- [ ] Weapon roster v2: AK-style rifle, dual pistols, smoke and fire
+- [x] Drone the tactician sends to unreachable zones
+- [x] Moving platform section (train or wagon between areas)
+- [x] Weapon roster v2: AK-style rifle, dual pistols, smoke and fire
       grenades, night vision device (grainy green, limited battery)
-- [ ] Meta progression in localStorage (permanent unlocks)
-- [ ] Trench sections between bases (tight, flashlight, night)
+- [x] Meta progression in localStorage (permanent unlocks)
+- [x] Trench sections between bases (tight, flashlight, night)
 
 ## Phase 3 - The polish loop (sub-agent critics, see KICKOFF-PROMPT.md)
 

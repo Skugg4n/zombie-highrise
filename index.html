@@ -39,6 +39,11 @@
   #ui .layer-overlays { position: absolute; inset: 0; z-index: 300; pointer-events: none; }
   #ui .layer-debug    { position: absolute; inset: 0; z-index: 900; pointer-events: none; }
 
+  /* The shop grew past a single column; grid keeps it on one screen */
+  #panel-shop { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #panel-shop h2, #panel-shop #shop-status, #panel-shop #btn-shop-ready { grid-column: 1 / -1; }
+  #panel-shop .shop-item { font-size: 12px; padding: 10px 8px; min-height: 42px; }
+
   .panel {
     pointer-events: auto;
     position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
@@ -118,6 +123,16 @@
   #hud-wave { left: 50%; transform: translateX(-50%); top: max(10px, env(safe-area-inset-top)); font-size: 13px; opacity: 0.85; }
   #hud-room { left: max(14px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); font-size: 12px; opacity: 0.8; }
   #hud-scrap { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 18px); font-size: 12px; color: var(--accent); }
+  #hud-nv { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 52px); font-size: 12px; }
+
+  /* Night vision overlay (flat modes): green cast + vignette + scanlines */
+  #nv-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse at center, rgba(30,255,90,0.10) 0%, rgba(10,60,20,0.42) 100%);
+    mix-blend-mode: normal;
+  }
 
   /* Tactical map toolbar (HUD layer) */
   #map-ui {
@@ -169,7 +184,7 @@
   #touch-actions {
     position: absolute; right: max(22px, env(safe-area-inset-right));
     bottom: calc(max(14px, env(safe-area-inset-bottom)) + 196px);
-    display: none; flex-direction: column; gap: 10px; pointer-events: auto;
+    display: none; grid-template-columns: 1fr 1fr; gap: 8px; pointer-events: auto;
   }
   #touch-actions button {
     width: 58px; height: 46px; border-radius: 10px; font-size: 11px;
@@ -217,8 +232,10 @@
       <div id="map-ui" class="hidden">
         <button id="btn-map-ping" class="small on">PING</button>
         <button id="btn-map-mine" class="small">MINE - 65</button>
+        <button id="btn-map-drone" class="small">DRONE - 40</button>
         <button id="btn-map-close" class="small">CLOSE MAP</button>
       </div>
+      <div id="nv-overlay" class="hidden"></div>
       <div id="countdown" class="hidden"></div>
       <div id="downed-note" class="hidden">DOWNED - a teammate close to you revives you</div>
       <div id="hud-room" class="hud-box" data-smoke>ROOM ----</div>
@@ -228,6 +245,7 @@
       <div id="hud-weapon" class="hud-box" data-smoke>PISTOL</div>
       <div id="hud-items" class="hud-box" data-smoke>G 1 &nbsp; P 0</div>
       <div id="hud-scrap" class="hud-box" data-smoke>SCRAP 25</div>
+      <div id="hud-nv" class="hud-box hidden">NV 30s</div>
       <div id="touch-ui" class="hidden">
         <div id="stick-zone"><div id="stick-base"></div><div id="stick-nub"></div></div>
         <div id="look-zone"></div>
@@ -237,6 +255,8 @@
           <button id="btn-reload">RELOAD</button>
           <button id="btn-grenade">NADE</button>
           <button id="btn-pack">PACK</button>
+          <button id="btn-swap">SWAP</button>
+          <button id="btn-nv" class="hidden">NV</button>
           <button id="btn-map">MAP</button>
         </div>
       </div>
@@ -252,6 +272,7 @@
       <button id="btn-join" data-smoke>JOIN A ROOM</button>
       <button id="btn-solo" class="secondary" data-smoke>PRACTICE SOLO</button>
       <div id="menu-status" class="status"></div>
+      <div id="menu-meta" class="status" style="opacity:0.65"></div>
     </div>
 
     <div id="panel-hosting" class="panel hidden">
@@ -312,6 +333,12 @@
       <button class="secondary shop-item" data-item="healthPack" data-smoke>HEALTH PACK - 75</button>
       <button class="secondary shop-item" data-item="grenadePack" data-smoke>2 GRENADES - 60</button>
       <button class="secondary shop-item" data-item="mine" data-smoke>MINE - 50</button>
+      <button class="secondary shop-item" data-item="ak" data-smoke>AK - 650</button>
+      <button class="secondary shop-item" data-item="ammoRefillAk" data-smoke>AK AMMO +90 - 110</button>
+      <button class="secondary shop-item" data-item="akimbo" data-smoke>DUAL PISTOLS - 300</button>
+      <button class="secondary shop-item" data-item="smokePack" data-smoke>2 SMOKES - 50</button>
+      <button class="secondary shop-item" data-item="molotovPack" data-smoke>2 MOLOTOVS - 70</button>
+      <button class="secondary shop-item" data-item="nightVision" data-smoke>NIGHT VISION - 500</button>
       <button id="btn-shop-ready" data-smoke>READY - NEXT FLOOR</button>
     </div>
     <div id="panel-gameover" class="panel hidden">

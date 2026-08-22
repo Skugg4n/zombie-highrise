@@ -1,5 +1,28 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.6.0 - 2026-08-22 19:40
+
+Phase 2 complete: roles and depth. Why: projectplan Phase 2 items.
+
+- Weapon roster v2: AK (heavy auto, 650 scrap), dual pistols (slot-1
+  upgrade, both hands fire in VR), smoke grenades (slow cloud, 8 s),
+  molotovs (burning patch, shatters on impact), night vision device
+  (green light + grain overlay, 30 s battery, recharges by day; N key /
+  NV button / left-stick press in VR). V / SWAP / right-stick press
+  cycles the selected throwable.
+- Scout drone from the tactical map (40 scrap): flies to the target,
+  hovers 10 s, pings the nearest zombie every 2 s.
+- New level types in a 6-floor cycle (ground, basement, upper, ground,
+  trench, wagon): the TRENCH (serpentine night trench, flares, flashlight,
+  tight lanes) and the WAGON (moving flatbed platform: scenery scrolls
+  past, zombies vault in over the open ends, single night, no shop, the
+  ride simply arrives).
+- Meta progression in localStorage (versioned schema): best nights/floor,
+  total kills, run count, veteran scrap bonus (+25 at 4 nights, +50 at 8)
+  that each device brings to any room it joins; record line in the menu.
+- Shop restyled as a two-column grid with the six new items.
+- Smoke test now generates and renders all six level types.
+
 ## v0.5.1 - 2026-08-22 18:30
 
 Fixes from the 35-agent adversarial review of Phase 1 (28 confirmed

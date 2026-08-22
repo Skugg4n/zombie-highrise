@@ -15,6 +15,7 @@ import { TUNING } from './game/tuning.js';
 import { Arsenal } from './game/arsenal.js';
 import { makeWeaponMesh, makeItemMesh } from './world/weapons3d.js';
 import { Replica } from './game/replica.js';
+import { meta } from './game/meta.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { TouchInput } from './input/touch.js';
 import { VRInput } from './input/vr.js';
@@ -105,7 +106,7 @@ function updateDayNight(force = false) {
 // ---- Level lifecycle ----------------------------------------------------
 // All peers build identical geometry from (runSeed, levelIndex); the host
 // picks the seed and hands it out in the welcome message.
-const PHOTO_LEVEL = { 2: 2, 6: 3 };
+const PHOTO_LEVEL = { 2: 2, 6: 3, 7: 5 };
 let runSeed = (PHOTOMODE || UISTATE) ? 1337
   : (parseInt(PARAMS.get('seed') || '0', 10) || ((Math.random() * 1e9) >>> 0));
 let levelIndex = PHOTOMODE ? (PHOTO_LEVEL[PHOTOMODE] || 1) : 1;
@@ -309,14 +310,18 @@ function updateItemVisuals(rows, dt) {
   }
 }
 
+const GRENADE_TINTS = [0x3f4a38, 0x8a8f98, 0xc07830];   // frag, smoke, molotov
 function updateGrenadeVisuals(rows) {
   const keep = new Set();
-  for (const [id, x, y, z] of rows) {
+  for (const [id, x, y, z, kind] of rows) {
     keep.add(id);
     let m = grenadeVisuals.get(id);
     if (!m) {
       m = makeWeaponMesh('grenade');
       m.scale.setScalar(1.4);
+      m.traverse((o) => {
+        if (o.isMesh && o.material.color) o.material.color.setHex(GRENADE_TINTS[kind || 0] || GRENADE_TINTS[0]);
+      });
       grenadeVisuals.set(id, m);
       scene.add(m);
     }
@@ -324,6 +329,99 @@ function updateGrenadeVisuals(rows) {
   }
   for (const [id, m] of grenadeVisuals) {
     if (!keep.has(id)) { scene.remove(m); grenadeVisuals.delete(id); }
+  }
+}
+
+// ---- Smoke clouds, fire patches, drones ---------------------------------
+const smokeVisuals = [];   // {mesh, t, d}
+const fireVisuals = [];    // {group, light, t, d}
+const droneVisuals = new Map();
+
+function spawnSmokeVisual(p, duration) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(TUNING.weapons.smokeGrenade.cloudRadius, 14, 10),
+    new THREE.MeshBasicMaterial({ color: 0x9aa0a8, transparent: true, opacity: 0.38, depthWrite: false }));
+  mesh.position.set(p[0], p[1] + 1.0, p[2]);
+  scene.add(mesh);
+  smokeVisuals.push({ mesh, t: duration, d: duration });
+}
+
+function spawnFireVisual(p, duration) {
+  const group = new THREE.Group();
+  const light = new THREE.PointLight(0xff8830, 4, 7, 1.6);
+  light.position.y = 0.6;
+  group.add(light);
+  for (let i = 0; i < 5; i++) {
+    const flame = new THREE.Mesh(
+      new THREE.ConeGeometry(0.22, 0.7, 5),
+      new THREE.MeshBasicMaterial({ color: i % 2 ? 0xffa030 : 0xff5010, transparent: true, opacity: 0.85 }));
+    const a = (i / 5) * Math.PI * 2;
+    flame.position.set(Math.cos(a) * 0.8, 0.3, Math.sin(a) * 0.8);
+    group.add(flame);
+  }
+  group.position.set(p[0], p[1], p[2]);
+  scene.add(group);
+  fireVisuals.push({ group, light, t: duration, d: duration });
+}
+
+function makeDroneMesh() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0x2e3236, roughness: 0.5, metalness: 0.5 }));
+  g.add(body);
+  const rotors = new THREE.Group();
+  for (const [dx, dz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2]]) {
+    const r = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.015, 8),
+      new THREE.MeshBasicMaterial({ color: 0x888d94, transparent: true, opacity: 0.5 }));
+    r.position.set(dx, 0.07, dz);
+    rotors.add(r);
+  }
+  g.add(rotors);
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 5),
+    new THREE.MeshStandardMaterial({ color: 0x001100, emissive: 0x30ff60, emissiveIntensity: 1.5 }));
+  eye.position.set(0, -0.06, 0.12);
+  g.add(eye);
+  g.userData.rotors = rotors;
+  return g;
+}
+
+function updateDroneVisuals(rows, dt) {
+  const keep = new Set();
+  for (const [id, x, y, z] of rows) {
+    keep.add(id);
+    let g = droneVisuals.get(id);
+    if (!g) { g = makeDroneMesh(); droneVisuals.set(id, g); scene.add(g); }
+    g.position.set(x, y + Math.sin(performance.now() / 300) * 0.08, z);
+    g.userData.rotors.rotation.y += dt * 30;
+  }
+  for (const [id, g] of droneVisuals) {
+    if (!keep.has(id)) { scene.remove(g); droneVisuals.delete(id); }
+  }
+}
+
+function updateEffectVisuals(dt) {
+  for (let i = smokeVisuals.length - 1; i >= 0; i--) {
+    const s = smokeVisuals[i];
+    s.t -= dt;
+    s.mesh.material.opacity = 0.38 * Math.min(1, s.t / (s.d * 0.35));
+    s.mesh.rotation.y += dt * 0.15;
+    if (s.t <= 0) {
+      scene.remove(s.mesh);
+      s.mesh.geometry.dispose(); s.mesh.material.dispose();
+      smokeVisuals.splice(i, 1);
+    }
+  }
+  for (let i = fireVisuals.length - 1; i >= 0; i--) {
+    const f = fireVisuals[i];
+    f.t -= dt;
+    f.light.intensity = 3 + Math.sin(performance.now() / 60) * 1.4;
+    for (const child of f.group.children) {
+      if (child.isMesh) child.scale.y = 0.8 + Math.sin(performance.now() / 90 + child.position.x * 7) * 0.3;
+    }
+    if (f.t <= 0) {
+      scene.remove(f.group);
+      fireVisuals.splice(i, 1);
+    }
   }
 }
 
@@ -425,6 +523,12 @@ function clearTransientVisuals() {
   mineVisuals.clear();
   for (const ping of pings) scene.remove(ping.group);
   pings.length = 0;
+  for (const s of smokeVisuals) scene.remove(s.mesh);
+  smokeVisuals.length = 0;
+  for (const f of fireVisuals) scene.remove(f.group);
+  fireVisuals.length = 0;
+  for (const g of droneVisuals.values()) scene.remove(g);
+  droneVisuals.clear();
 }
 
 // ---- UI -----------------------------------------------------------------
@@ -482,6 +586,8 @@ function refreshShop() {
     shotgun: 'SHOTGUN', smg: 'SMG',
     ammoRefillShotgun: 'SHELLS +25', ammoRefillSmg: 'SMG AMMO +120',
     healthPack: 'HEALTH PACK', grenadePack: '2 GRENADES', mine: 'MINE',
+    ak: 'AK', ammoRefillAk: 'AK AMMO +90', akimbo: 'DUAL PISTOLS',
+    smokePack: '2 SMOKES', molotovPack: '2 MOLOTOVS', nightVision: 'NIGHT VISION',
   };
   for (const btn of document.querySelectorAll('.shop-item')) {
     const item = btn.dataset.item;
@@ -494,6 +600,12 @@ function refreshShop() {
     if (item === 'healthPack' && arsenal.packs >= 2) { label = 'HEALTH PACK - FULL'; blocked = true; }
     if (item === 'grenadePack' && arsenal.grenades >= 5) { label = '2 GRENADES - FULL'; blocked = true; }
     if (item === 'mine' && arsenal.mines >= 3) { label = 'MINE - FULL'; blocked = true; }
+    if (item === 'ak' && arsenal.owned.includes('ak')) { label = 'AK - OWNED'; blocked = true; }
+    if (item === 'ammoRefillAk' && !arsenal.owned.includes('ak')) blocked = true;
+    if (item === 'akimbo' && arsenal.owned.includes('akimbo')) { label = 'DUAL PISTOLS - OWNED'; blocked = true; }
+    if (item === 'smokePack' && arsenal.smokes >= 4) { label = '2 SMOKES - FULL'; blocked = true; }
+    if (item === 'molotovPack' && arsenal.molotovs >= 4) { label = '2 MOLOTOVS - FULL'; blocked = true; }
+    if (item === 'nightVision' && arsenal.nightVision) { label = 'NIGHT VISION - OWNED'; blocked = true; }
     btn.textContent = label;
     btn.disabled = blocked;
   }
@@ -571,6 +683,7 @@ let arsenal = makeArsenal();
 function refreshWeaponHud() {
   hud.setWeapon(arsenal.hudInfo());
   hud.setScrap(scrap);
+  $('btn-nv').classList.toggle('hidden', !arsenal.nightVision);
   refreshShop();
   if (arsenal.active !== lastActiveWeapon) {
     lastActiveWeapon = arsenal.active;
@@ -605,8 +718,41 @@ const actions = {
   },
   mineAt: (pos) => { if (canAct()) arsenal.placeMine(pos); },
   flashlight: () => { flashlightOn = !flashlightOn; },
+  throwCycle: () => { if (canAct()) arsenal.cycleThrowable(); },
+  nightVision: () => toggleNightVision(),
   map: () => toggleMap(),
 };
+
+// ---- Night vision -------------------------------------------------------
+// Grainy green view, limited battery, recharges during the day.
+let nvOn = false;
+let nvBattery = TUNING.weapons.nightVision.batterySeconds;
+function toggleNightVision() {
+  if (!arsenal.nightVision || (nvBattery <= 0 && !nvOn)) return;
+  nvOn = !nvOn;
+}
+function updateNightVision(dt) {
+  const NV = TUNING.weapons.nightVision;
+  if (nvOn) {
+    nvBattery -= dt;
+    if (nvBattery <= 0) { nvBattery = 0; nvOn = false; }
+  } else if (lastWave && (lastWave.ph === 'day' || lastWave.ph === 'ride')) {
+    nvBattery = Math.min(NV.batterySeconds, nvBattery + NV.rechargePerDaySecond * dt);
+  }
+  const active = nvOn && nvBattery > 0;
+  if (active) {
+    // Light-level override works in VR too; the DOM overlay adds the
+    // grain/vignette on flat screens.
+    hemi.intensity = 1.8;
+    hemi.color.setHex(0x66ff88);
+    sun.intensity = Math.min(sun.intensity, 0.05);
+  } else {
+    hemi.color.setHex(0xcfe5ff);
+  }
+  const inVR = !!(vrInput && vrInput.active);
+  $('nv-overlay').classList.toggle('hidden', !active || inVR);
+  hud.setNightVision(arsenal.nightVision, active, nvBattery);
+}
 
 // ---- Tactical map view --------------------------------------------------
 // Orthographic top-down view of the live scene. PING marks a spot for the
@@ -622,9 +768,11 @@ function setMapMode(mode) {
   mapMode = mode;
   $('btn-map-ping').classList.toggle('on', mode === 'ping');
   $('btn-map-mine').classList.toggle('on', mode === 'mine');
+  $('btn-map-drone').classList.toggle('on', mode === 'drone');
 }
 $('btn-map-ping').addEventListener('click', () => setMapMode('ping'));
 $('btn-map-mine').addEventListener('click', () => setMapMode('mine'));
+$('btn-map-drone').addEventListener('click', () => setMapMode('drone'));
 $('btn-map-close').addEventListener('click', () => toggleMap(false));
 
 function toggleMap(force) {
@@ -672,6 +820,12 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
       return;
     }
     dispatchAction({ t: 'placeMine', p: p.toArray(), via: 'map' });
+  } else if (mapMode === 'drone') {
+    if (scrap < TUNING.economy.droneDeploy) {
+      showToast('Not enough scrap (' + TUNING.economy.droneDeploy + ' needed)', 2000);
+      return;
+    }
+    dispatchAction({ t: 'drone', p: p.toArray() });
   }
 });
 
@@ -686,6 +840,9 @@ function resetSession() {
   refreshWeaponHud();
   lastSnapAt = 0; lastWave = null;
   presentedPhase = null;
+  nvOn = false;
+  nvBattery = TUNING.weapons.nightVision.batterySeconds;
+  $('nv-overlay').classList.add('hidden');
   closeShop();
   toggleMap(false);
   clearTransientVisuals();
@@ -702,7 +859,7 @@ function startSolo() {
   resetSession();
   role = 'solo';
   sim = new HostSim(level);
-  sim.addPlayer('H', playerName, PLATFORM);
+  sim.addPlayer('H', playerName, PLATFORM, meta.scrapBonus());
   hud.setRoom(null);
   startPlaying();
 }
@@ -713,10 +870,10 @@ function startHosting() {
   lobby.setMenuBusy(true, 'Contacting the connection broker...');
   net = new Net();
   sim = new HostSim(level);
-  sim.addPlayer('H', playerName, PLATFORM);
+  sim.addPlayer('H', playerName, PLATFORM, meta.scrapBonus());
   net.onHostReady = (code) => { lobby.setMenuBusy(false); lobby.showCode(code); hud.setRoom(code); };
   net.onPeerJoin = (id, hi) => {
-    sim.addPlayer(id, hi.name, hi.platform);
+    sim.addPlayer(id, hi.name, hi.platform, hi.b || 0);
     refreshHostPlayers();
   };
   net.onPeerLeave = (id) => { sim.removePlayer(id); refreshHostPlayers(); };
@@ -771,7 +928,7 @@ function startJoining(code) {
   };
   net.onDisconnected = () => lobby.showError('Lost the connection to the host.');
   net.onError = onNetError;
-  net.join(code, msg.hi(playerName, PLATFORM, VERSION));
+  net.join(code, { ...msg.hi(playerName, PLATFORM, VERSION), b: meta.scrapBonus() });
 }
 
 function startPlaying() {
@@ -847,6 +1004,17 @@ function handleEvents(evs) {
       case 'boom':
         spawnExplosion(ev.p);
         break;
+      case 'smoke':
+        spawnSmokeVisual(ev.p, ev.d || 8);
+        break;
+      case 'fire':
+        spawnFireVisual(ev.p, ev.d || 5);
+        break;
+      case 'droned': {
+        const me = role === 'client' ? net?.myId : 'H';
+        if (ev.by === me) showToast('Drone deployed', 1500);
+        break;
+      }
       case 'pickup': {
         const me = role === 'client' ? net?.myId : 'H';
         if (ev.by === me) {
@@ -899,6 +1067,8 @@ function handleEvents(evs) {
       }
       case 'gameover': {
         const s = ev.stats || {};
+        meta.recordRun(s);
+        $('menu-meta').textContent = meta.summaryLine();
         $('go-stats').textContent =
           `You survived ${s.nights || 0} night${s.nights === 1 ? '' : 's'} and reached level ${s.level || 1}. ` +
           `${s.kills || 0} zombies down.`;
@@ -1021,6 +1191,7 @@ if (PHOTOMODE) {
   scene.add(camera);
 } else {
   lobby.setState('menu');
+  $('menu-meta').textContent = meta.summaryLine();
 }
 
 // ---- Phase presentation -------------------------------------------------
@@ -1050,7 +1221,9 @@ function presentPhase(ph) {
       break;
     case 'ride':
       toggleMap(false);
-      openShop();
+      // The wagon has no shop: the ride just arrives.
+      if (level.type === 'wagon') closeShop();
+      else openShop();
       break;
     case 'gameover':
       toggleMap(false);
@@ -1075,7 +1248,9 @@ function updateWaveHud(w) {
     case 'night': hud.setWave(`NIGHT ${w.n} - ${w.left} left`); break;
     case 'elevator': hud.setWave('CLEARED - board the elevator'); break;
     case 'ride':
-      hud.setWave('GOING UP - floor ' + (w.lv + 1));
+      hud.setWave(level.type === 'wagon'
+        ? 'ARRIVING - floor ' + (w.lv + 1)
+        : 'GOING UP - floor ' + (w.lv + 1));
       if (shopOpen && w.t !== lastRideT) { lastRideT = w.t; refreshShop(); }
       break;
     case 'gameover': hud.setWave('GAME OVER'); break;
@@ -1170,6 +1345,11 @@ renderer.setAnimationLoop(() => {
         mrows.push([m.id, m.pos.x, m.pos.y, m.pos.z]);
       }
       updateMineVisuals(mrows);
+      const drows = [];
+      for (const d of sim.drones.values()) {
+        drows.push([d.id, d.pos.x, d.pos.y, d.pos.z]);
+      }
+      updateDroneVisuals(drows, dt);
       const keep = new Set();
       for (const [id, p] of sim.players) {
         if (id === 'H') continue;
@@ -1202,6 +1382,7 @@ renderer.setAnimationLoop(() => {
         updateItemVisuals(latest.is || [], dt);
         updateGrenadeVisuals(latest.gs || []);
         updateMineVisuals(latest.ms || []);
+        updateDroneVisuals(latest.ds || [], dt);
       }
       // Stale-connection feedback (LESSONS.md).
       const stale = lastSnapAt > 0 && performance.now() - lastSnapAt > 4000;
@@ -1215,10 +1396,13 @@ renderer.setAnimationLoop(() => {
       updateWaveHud(lastWave);
     }
     updateDayNight();
+    updateNightVision(dt);
     // Elevator doors: open while boarding, closed otherwise.
     const doorTarget = lastWave && lastWave.ph === 'elevator' ? 1 : (lastWave && (lastWave.ph === 'night' || lastWave.ph === 'ride') ? 0 : doorT);
     doorT += (doorTarget - doorT) * Math.min(1, dt * 3);
     if (level.elevator) level.elevator.setDoors(doorT);
+    // Moving-platform levels scroll their scenery.
+    if (level.tick) level.tick(dt);
   }
 
   // Centre text timer.
@@ -1234,6 +1418,7 @@ renderer.setAnimationLoop(() => {
   if (flash.intensity > 0) flash.intensity = Math.max(0, flash.intensity - dt * 80);
   updateExplosions(dt);
   updatePings(dt);
+  updateEffectVisuals(dt);
 
   renderer.render(scene, mapActive && !(vrInput && vrInput.active) ? mapCam : camera);
 });
@@ -1272,6 +1457,11 @@ window.__zhr = {
     sim.wave.queue = [];
     sim.zombies.clear();
   },
+  debugGotoLevel: (n) => {
+    if (sim) sim.wave.level = n;
+    loadLevel(n);
+  },
+  levelType: () => level.type,
   elevatorZone: () => (level.elevatorZone ? { x: level.elevatorZone.x, z: level.elevatorZone.z } : null),
   shopOpen: () => shopOpen,
   debugShootZombie: () => {

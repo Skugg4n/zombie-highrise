@@ -24,8 +24,17 @@ export class Hud {
       const res = info.reserve < 0 ? '∞' : info.reserve;
       $('hud-ammo').textContent = `${info.mag} / ${res}`;
     }
-    $('hud-items').textContent = `G ${info.grenades}  P ${info.packs}  M ${info.mines || 0}`;
+    $('hud-items').textContent = `${(info.throwSel || 'frag').toUpperCase()} x${info.throwCount ?? info.grenades}  P ${info.packs}  M ${info.mines || 0}`;
   }
   setScrap(n) { $('hud-scrap').textContent = 'SCRAP ' + n; }
+  // Night vision battery readout; hidden until the device is owned.
+  setNightVision(owned, on, battery) {
+    const el = $('hud-nv');
+    el.classList.toggle('hidden', !owned);
+    if (owned) {
+      el.textContent = 'NV ' + (on ? 'ON ' : '') + Math.ceil(battery) + 's';
+      el.style.color = on ? 'var(--accent2)' : 'var(--text)';
+    }
+  }
   setWave(text) { $('hud-wave').textContent = text; }
 }
