@@ -27,6 +27,7 @@ export class HostSim {
     this.items = new Map();
     this.mines = new Map();
     this.drones = new Map();
+    this.barrels = new Map();
     this.clouds = [];          // smoke: {pos, t}
     this.fires = [];           // molotov: {pos, t, tickT}
     this.nextZid = 1;
@@ -34,12 +35,14 @@ export class HostSim {
     this.nextIid = 1;
     this.nextMid = 1;
     this.nextDid = 1;
+    this.nextBid = 1;
     this.events = [];
     this.kills = 0;
     this.wave = {
       phase: 'lobby', night: 0, nightInLevel: 0, level: level.index,
       t: 0, queue: [], spawnT: 0, spawnCount: 0, left: 0,
     };
+    this._seedBarrels();   // the boot level needs them too
   }
 
   setLevel(level) {
@@ -53,6 +56,7 @@ export class HostSim {
     this.drones.clear();
     this.clouds.length = 0;
     this.fires.length = 0;
+    this._seedBarrels();
     let i = 0;
     for (const p of this.players.values()) {
       p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
@@ -60,6 +64,18 @@ export class HostSim {
     if (this.pendingDayLoot) {
       this.pendingDayLoot = false;
       this._spawnDayLoot();
+    }
+  }
+
+  // Explosive barrels come from the level generator; they respawn with
+  // every new floor (and after a level restart).
+  _seedBarrels() {
+    this.barrels.clear();
+    for (const b of (this.level.barrels || [])) {
+      const id = this.nextBid++;
+      const pos = new THREE.Vector3(b.x, this.level.heightAt(b.x, b.z), b.z);
+      this.barrels.set(id, { id, pos, hp: 2 });
+      this.level.colliders.push({ x: b.x, z: b.z, hx: 0.36, hz: 0.36, tall: false, barrel: id });
     }
   }
 
@@ -588,9 +604,11 @@ export class HostSim {
     this._enterDay(false);
   }
 
-  forceNight() {  // test hook
+  forceNight(night) {  // test hook: jump straight into a night
     if (this.wave.phase === 'lobby') this.startRun();
-    if (this.wave.phase === 'day' || this.wave.phase === 'countdown') this._enterNight();
+    if (typeof night === 'number') this.wave.night = night - 1;
+    if (['victory', 'gameover', 'finale'].includes(this.wave.phase)) return;
+    this._enterNight();
   }
 
   // ---- Combat ----------------------------------------------------------
@@ -629,6 +647,23 @@ export class HostSim {
       const distSq = oc.lengthSq() - t * t;
       if (distSq > r * r) continue;
       if (t < bestT) { bestT = t; best = z; }
+    }
+    // Barrels are shootable too: nearest hit wins.
+    let barrelHit = null, barrelT = Infinity;
+    for (const b of this.barrels.values()) {
+      const centre = b.pos.clone(); centre.y += 0.55;
+      const oc = centre.sub(o);
+      const t = oc.dot(d);
+      if (t < 0 || t > 200) continue;
+      if (oc.lengthSq() - t * t > 0.42 * 0.42) continue;
+      if (t < barrelT) { barrelT = t; barrelHit = b; }
+    }
+    if (barrelHit && barrelT < (best ? bestT : Infinity)) {
+      const hp = o.clone().addScaledVector(d, barrelT);
+      if (!segmentBlocked(o.x, o.z, hp.x, hp.z, this._tall())) {
+        this._damageBarrel(barrelHit, damage, byId);
+        return null;
+      }
     }
     if (!best) return null;
     const hit = o.clone().addScaledVector(d, bestT);
@@ -680,6 +715,45 @@ export class HostSim {
       this._maybeDrop(z);
     } else {
       this.events.push({ e: 'zhit', id: z.id, by: byId });
+    }
+  }
+
+  // A barrel takes 2 damage to pop, then detonates like a big grenade and
+  // chains into other barrels in range.
+  _damageBarrel(b, damage, byId, depth = 0) {
+    if (!this.barrels.has(b.id)) return;
+    b.hp -= damage;
+    if (b.hp > 0) {
+      this.events.push({ e: 'bhit', id: b.id });
+      return;
+    }
+    this.barrels.delete(b.id);
+    const idx = this.level.colliders.findIndex((c) => c.barrel === b.id);
+    if (idx >= 0) this.level.colliders.splice(idx, 1);
+    this.level.collidersTall = null;   // cached list is stale now
+    this.events.push({ e: 'bboom', id: b.id, p: b.pos.toArray() });
+    const R = TUNING.economy.barrel.blastRadius;
+    for (const z of [...this.zombies.values()]) {
+      const dist = z.pos.distanceTo(b.pos);
+      if (dist > R) continue;
+      const push = new THREE.Vector3(z.pos.x - b.pos.x, 0, z.pos.z - b.pos.z).normalize()
+        .multiplyScalar(3.0 * (1 - dist / R) + 0.8);
+      z.blast = [push.x, push.z];
+      this.damageZombie(z, TUNING.economy.barrel.damage * (1 - dist / R * 0.6), false, byId);
+      z.blast = null;
+    }
+    for (const [pid, p] of this.players) {
+      if (p.down) continue;
+      const dist = p.pos.distanceTo(b.pos);
+      if (dist < R * 0.7) this.damagePlayer(pid, Math.round(20 * (1 - dist / (R * 0.7))));
+    }
+    // Chain reaction (bounded depth so a barrel farm cannot recurse away).
+    if (depth < 4) {
+      for (const other of [...this.barrels.values()]) {
+        if (other.pos.distanceTo(b.pos) <= R * 1.1) {
+          this._damageBarrel(other, 99, byId, depth + 1);
+        }
+      }
     }
   }
 
@@ -1078,6 +1152,9 @@ export class HostSim {
     }
     const G = TUNING.weapons.fragGrenade;
     this.events.push({ e: 'boom', p: g.pos.toArray() });
+    for (const b of [...this.barrels.values()]) {
+      if (b.pos.distanceTo(g.pos) <= G.falloffRadius) this._damageBarrel(b, 99, g.owner);
+    }
     for (const z of [...this.zombies.values()]) {
       const dist = z.pos.distanceTo(g.pos);
       if (dist > G.falloffRadius) continue;
@@ -1226,6 +1303,10 @@ export class HostSim {
     for (const g of this.grenades.values()) {
       gs.push([g.id, +g.pos.x.toFixed(2), +g.pos.y.toFixed(2), +g.pos.z.toFixed(2), GKINDS.indexOf(g.kind || 'frag')]);
     }
+    const bs = [];
+    for (const b of this.barrels.values()) {
+      bs.push([b.id, +b.pos.x.toFixed(2), +b.pos.y.toFixed(2), +b.pos.z.toFixed(2)]);
+    }
     const ds = [];
     for (const d of this.drones.values()) {
       ds.push([d.id, +d.pos.x.toFixed(2), +d.pos.y.toFixed(2), +d.pos.z.toFixed(2)]);
@@ -1242,7 +1323,7 @@ export class HostSim {
     const ev = this.events; this.events = [];
     const w = this.wave;
     return {
-      t: 'snap', ts, players, zs, gs, is, ms, ds,
+      t: 'snap', ts, players, zs, gs, is, ms, ds, bs,
       wave: { ph: w.phase, n: w.night, lv: w.level, t: Math.max(0, Math.ceil(w.t)), left: w.left, mod: this.mod || null },
       ev,
     };

@@ -731,6 +731,35 @@ function updateEffectVisuals(dt) {
   }
 }
 
+// Explosive barrels: red drums with a hazard band, distinct from the
+// inert rust barrels that are level dressing.
+const barrelVisuals = new Map();
+const barrelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.95, 10);
+const barrelBandGeo = new THREE.CylinderGeometry(0.375, 0.375, 0.2, 10);
+const barrelMatRed = new THREE.MeshStandardMaterial({ color: 0xa8341f, roughness: 0.75, metalness: 0.25 });
+const barrelMatBand = new THREE.MeshStandardMaterial({ color: 0xe8c23c, roughness: 0.8 });
+function updateBarrelVisuals(rows) {
+  const keep = new Set();
+  for (const [id, x, y, z] of rows) {
+    keep.add(id);
+    let g = barrelVisuals.get(id);
+    if (!g) {
+      g = new THREE.Group();
+      const drum = new THREE.Mesh(barrelGeo, barrelMatRed);
+      drum.position.y = 0.475;
+      const band = new THREE.Mesh(barrelBandGeo, barrelMatBand);
+      band.position.y = 0.62;
+      g.add(drum, band);
+      barrelVisuals.set(id, g);
+      scene.add(g);
+    }
+    g.position.set(x, y, z);
+  }
+  for (const [id, g] of barrelVisuals) {
+    if (!keep.has(id)) { removeAndDispose(g); barrelVisuals.delete(id); }
+  }
+}
+
 const mineVisuals = new Map();     // id -> {group, dot}
 function makeMineMesh() {
   const g = new THREE.Group();
@@ -872,6 +901,8 @@ function clearTransientVisuals() {
   fireVisuals.length = 0;
   for (const g of droneVisuals.values()) removeAndDispose(g);
   droneVisuals.clear();
+  for (const g of barrelVisuals.values()) removeAndDispose(g);
+  barrelVisuals.clear();
 }
 
 // ---- UI -----------------------------------------------------------------
@@ -1481,6 +1512,20 @@ function handleEvents(evs) {
         }
         break;
       }
+      case 'bhit': {
+        const g = barrelVisuals.get(ev.id);
+        if (g) audio.play('zhit', g.position);
+        break;
+      }
+      case 'bboom': {
+        // A barrel goes up bigger than a grenade: bright, loud, shaky.
+        spawnExplosion(ev.p);
+        spawnFireVisual(ev.p, 2.5);
+        audio.play('explosion', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
+        const db = camera.getWorldPosition(tmpV).distanceTo(new THREE.Vector3(...ev.p));
+        if (db < 22 && !(vrInput && vrInput.active)) addShake(0.02 + 0.06 * (1 - db / 22));
+        break;
+      }
       case 'boom': {
         spawnExplosion(ev.p);
         audio.play('explosion', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
@@ -1998,7 +2043,7 @@ renderer.setAnimationLoop(() => {
           net.broadcast(snap);
         }
       }
-      lastWave = { ph: sim.wave.phase, n: sim.wave.night, lv: sim.wave.level, t: Math.ceil(sim.wave.t), left: sim.wave.left };
+      lastWave = { ph: sim.wave.phase, n: sim.wave.night, lv: sim.wave.level, t: Math.ceil(sim.wave.t), left: sim.wave.left, mod: sim.mod || null };
       // Authoritative inventory sync for the host's own arsenal (pickups,
       // grenade drops, scrap) at snapshot cadence.
       invAccum += dt;
@@ -2037,6 +2082,11 @@ renderer.setAnimationLoop(() => {
         drows.push([d.id, d.pos.x, d.pos.y, d.pos.z]);
       }
       updateDroneVisuals(drows, dt);
+      const brows = [];
+      for (const b of sim.barrels.values()) {
+        brows.push([b.id, b.pos.x, b.pos.y, b.pos.z]);
+      }
+      updateBarrelVisuals(brows);
       const keep = new Set();
       for (const [id, p] of sim.players) {
         if (id === 'H') continue;
@@ -2070,6 +2120,7 @@ renderer.setAnimationLoop(() => {
         updateGrenadeVisuals(latest.gs || []);
         updateMineVisuals(latest.ms || []);
         updateDroneVisuals(latest.ds || [], dt);
+        updateBarrelVisuals(latest.bs || []);
       }
       // Stale-connection feedback (LESSONS.md).
       const stale = lastSnapAt > 0 && performance.now() - lastSnapAt > 4000;
@@ -2167,11 +2218,7 @@ window.__zhr = {
   },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
   debugTeleport: (x, z) => { rig.group.position.x = x; rig.group.position.z = z; },
-  forceNight: (n) => {
-    if (!sim) return;
-    if (n) sim.wave.night = n - 1;   // next night becomes n (heavier mix)
-    sim.forceNight();
-  },
+  forceNight: (n) => { if (sim) sim.forceNight(n); },
   debugClearNight: () => {
     if (!sim) return;
     sim.wave.queue = [];
@@ -2207,6 +2254,16 @@ window.__zhr = {
     return true;
   },
   items: () => [...itemVisuals.keys()],
+  barrels: () => {
+    const out = [];
+    for (const [id, g] of barrelVisuals) out.push({ id, pos: g.position.toArray() });
+    return out;
+  },
+  debugShootAt: (x, y, z) => {
+    const o = camera.getWorldPosition(new THREE.Vector3());
+    const d = new THREE.Vector3(x, y, z).sub(o).normalize();
+    arsenal.fire(o, d);
+  },
   renderInfo: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }),
 };
 

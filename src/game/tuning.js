@@ -116,6 +116,9 @@ export const TUNING = {
     droneDeploy: 40,               // tactical map: scout drone, one flight
     minePlacementFromMap: 65,      // remote placement pays a convenience premium
     mine: { triggerRadius: 0.6, blastRadius: 2.5, damage: 12 },
+    // Explosive barrels: level furniture, free damage if you aim well and
+    // a liability if the horde reaches you while standing next to one.
+    barrel: { blastRadius: 4.0, damage: 18 },
   },
 
   // ---- 5. Pacing --------------------------------------------------------

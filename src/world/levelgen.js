@@ -337,6 +337,14 @@ function buildGround(level, rng, quality) {
       g.add(b);
       level.colliders.push({ x, z, hx: 0.35, hz: 0.35, tall: false });
     }
+    // Explosive barrels: shootable, chain into the horde. Placed near the
+    // wall gaps where the zombies funnel in (the whole point of them).
+    for (const e of level.entries) {
+      if (!rng.chance(0.7)) continue;
+      const bx = e.x * 0.72 + rng.range(-0.8, 0.8);
+      const bz = e.z * 0.72 + rng.range(-0.8, 0.8);
+      level.barrels.push({ x: bx, z: bz });
+    }
   }
 
   // Foreground scatter: debris ring just outside the walls so every shot
@@ -536,6 +544,10 @@ function buildBasement(level, rng) {
   g.add(level.elevator.group);
   addElevatorColliders(level, 0, -half + 1.3);
   level.elevatorZone = { x: 0, z: Math.max(-playHalf + 0.9, -half + 3.0), hx: 1.3, hz: 0.9 };
+  // Explosive barrels by the doorways (basement chokepoints)
+  for (const e of level.entries) {
+    if (rng.chance(0.6)) level.barrels.push({ x: e.x * 0.7, z: e.z * 0.7 });
+  }
 
   const qb = half * 0.28;
   level.playerSpawns = [
@@ -1049,6 +1061,10 @@ function buildBossArena(level, rng) {
     level.colliders.push({ x: px, z: pz, hx: 0.45, hz: 0.45, tall: true });
   }
   // Torches: violet-dusk arena mood
+  // Barrels in the boss arena: the Butcher's charge can detonate them
+  for (const [bx, bz] of [[-half / 2 + 1.6, 0], [half / 2 - 1.6, 0], [0, half / 2]]) {
+    level.barrels.push({ x: bx, z: bz });
+  }
   for (const [tx, tz] of [[-half + 1, -half + 1], [half - 1, -half + 1], [-half + 1, half - 1], [half - 1, half - 1]]) {
     const torch = new THREE.PointLight(0xff9040, 1.6, 10);
     torch.position.set(tx, 2.4, tz);
@@ -1156,6 +1172,7 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
     type, index: levelIndex,
     group: new THREE.Group(),
     colliders: [], entries: [], zombieSpawns: [], playerSpawns: [],
+    barrels: [],   // explosive barrels: {x, z} seeded by the generator
     elevator: null, elevatorZone: null,
     floorY: 0, heightAt: () => 0, lighting: null,
   };
