@@ -25,7 +25,10 @@ export class LobbyUI {
     $('btn-start-host').addEventListener('click', () => this.h.onStart());
     $('btn-start-client').addEventListener('click', () => this.h.onStart());
     $('btn-back-host').addEventListener('click', () => this.h.onLeave());
-    $('btn-back-join').addEventListener('click', () => this.setState('menu'));
+    // BACK from joining must CANCEL the pending join (destroy its peer),
+    // not just switch panels: an abandoned join's callbacks would fire
+    // into whatever session comes next.
+    $('btn-back-join').addEventListener('click', () => this.h.onLeave());
     $('btn-leave').addEventListener('click', () => this.h.onLeave());
     $('btn-error-lobby').addEventListener('click', () => {
       $('panel-error').classList.add('hidden');
@@ -37,7 +40,9 @@ export class LobbyUI {
       if (e.key === 'Enter') this._submitJoin();
     });
     $('join-code').addEventListener('input', (e) => {
-      e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      // Only characters the room-code alphabet can actually produce
+      // (no I, O, 0, 1: they are excluded to avoid misreadings).
+      e.target.value = e.target.value.toUpperCase().replace(/[^ABCDEFGHJKLMNPQRSTUVWXYZ23456789]/g, '');
     });
 
     $('btn-copy').addEventListener('click', async () => {
@@ -55,6 +60,13 @@ export class LobbyUI {
       group.querySelector('.loco-roomscale').addEventListener('click', () => this._setLoco('roomscale'));
       group.querySelector('.loco-stationary').addEventListener('click', () => this._setLoco('stationary'));
     }
+  }
+
+  // Disable the menu actions while a host/join attempt is in flight so a
+  // second click cannot spawn a parallel session.
+  setMenuBusy(busy, text = '') {
+    for (const id of ['btn-host', 'btn-join', 'btn-solo']) $(id).disabled = busy;
+    $('menu-status').textContent = text;
   }
 
   _setLoco(mode) {
@@ -84,7 +96,13 @@ export class LobbyUI {
       connected: 'panel-connected',
     }[state];
     for (const id of PANELS) {
-      if (id === 'panel-error') continue;  // error overlay managed separately
+      // The error overlay is managed separately, except that returning to
+      // the menu always clears it (a deliberate leave must never end on a
+      // stale "connection lost" screen).
+      if (id === 'panel-error') {
+        if (state === 'menu') $(id).classList.add('hidden');
+        continue;
+      }
       $(id).classList.toggle('hidden', id !== show);
     }
     $('hud').classList.toggle('hidden', state !== 'playing');

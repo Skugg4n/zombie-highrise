@@ -107,7 +107,10 @@ export class HostSim {
 
     const to = target.clone().sub(z.pos); to.y = 0;
     const dist = Math.sqrt(nd);
-    if (dist > CONFIG.ZOMBIE_ATTACK_RANGE) {
+    // Melee only when actually heading for the player (not while routing
+    // to a gap): otherwise the zombie would bite through the sandbag wall.
+    const huntingPlayer = target === nearest.pos;
+    if (!huntingPlayer || dist > CONFIG.ZOMBIE_ATTACK_RANGE) {
       to.normalize().multiplyScalar(CONFIG.ZOMBIE_SPEED * dt);
       z.pos.add(to);
       z.attackT = 0;
@@ -121,8 +124,8 @@ export class HostSim {
         this.events.push({ e: 'phit', id, hp: nearest.hp });
       }
     }
-    // Terrain: base floor is 0.1 m above the ground plane.
-    z.pos.y = insideBase ? this.world.floorY : 0;
+    // Terrain after moving: base floor is 0.1 m above the ground plane.
+    z.pos.y = (Math.abs(z.pos.x) < HALF && Math.abs(z.pos.z) < HALF) ? this.world.floorY : 0;
   }
 
   _idOf(player) {

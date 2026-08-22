@@ -21,7 +21,10 @@ import { Hud } from './ui/hud.js';
 const ua = navigator.userAgent || '';
 const isQuest = /OculusBrowser|Quest/i.test(ua);
 const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-const PLATFORM = isQuest ? 'quest' : (isTouch ? 'mobile' : 'desktop');
+// A touchscreen laptop still has a fine pointer (mouse/trackpad): treat it
+// as desktop so keyboard and mouse keep working. 'mobile' means touch-only.
+const hasFinePointer = matchMedia('(pointer: fine)').matches;
+const PLATFORM = isQuest ? 'quest' : (isTouch && !hasFinePointer ? 'mobile' : 'desktop');
 const QUALITY = (FORCE_QUALITY || (isQuest ? 'vr' : PLATFORM)).toUpperCase() === 'VR' ? 'VR'
   : (FORCE_QUALITY || PLATFORM).toUpperCase() === 'MOBILE' ? 'MOBILE' : 'DESKTOP';
 
@@ -53,6 +56,9 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+// Backgrounded tabs suspend the animation loop; on return, restart the dt
+// clock so the first frame is not a huge step (LESSONS.md).
+document.addEventListener('visibilitychange', () => { last = performance.now(); });
 
 // ---- Actors -------------------------------------------------------------
 const zombieMesh = makeZombieMesh();
@@ -126,12 +132,42 @@ let net = null;
 let sim = null;              // HostSim (solo/host)
 let replica = null;          // Replica (client)
 let myHp = CONFIG.PLAYER_HP;
+let lastSnapAt = 0;          // client: when the last snapshot arrived
+let staleShown = false;
+let toastTimer = 0;
+
+function showToast(text, ms = 4000) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  if (ms > 0) toastTimer = setTimeout(() => el.classList.add('hidden'), ms);
+}
+function hideToast() {
+  clearTimeout(toastTimer);
+  document.getElementById('toast').classList.add('hidden');
+}
 const weapon = { ammo: CONFIG.PISTOL_MAG, reloading: false, reloadT: 0, cooldown: 0 };
 const playerName = PARAMS.get('name') || 'Player';
 
 function isPlaying() { return lobby.state === 'playing'; }
 
+// Tear down any previous session completely before starting a new one.
+// Orphaned Nets keep live Peers registered at the broker and their stale
+// callbacks would fire into the new session's UI.
+function resetSession() {
+  if (net) net.leave();          // leave() detaches all callbacks first
+  net = null; sim = null; replica = null; role = null;
+  myHp = CONFIG.PLAYER_HP;
+  weapon.ammo = CONFIG.PISTOL_MAG;
+  weapon.reloading = false; weapon.reloadT = 0; weapon.cooldown = 0;
+  lastSnapAt = 0;
+  pruneAvatars(new Set());
+  lobby.setMenuBusy(false);
+}
+
 function startSolo() {
+  resetSession();
   role = 'solo';
   sim = new HostSim(world);
   sim.addPlayer('H', playerName, PLATFORM);
@@ -140,11 +176,13 @@ function startSolo() {
 }
 
 function startHosting() {
+  resetSession();
   role = 'host';
+  lobby.setMenuBusy(true, 'Contacting the connection broker...');
   net = new Net();
   sim = new HostSim(world);
   sim.addPlayer('H', playerName, PLATFORM);
-  net.onHostReady = (code) => { lobby.showCode(code); hud.setRoom(code); };
+  net.onHostReady = (code) => { lobby.setMenuBusy(false); lobby.showCode(code); hud.setRoom(code); };
   net.onPeerJoin = (id, hi) => {
     sim.addPlayer(id, hi.name, hi.platform);
     refreshHostPlayers();
@@ -164,6 +202,7 @@ function refreshHostPlayers() {
 }
 
 function startJoining(code) {
+  resetSession();
   role = 'client';
   net = new Net();
   replica = new Replica();
@@ -171,16 +210,14 @@ function startJoining(code) {
   lobby.setJoinStatus('Connecting to ' + code + '...');
   net.onWelcome = (w) => { lobby.showConnected(w.code); hud.setRoom(w.code); };
   net.onSnapshot = (snap) => {
+    lastSnapAt = performance.now();
     replica.push(snap);
     handleEvents(snap.ev || []);
     const me = snap.players?.[net.myId];
     if (me && me.hp !== myHp) { myHp = me.hp; hud.setHealth(myHp); }
   };
   net.onDisconnected = () => lobby.showError('Lost the connection to the host.');
-  net.onError = (text) => {
-    if (lobby.state === 'joining') lobby.setJoinStatus(text, true);
-    else lobby.showError(text);
-  };
+  net.onError = onNetError;
   net.join(code, msg.hi(playerName, PLATFORM, VERSION));
 }
 
@@ -192,21 +229,25 @@ function startPlaying() {
 }
 
 function leaveToMenu() {
-  if (net) net.leave();
-  net = null; sim = null; replica = null; role = null;
-  myHp = CONFIG.PLAYER_HP;
-  pruneAvatars(new Set());
+  resetSession();
+  hud.setRoom(null);
   lobby.setState('menu');
 }
 
 function onNetError(text, fatal) {
-  if (lobby.state === 'menu' || lobby.state === 'joining') {
+  if (fatal) {
+    // Fatal errors only happen before a session is established (broker
+    // unreachable). Reset everything so the next attempt starts clean.
+    resetSession();
+    lobby.setState('menu');
+    lobby.setJoinStatus(text, true);
+    document.getElementById('menu-status').textContent = text;
+  } else if (lobby.state === 'menu' || lobby.state === 'joining') {
     lobby.setJoinStatus(text, true);
     document.getElementById('menu-status').textContent = text;
   } else {
-    lobby.showError(text);
+    showToast(text, 6000);
   }
-  if (fatal && net) { net.leave(); net = null; }
 }
 
 // ---- Events from the sim / snapshots ------------------------------------
@@ -263,7 +304,17 @@ const inputCtx = {
   isPlaying,
   getLocoMode: () => lobby.locoMode,
   onSessionChange: (active) => {
-    if (!active) {
+    if (active) {
+      // Inside the headset the 2D lobby panels are invisible, so a player
+      // entering VR from the lobby would be dead-ended. Entering VR while
+      // hosting/connected starts the game; from the bare menu it starts a
+      // solo practice session. (Session start itself is always the user's
+      // own button press, per the WebXR gesture rule.)
+      if (lobby.state === 'hosting' || lobby.state === 'connected') startPlaying();
+      else if (lobby.state === 'menu') startSolo();
+      return;
+    }
+    {
       // Back to flat controls: adopt whatever yaw the rig ended up with.
       rig.yaw = rig.group.rotation.y;
       rig.pitch = 0;
@@ -296,15 +347,12 @@ function buildPose() {
     p: [hp.x, rig.group.position.y, hp.z], ry: e.y, rx: e.x, vr: true,
     h: { p: hp.toArray(), q: hq.toArray() },
   };
-  for (const [key, idx] of [['hl', 0], ['hr', 1]]) {
-    const c = renderer.xr.getControllerGrip(idx);
-    if (c) {
-      pose[key] = {
-        p: c.getWorldPosition(new THREE.Vector3()).toArray(),
-        q: c.getWorldQuaternion(new THREE.Quaternion()).toArray(),
-      };
-    }
-  }
+  // Hands come from the handedness map and only while tracked; an asleep
+  // controller must not report a stale or identity transform.
+  const hl = vrInput.getHandPose('left');
+  const hr = vrInput.getHandPose('right');
+  if (hl) pose.hl = hl;
+  if (hr) pose.hr = hr;
   return pose;
 }
 
@@ -366,7 +414,10 @@ renderer.setAnimationLoop(() => {
     // Simulation / replication.
     if (sim) {
       sim.updatePose('H', buildPose());
-      sim.step(dt);
+      // The world only simulates once the host is actually playing; poses
+      // still sync so lobby members see each other, but the zombie neither
+      // walks nor bites anyone who is still in a lobby panel.
+      if (isPlaying()) sim.step(dt);
       if (role === 'solo') handleEvents(sim.events.splice(0));
       if (role === 'host' && net) {
         snapAccum += dt;
@@ -409,6 +460,11 @@ renderer.setAnimationLoop(() => {
           zombieMesh.visible = s.z.alive || zombieDeathT > 0;
         }
       }
+      // Stale-connection feedback (LESSONS.md: show "reconnecting" instead
+      // of silently freezing when the host tab is backgrounded).
+      const stale = lastSnapAt > 0 && performance.now() - lastSnapAt > 4000;
+      if (stale && !staleShown) { staleShown = true; showToast('Connection stalled, waiting for the host...', 0); }
+      else if (!stale && staleShown) { staleShown = false; hideToast(); }
     }
   }
 
@@ -418,8 +474,10 @@ renderer.setAnimationLoop(() => {
   const zMoved = zDelta.lengthSq() > 1e-8;
   if (zMoved) zombieMesh.rotation.y = Math.atan2(zDelta.x, zDelta.z);
   zombiePrev.copy(zombieMesh.position);
+  // In photomode the pose is set ONCE (fixed zombieAnimT at boot) and never
+  // advanced: captures must be pixel-deterministic across iterations.
+  if (zMoved && !PHOTOMODE) zombieAnimT += dt * 5.5;
   if (zMoved || PHOTOMODE) {
-    zombieAnimT += dt * 5.5;
     const s = Math.sin(zombieAnimT);
     const parts = zombieMesh.userData.parts;
     parts.legL.rotation.x = s * 0.45;
@@ -442,7 +500,11 @@ renderer.setAnimationLoop(() => {
     zombieDeathT -= dt;
     const k = Math.max(0.05, zombieDeathT / 0.45);
     zombieMesh.scale.set(1, k, 1);
-    if (zombieDeathT <= 0) { zombieMesh.visible = false; zombieMesh.scale.set(1, 1, 1); }
+    if (zombieDeathT <= 0) {
+      zombieDeathT = 0;   // exactly 0: a negative value would freeze the zombie forever
+      zombieMesh.visible = false;
+      zombieMesh.scale.set(1, 1, 1);
+    }
   }
 
   // Muzzle flash decay.

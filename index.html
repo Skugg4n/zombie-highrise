@@ -128,10 +128,20 @@
   }
   #look-zone { position: absolute; right: 0; bottom: 0; width: 55%; height: 100%; pointer-events: auto; }
   #btn-fire {
-    position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: 110px;
+    position: absolute; right: max(18px, env(safe-area-inset-right));
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 104px);
     width: 76px; height: 76px; border-radius: 50%;
     background: rgba(192, 57, 43, 0.85); color: #fff; font-size: 14px;
     display: none; pointer-events: auto;
+  }
+
+  /* Transient status toast (overlays layer) */
+  #toast {
+    position: absolute; left: 50%; top: max(48px, calc(env(safe-area-inset-top) + 40px));
+    transform: translateX(-50%);
+    background: var(--panel); border: 1px solid rgba(224, 163, 60, 0.35);
+    border-radius: 8px; padding: 10px 16px; font-size: 13px; max-width: 86vw;
+    text-align: center; pointer-events: none;
   }
 
   /* Debug layer */
@@ -246,6 +256,7 @@
       <div id="error-text" class="status error"></div>
       <button id="btn-error-lobby">BACK TO LOBBY</button>
     </div>
+    <div id="toast" class="hidden"></div>
   </div>
 
   <!-- Debug layer: z 900 -->

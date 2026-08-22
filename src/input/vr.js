@@ -31,6 +31,9 @@ export class VRInput {
     this.active = false;
     this.snapReady = { left: true, right: true };
     this.controllers = [];
+    // Tracked grips by handedness. Slots 0/1 are assigned by CONNECTION
+    // ORDER, not handedness, so the mapping comes from the connected event.
+    this.hands = { left: null, right: null };
 
     const renderer = ctx.renderer;
     renderer.xr.enabled = true;
@@ -43,6 +46,13 @@ export class VRInput {
       const grip = renderer.xr.getControllerGrip(i);
       grip.add(makePistolMesh());
       ctx.rig.group.add(grip);
+      controller.addEventListener('connected', (e) => {
+        const h = e.data && e.data.handedness;
+        if (h === 'left' || h === 'right') this.hands[h] = grip;
+      });
+      controller.addEventListener('disconnected', () => {
+        for (const h of ['left', 'right']) if (this.hands[h] === grip) this.hands[h] = null;
+      });
       this.controllers.push(controller);
     }
 
@@ -83,6 +93,17 @@ export class VRInput {
       supported = !!navigator.xr && await navigator.xr.isSessionSupported('immersive-vr');
     } catch { supported = false; }
     if (supported) this.button.classList.remove('hidden');
+  }
+
+  // World transform of a tracked hand, or null when that controller is
+  // absent/asleep (never report untracked identity poses over the net).
+  getHandPose(hand) {
+    const grip = this.hands[hand];
+    if (!grip || !this.active) return null;
+    return {
+      p: grip.getWorldPosition(new THREE.Vector3()).toArray(),
+      q: grip.getWorldQuaternion(new THREE.Quaternion()).toArray(),
+    };
   }
 
   _fireFrom(controller) {

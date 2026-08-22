@@ -1,5 +1,42 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.1.1 - 2026-08-22 14:20
+
+Fixes from a 33-agent adversarial review of the Phase 0 code (21 confirmed
+findings, all addressed; scoreboard in QUALITY.md). Why: harden the steel
+thread before real-device testing.
+
+- Critical: the zombie froze forever after its first death (death timer
+  went negative and was never reset).
+- Session lifecycle: every session start now fully tears down the previous
+  one; orphaned PeerJS peers from repeated HOST/JOIN, BACK from joining or
+  fatal errors can no longer fire stale callbacks into a later game.
+- Client LEAVE no longer shows a false "CONNECTION LOST" overlay
+  (net.leave detaches callbacks before destroying the peer, and returning
+  to the menu always clears the error panel).
+- Broker-socket loss mid-game is no longer fatal: existing P2P connections
+  keep playing, a toast explains that new joins are blocked, and the peer
+  tries to reconnect to the broker.
+- HOST A ROOM disables the menu and shows "contacting broker" while
+  pending; double-clicks can no longer create parallel sessions or ghost
+  players.
+- Touchscreen laptops are desktop again (pointer:fine detection); they
+  kept losing keyboard and mouse entirely.
+- VR: entering VR from the lobby now starts the game (the 2D START button
+  is invisible inside the headset); hand poses are mapped by actual
+  handedness and only sent while tracked.
+- Sim: the world only simulates while playing (no lobby bites); the zombie
+  no longer melees through the sandbag wall while routing to a gap; floor
+  height is consistent at the base edge.
+- Photomode is now pixel-deterministic (animation no longer advances on
+  wall clock) and the debug atlas leaves transparent blob shadows alone.
+- Mobile: FIRE button no longer overlaps the ammo readout on notched
+  phones. Join input only accepts characters the code alphabet produces.
+- Client shows "connection stalled" when snapshots stop arriving
+  (backgrounded host tab), per LESSONS.md.
+- Smoke test: new regression check that a deliberate client LEAVE lands on
+  the menu without an error overlay. All checks green.
+
 ## v0.1.0 - 2026-08-22 13:58
 
 - Phase 0 steel thread built and smoke-tested green. Why: the project plan

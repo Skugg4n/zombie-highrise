@@ -48,11 +48,13 @@ export function makeDebugAtlasTexture() {
   return tex;
 }
 
-// Replace every mesh material in the scene with the debug atlas material.
+// Replace every opaque mesh material in the scene with the debug atlas
+// material. Transparent helpers (blob shadows) keep their material: they
+// carry no meaningful UV mapping and would render as opaque squares.
 export function applyDebugAtlas(scene) {
   const tex = makeDebugAtlasTexture();
   const mat = new THREE.MeshBasicMaterial({ map: tex });
   scene.traverse((obj) => {
-    if (obj.isMesh) obj.material = mat;
+    if (obj.isMesh && !obj.material.transparent) obj.material = mat;
   });
 }

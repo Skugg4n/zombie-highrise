@@ -26,3 +26,10 @@ reversible; say the word and I change it.
 7. **Test dependency:** Playwright is a devDependency in package.json
    (node_modules is gitignored). The game itself still has no build step
    and no runtime dependencies beyond the vendored libs.
+8. **Entering VR from the lobby starts the game:** the 2D lobby is
+   invisible inside the headset, so ENTER VR while hosting/connected now
+   also starts playing, and ENTER VR from the bare menu starts solo
+   practice. Alternative would be an in-VR menu (Phase 2+ material).
+9. **Broker loss mid-game:** treated as non-fatal (current players keep
+   playing, new joins blocked, auto-reconnect attempts). Fatal errors only
+   before a session is established.

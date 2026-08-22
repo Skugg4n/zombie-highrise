@@ -171,6 +171,27 @@ if (code) {
 
 await host.screenshot({ path: join(ARTIFACTS, 'live-host.png') });
 await client.screenshot({ path: join(ARTIFACTS, 'live-client.png') });
+
+// Regression: a deliberate client LEAVE must land on the menu, never on
+// the "CONNECTION LOST" error overlay (the client's own peer.destroy()
+// fires the connection close handler).
+if (code) {
+  try {
+    // Fresh join (the live client is already in playing state, where the
+    // LEAVE button is not shown), then leave from the connected panel.
+    await client.goto(`${BASE}/?autojoin=${code}&name=SmokeLeaver`);
+    await client.waitForFunction(() => window.__zhr && window.__zhr.state() === 'connected', null, { timeout: 30000 });
+    await client.click('#btn-leave');
+    await client.waitForFunction(() => window.__zhr.state() === 'menu', null, { timeout: 5000 });
+    await client.waitForTimeout(400);   // give any stray close event time to fire
+    const errVisible = await client.evaluate(() =>
+      !document.getElementById('panel-error').classList.contains('hidden'));
+    note(!errVisible, 'client LEAVE returns to menu without a false error overlay');
+  } catch (e) {
+    note(false, 'client LEAVE flow failed: ' + e.message);
+  }
+}
+
 await hostCtx.close();
 await clientCtx.close();
 

@@ -13,6 +13,8 @@ function randomCode() {
   return c;
 }
 
+const noop = () => {};
+
 export class Net {
   constructor() {
     this.mode = null;          // null | 'host' | 'client'
@@ -22,6 +24,7 @@ export class Net {
     this.conns = new Map();    // host: playerId -> DataConnection
     this.hostConn = null;      // client: connection to host
     this.nextClientNum = 2;    // host: P2, P3, ...
+    this.established = false;  // host: broker accepted our id; client: welcomed
     // Callbacks the game wires up:
     this.onHostReady = () => {};      // (code)
     this.onPeerJoin = () => {};       // host: (id, hello)
@@ -49,6 +52,7 @@ export class Net {
 
     peer.on('open', () => {
       if (peer !== this.peer) return;
+      this.established = true;
       this.onHostReady(this.code);
     });
     peer.on('connection', (conn) => this._acceptClient(conn));
@@ -58,7 +62,14 @@ export class Net {
         peer.destroy();
         this.host(attempt + 1);      // code collision: roll a new code
       } else if (err.type === 'network' || err.type === 'server-error') {
-        this.onError('Cannot reach the connection broker. Check your network and try again.', true);
+        if (this.established) {
+          // Broker link lost mid-session. Existing P2P connections keep
+          // working; only NEW joins are blocked. Never tear the game down.
+          this.onError('Lost contact with the connection broker. Current players stay connected; new players cannot join until it returns.', false);
+          try { this.peer.reconnect(); } catch { /* destroyed */ }
+        } else {
+          this.onError('Cannot reach the connection broker. Check your network and try again.', true);
+        }
       } else if (err.type !== 'peer-unavailable') {
         this.onError('Connection error: ' + err.type, false);
       }
@@ -109,7 +120,7 @@ export class Net {
       conn.on('open', () => { if (hello) conn.send(hello); });
       conn.on('data', (data) => {
         if (!data || typeof data !== 'object') return;
-        if (data.t === 'welcome') { this.myId = data.id; this.onWelcome(data); }
+        if (data.t === 'welcome') { this.myId = data.id; this.established = true; this.onWelcome(data); }
         else if (data.t === 'snap') this.onSnapshot(data);
       });
       conn.on('close', () => this.onDisconnected());
@@ -120,7 +131,12 @@ export class Net {
       if (err.type === 'peer-unavailable') {
         this.onError('No room with code ' + this.code + '. Check the code and try again.', false);
       } else if (err.type === 'network' || err.type === 'server-error') {
-        this.onError('Cannot reach the connection broker. Check your network and try again.', true);
+        if (this.established) {
+          // Broker gone but the P2P link to the host still works. Ignore.
+          try { this.peer.reconnect(); } catch { /* destroyed */ }
+        } else {
+          this.onError('Cannot reach the connection broker. Check your network and try again.', true);
+        }
       } else {
         this.onError('Connection error: ' + err.type, false);
       }
@@ -133,8 +149,15 @@ export class Net {
 
   // ---- Common ----------------------------------------------------------
   leave() {
+    // Detach every callback FIRST: peer.destroy() synchronously emits
+    // 'close' on open connections (PeerJS 1.5.4), which must not surface
+    // as a fake "lost connection" error after a deliberate leave.
+    this.onHostReady = this.onPeerJoin = this.onPeerLeave = noop;
+    this.onClientMessage = this.onWelcome = this.onSnapshot = noop;
+    this.onError = this.onDisconnected = noop;
     if (this.peer) { try { this.peer.destroy(); } catch { /* already gone */ } }
     this.mode = null; this.peer = null; this.code = null; this.myId = null;
     this.conns.clear(); this.hostConn = null; this.nextClientNum = 2;
+    this.established = false;
   }
 }
