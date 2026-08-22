@@ -49,6 +49,7 @@ document.getElementById('gl-root').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 400);
+let lastWave = null;   // latest wave block (declared early: lighting reads it)
 
 // Remove an object from the scene AND free its per-instance GPU buffers.
 // Shared materials (zombie skin/pants, pooled casings) are skipped.
@@ -129,9 +130,14 @@ function applyLevelLighting(level) {
 
 function updateDayNight(force = false) {
   const L = level.lighting;
+  const modNow = lastWave && lastWave.ph === 'night' ? lastWave.mod : null;
+  if (scene.fog) {
+    scene.fog.far = L.fogFar * (modNow === 'fog' ? TUNING.modifiers.fog.fogFarMult : 1);
+  }
+  const blackout = modNow === 'blackout' ? TUNING.modifiers.blackout.hemiMult : 1;
   if (L.dark) {   // basements/trenches: the sky barely matters
     sun.intensity = 0;
-    hemi.intensity = L.hemiDay;
+    hemi.intensity = L.hemiDay * blackout;
     sky.uniforms.uTop.value.setHex(0x0c1424);
     sky.uniforms.uHorizon.value.setHex(0x142036);
     sky.uniforms.uGround.value.setHex(0x0b1020);
@@ -147,7 +153,7 @@ function updateDayNight(force = false) {
   scene.fog.color.copy(colTmp2);
   sun.intensity = L.sunDay * (1 - nightT * 0.92);
   sun.color.setHex(nightT > 0.5 ? 0xa8c0e8 : 0xffe8c0);   // moonlight is cool
-  hemi.intensity = L.hemiDay * (1 - nightT * 0.72);
+  hemi.intensity = L.hemiDay * (1 - nightT * 0.72) * blackout;
   // Windows in the skyline only glow after dark.
   MATS.facade.emissiveIntensity = nightT * 0.9;
   sunGlow.material.opacity = 1 - nightT * 0.55;   // the moon still glows
@@ -605,7 +611,7 @@ function updateItemVisuals(rows, dt) {
   }
 }
 
-const GRENADE_TINTS = [0x3f4a38, 0x8a8f98, 0xc07830];   // frag, smoke, molotov
+const GRENADE_TINTS = [0x3f4a38, 0x8a8f98, 0xc07830, 0x6ab830];   // frag, smoke, molotov, spit
 function updateGrenadeVisuals(rows) {
   const keep = new Set();
   for (const [id, x, y, z, kind] of rows) {
@@ -959,7 +965,6 @@ let scrap = TUNING.economy.startingScrap;
 let lastSnapAt = 0;          // client: when the last snapshot arrived
 let staleShown = false;
 let toastTimer = 0;
-let lastWave = null;         // latest wave block (host: sim.wave mirror)
 
 function showToast(text, ms = 4000) {
   const el = $('toast');
@@ -1530,7 +1535,17 @@ function handleEvents(evs) {
         break;   // ticking text driven from the wave block each frame
       case 'night':
         if (isPlaying()) {
-          showCenterText('NIGHT ' + ev.n, 2.0);
+          const MOD_TEXT = {
+            fog: 'FOG NIGHT - they come out of the murk',
+            frenzy: 'FRENZY - the runners are rabid',
+            blackout: 'BLACKOUT - lights are dead tonight',
+            swarm: 'SWARM - countless but rotten',
+            loot: 'HARVEST NIGHT - they drop everything',
+          };
+          if (ev.boss) showCenterText('THE BUTCHER', 2.4);
+          else if (ev.surge) showCenterText('NIGHT ' + ev.n + ' - SURGE', 2.2);
+          else showCenterText('NIGHT ' + ev.n, 2.0);
+          if (ev.mod && MOD_TEXT[ev.mod]) showToast(MOD_TEXT[ev.mod], 4200);
           audio.stinger('night');
         }
         break;
@@ -1564,6 +1579,35 @@ function handleEvents(evs) {
       case 'ping':
         spawnPing(ev.p);
         audio.play('ping', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
+        break;
+      case 'spit': {
+        const v = zombieStates.get(ev.id);
+        if (v) audio.play('acid', v);
+        break;
+      }
+      case 'acid':
+        spawnBloodPuff(ev.p[0], ev.p[1] - 1.0, ev.p[2]);   // green-ish splash stand-in
+        audio.play('acid', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
+        break;
+      case 'scream':
+        audio.play('scream', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
+        spawnPing(ev.p);   // marks the priority target for the squad
+        break;
+      case 'roar': {
+        audio.play('roar', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
+        const dRoar = camera.getWorldPosition(tmpV).distanceTo(new THREE.Vector3(...ev.p));
+        if (dRoar < 16 && !(vrInput && vrInput.active)) addShake(0.02);
+        showToast('The Butcher is charging!', 1200);
+        break;
+      }
+      case 'crash': {
+        audio.play('explosion', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
+        spawnSmokeVisual(ev.p, 1.2);
+        if (!(vrInput && vrInput.active)) addShake(0.03);
+        break;
+      }
+      case 'crit':
+        showHitmarker(true);
         break;
       case 'mined': {
         const me = role === 'client' ? net?.myId : 'H';
@@ -1898,7 +1942,7 @@ renderer.setAnimationLoop(() => {
       }
       updateItemVisuals(irows, dt);
       const grows = [];
-      const GK = ['frag', 'smoke', 'molotov'];
+      const GK = ['frag', 'smoke', 'molotov', 'spit'];
       for (const g of sim.grenades.values()) {
         grows.push([g.id, g.pos.x, g.pos.y, g.pos.z, GK.indexOf(g.kind || 'frag')]);
       }

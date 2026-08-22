@@ -114,6 +114,9 @@ const RECIPES = {
   ignite: (d) => { noiseBurst(d, { peak: 0.5, attack: 0.02, decay: 0.5, freq: 700, q: 0.5, type: 'lowpass' }); tone(d, { freq: 110, endFreq: 70, type: 'sawtooth', peak: 0.2, decay: 0.4 }); },
   doors: (d) => noiseBurst(d, { peak: 0.2, attack: 0.1, decay: 0.6, freq: 220, q: 1, type: 'lowpass' }),
   throw: (d) => noiseBurst(d, { peak: 0.12, attack: 0.01, decay: 0.1, freq: 1200, q: 1.5 }),
+  scream: (d) => { tone(d, { freq: 1450, endFreq: 680, type: 'sawtooth', peak: 0.28, attack: 0.06, decay: 1.1, detune: 40 }); tone(d, { freq: 1480, endFreq: 700, type: 'square', peak: 0.12, attack: 0.08, decay: 1.0, detune: -35 }); },
+  roar: (d) => { tone(d, { freq: 95, endFreq: 55, type: 'sawtooth', peak: 0.4, attack: 0.08, decay: 1.1, detune: -25 }); noiseBurst(d, { peak: 0.25, attack: 0.1, decay: 0.9, freq: 260, q: 0.6, type: 'lowpass' }); },
+  acid: (d) => noiseBurst(d, { peak: 0.3, attack: 0.01, decay: 0.35, freq: 800, q: 1.2, type: 'lowpass' }),
 };
 
 // Night stinger and day chime: little synth phrases.

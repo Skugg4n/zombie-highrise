@@ -13,7 +13,7 @@ import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
 import { levelTypeFor } from '../world/levelgen.js';
 
-export const ZOMBIE_TYPES = ['walker', 'runner', 'brute'];
+export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 'screamer', 'butcher'];
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
 
 const AMMO_PICKUP = { ammo_shotgun: ['shotgun', 25], ammo_smg: ['smg', 120] };
@@ -379,11 +379,13 @@ export class HostSim {
 
   _enterDay(spawnLoot = true) {
     this.wave.phase = 'day';
+    this.dayBonus = this.postSurge;
+    this.postSurge = false;
     // On the wagon the prep is short: you are already rolling. When called
     // from _arrive the local level object is still the OLD floor, so the
     // incoming floor's type comes from the level index instead.
     const type = spawnLoot ? this.level.type : levelTypeFor(this.wave.level);
-    this.wave.t = type === 'wagon' ? 10 : TUNING.pacing.dayPhaseDuration;
+    this.wave.t = (type === 'wagon' ? 10 : TUNING.pacing.dayPhaseDuration) + (this.dayBonus ? 15 : 0);
     this.events.push({ e: 'day', n: this.wave.night + 1 });
     // On floor arrival the loot must spawn AFTER setLevel wipes the item
     // list (setLevel spawns it via pendingDayLoot), never before.
@@ -400,7 +402,7 @@ export class HostSim {
     // Drop loot near player spawn points: they are guaranteed walkable on
     // every level type (the old footprint-square sampling put wagon loot
     // on the ground beside the bed and trench loot inside dirt).
-    const count = 2;
+    const count = this.dayBonus ? 4 : 2;   // richer morning after a surge
     const spawns = this.level.playerSpawns;
     for (let i = 0; i < count; i++) {
       const kind = pool[Math.floor(Math.random() * pool.length)];
@@ -430,13 +432,46 @@ export class HostSim {
     this.wave.nightStarted = true;
     const night = this.wave.night;
     const players = Math.max(1, this.players.size);
-    const budget = W.budgetPoints(night)
+
+    // Night modifier roll (fog/frenzy/blackout/swarm/loot) from night 3.
+    const M = TUNING.modifiers;
+    this.mod = null;
+    if (night >= M.fromNight && Math.random() > M.chanceNone) {
+      this.mod = M.list[Math.floor(Math.random() * M.list.length)];
+    }
+    // Surge nights: every 3rd night peaks hard, the following day breathes.
+    this.surge = night % W.surgeEvery === 0;
+
+    // Boss floor: the Butcher plus a thin walker escort, nothing else.
+    if (this.level.type === 'boss') {
+      this.mod = null;
+      this.wave.phase = 'night';
+      this.wave.queue = ['walker', 'walker', 'walker', 'walker', 'butcher'];
+      this.wave.spawnT = 0;
+      this.wave.spawnCount = 0;
+      this.events.push({ e: 'night', n: night, boss: true });
+      return;
+    }
+
+    let budget = W.budgetPoints(night)
       * (W.levelTypeModifier[this.level.type] || 1)
       * TUNING.coopScaling.budgetMultiplier(players);
-    const mix = W.mixWeights(night);
+    if (this.surge) budget *= W.surgeBudgetMult;
+    if (this.mod === 'swarm') budget *= M.swarm.budgetMult;
+
+    const mix = { ...W.mixWeights(night) };
+    if (this.mod === 'frenzy') {
+      mix.runner = (mix.runner || 0) + M.frenzy.runnerWeightAdd;
+      mix.walker = Math.max(0.1, mix.walker - M.frenzy.runnerWeightAdd);
+    }
+    if (this.mod === 'swarm') {
+      // A flood of weaklings: everything becomes walkers at 40% hp.
+      for (const k of Object.keys(mix)) mix[k] = 0;
+      mix.walker = 1;
+    }
     const queue = [];
     for (const type of ZOMBIE_TYPES) {
-      const count = Math.round(budget * (mix[type] || 0) / W.threatCost[type]);
+      const count = Math.round(budget * (mix[type] || 0) / (W.threatCost[type] || 1));
       for (let i = 0; i < count; i++) queue.push(type);
     }
     if ((mix.brute || 0) > 0 && !queue.includes('brute')) queue.push('brute');
@@ -448,15 +483,18 @@ export class HostSim {
     this.wave.queue = queue;
     this.wave.spawnT = 0;
     this.wave.spawnCount = 0;
-    this.events.push({ e: 'night', n: night });
+    this.events.push({ e: 'night', n: night, mod: this.mod, surge: this.surge });
   }
 
   _nightCleared() {
     this.wave.nightInLevel++;
     this.wave.nightStarted = false;
+    if (this.surge) this.postSurge = true;   // the day after a surge breathes
+    this.mod = null;
+    this.surge = false;
     // The wagon is a single-night set piece and has no elevator: once the
     // night is beaten, the ride simply arrives.
-    const npl = this.level.type === 'wagon' ? 1 : TUNING.pacing.nightsPerLevel;
+    const npl = (this.level.type === 'wagon' || this.level.type === 'boss') ? 1 : TUNING.pacing.nightsPerLevel;
     if (this.wave.nightInLevel >= npl) {
       if (this.level.type === 'wagon' || !this.level.elevatorZone) {
         this._enterRide();
@@ -504,10 +542,12 @@ export class HostSim {
     const stats = TUNING.enemies[type];
     // Small jitter only: +-0.4 m keeps spawns inside 1.6 m doorways
     // (larger jitter put zombies behind tall walls where they got stuck).
+    let hpMult = this.mod === 'swarm' ? TUNING.modifiers.swarm.hpMult : 1;
+    if (type === 'butcher') hpMult *= 1 + 0.5 * (Math.max(1, this.players.size) - 1);
     this.zombies.set(id, {
       id, type,
       pos: s.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.8)),
-      hp: stats.hp, alive: true,
+      hp: Math.max(1, Math.round(stats.hp * hpMult)), alive: true,
       biteT: 0, targetId: null, retargetT: 0, stuckT: 0,
     });
     this.events.push({ e: 'zspawn', id });
@@ -534,6 +574,16 @@ export class HostSim {
     const hit = o.clone().addScaledVector(d, bestT);
     const tall = this._tall();
     if (segmentBlocked(o.x, o.z, hit.x, hit.z, tall)) return null;
+    if (best.type === 'butcher') {
+      const t = this._nearestStanding(best.pos);
+      if (t) {
+        const facing = new THREE.Vector3().subVectors(t.p.pos, best.pos).setY(0).normalize();
+        if (facing.dot(d) > 0.4) {
+          damage *= TUNING.enemies.butcher.backstabMult;   // weak back plate
+          this.events.push({ e: 'crit', id: best.id });
+        }
+      }
+    }
     if (knockback > 0) {
       const shove = knockback * (best.type === 'brute' ? 0.5 : 1);
       best.pos.addScaledVector(new THREE.Vector3(d.x, 0, d.z).normalize(), shove);
@@ -558,7 +608,9 @@ export class HostSim {
     if (z.hp <= 0) {
       z.alive = false;
       this.kills++;
-      const scrap = TUNING.economy.scrapPerKill[z.type] + (isMelee ? TUNING.economy.meleeKillBonus : 0);
+      let scrap = TUNING.economy.scrapPerKill[z.type] || TUNING.enemies[z.type].scrap || 10;
+      scrap += isMelee ? TUNING.economy.meleeKillBonus : 0;
+      if (this.mod === 'loot') scrap = Math.round(scrap * TUNING.modifiers.loot.scrapMult);
       const killer = byId ? this.players.get(byId) : null;
       if (killer) killer.inv.s += scrap;
       const die = { e: 'zdie', id: z.id, type: z.type, p: z.pos.toArray(), scrap, by: byId };
@@ -572,7 +624,7 @@ export class HostSim {
   }
 
   _maybeDrop(z) {
-    const roll = Math.random();
+    const roll = Math.random() / (this.mod === 'loot' ? TUNING.modifiers.loot.dropMult : 1);
     let kind = null;
     if (roll < 0.05) kind = 'grenade';
     else if (roll < 0.09) kind = 'pack';
@@ -689,8 +741,12 @@ export class HostSim {
   _stepZombies(dt) {
     for (const z of this.zombies.values()) {
       const stats = TUNING.enemies[z.type];
-      // Stunned (shotgun impact): stand and take it for a beat.
+      // Stunned (shotgun impact / post-charge recovery): stand and take it.
       if (z.stunT > 0) { z.stunT -= dt; continue; }
+      // Type-specific brains first; they may skip the default chase.
+      if (z.type === 'spitter' && this._stepSpitter(z, stats, dt)) continue;
+      if (z.type === 'screamer' && this._stepScreamer(z, stats, dt)) continue;
+      if (z.type === 'butcher' && this._stepButcher(z, stats, dt)) continue;
       // Aggro: nearest standing player, re-evaluated every 2 s.
       z.retargetT -= dt;
       let target = z.targetId ? this.players.get(z.targetId) : null;
@@ -723,6 +779,14 @@ export class HostSim {
       }
 
       const dist = z.pos.distanceTo(target.pos);
+      // Crawlers lunge when close: a burst of speed under the sightlines.
+      let speedMult = this._cloudSlowAt(z.pos);
+      if (z.type === 'crawler' && dist < stats.lungeRange) {
+        speedMult *= stats.lungeSpeed / stats.speed;
+      }
+      if (z.type === 'runner' && this.mod === 'frenzy') {
+        speedMult *= TUNING.modifiers.frenzy.runnerSpeedMult;
+      }
       const reach = stats.radius + 0.55;
       // Bites require line of sight: a wall between mouth and target means
       // keep walking, never chew through the masonry.
@@ -731,7 +795,7 @@ export class HostSim {
         const before = z.pos.clone();
         const to = goal.clone().sub(z.pos); to.y = 0;
         if (to.lengthSq() > 1e-6) {
-          to.normalize().multiplyScalar(stats.speed * this._cloudSlowAt(z.pos) * dt);
+          to.normalize().multiplyScalar(stats.speed * speedMult * dt);
           z.pos.add(to);
           resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
         }
@@ -758,6 +822,136 @@ export class HostSim {
       }
       z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
     }
+  }
+
+  // ---- Special enemy brains --------------------------------------------
+  _nearestStanding(pos) {
+    let best = null, bid = null, bd = Infinity;
+    for (const [id, p] of this.players) {
+      if (p.down) continue;
+      const d = pos.distanceToSquared(p.pos);
+      if (d < bd) { bd = d; best = p; bid = id; }
+    }
+    return best ? { p: best, id: bid, dist: Math.sqrt(bd) } : null;
+  }
+
+  // Spitter: holds a firing band (spitKeep..spitRange), lobs acid on a
+  // timer, backs off when crowded. Returns true = handled this frame.
+  _stepSpitter(z, stats, dt) {
+    const t = this._nearestStanding(z.pos);
+    if (!t) return true;
+    z.spitT = (z.spitT || 0) - dt;
+    const move = new THREE.Vector3();
+    if (t.dist > stats.spitRange) {
+      move.subVectors(t.p.pos, z.pos);
+    } else if (t.dist < stats.spitKeep) {
+      move.subVectors(z.pos, t.p.pos);   // back away
+    } else if (z.spitT <= 0) {
+      z.spitT = stats.spitInterval;
+      // Lob an acid glob on a ~1 s ballistic arc at the player.
+      const gid = this.nextGid++;
+      const flight = 1.0;
+      const dy = (t.p.pos.y + 0.4) - (z.pos.y + 1.2);
+      const vel = new THREE.Vector3(
+        (t.p.pos.x - z.pos.x) / flight,
+        dy / flight + 4.9 * flight,
+        (t.p.pos.z - z.pos.z) / flight);
+      this.grenades.set(gid, {
+        id: gid, owner: null, kind: 'spit',
+        pos: z.pos.clone().setY(z.pos.y + 1.2),
+        vel, fuse: 3.0,
+      });
+      this.events.push({ e: 'spit', id: z.id });
+      return true;
+    } else {
+      return true;   // hold position, glaring
+    }
+    move.y = 0;
+    if (move.lengthSq() > 1e-6) {
+      move.normalize().multiplyScalar(stats.speed * dt);
+      z.pos.add(move);
+      resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
+      z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+    }
+    return true;
+  }
+
+  // Screamer: keeps its distance and calls reinforcement bursts. Killing
+  // it fast is the whole point.
+  _stepScreamer(z, stats, dt) {
+    const t = this._nearestStanding(z.pos);
+    if (!t) return true;
+    z.screamT = (z.screamT ?? 2.0) - dt;
+    if (z.screamT <= 0) {
+      z.screamT = stats.screamInterval;
+      this.events.push({ e: 'scream', id: z.id, p: z.pos.toArray() });
+      for (let i = 0; i < stats.screamSpawns && this.zombies.size < TUNING.waves.maxAlive; i++) {
+        this.spawnZombie(Math.random() < 0.6 ? 'walker' : 'runner');
+      }
+      return true;
+    }
+    if (t.dist < stats.keepRange) {
+      const away = new THREE.Vector3().subVectors(z.pos, t.p.pos);
+      away.y = 0;
+      if (away.lengthSq() > 1e-6) {
+        away.normalize().multiplyScalar(stats.speed * dt);
+        z.pos.add(away);
+        resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
+        z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+      }
+      return true;
+    }
+    return false;   // out of range: default approach brings it closer
+  }
+
+  // Butcher: telegraphed line charge with a punished recovery window.
+  _stepButcher(z, stats, dt) {
+    z.chargeCd = (z.chargeCd ?? 3) - dt;
+    if (z.chargeState === 'telegraph') {
+      z.chargeT -= dt;
+      if (z.chargeT <= 0) {
+        z.chargeState = 'charging';
+        z.chargeDist = 0;
+      }
+      return true;   // stands still, roaring
+    }
+    if (z.chargeState === 'charging') {
+      const step = stats.chargeSpeed * dt;
+      const before = z.pos.clone();
+      z.pos.addScaledVector(z.chargeDir, step);
+      resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
+      z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+      z.chargeDist += step;
+      const moved = z.pos.distanceTo(before);
+      // Hit a player?
+      for (const [pid, p] of this.players) {
+        if (p.down) continue;
+        if (p.pos.distanceTo(z.pos) < stats.radius + 0.6) {
+          this.damagePlayer(pid, stats.chargeDamage);
+          z.chargeState = null;
+          z.stunT = stats.chargeRecover;
+          this.events.push({ e: 'crash', id: z.id, p: z.pos.toArray() });
+          return true;
+        }
+      }
+      if (z.chargeDist > stats.chargeRange || moved < step * 0.4) {
+        // Overran or slammed a wall: recovery window (shoot the back!).
+        z.chargeState = null;
+        z.stunT = stats.chargeRecover;
+        this.events.push({ e: 'crash', id: z.id, p: z.pos.toArray() });
+      }
+      return true;
+    }
+    const t = this._nearestStanding(z.pos);
+    if (t && z.chargeCd <= 0 && t.dist < stats.chargeRange && t.dist > 2.5) {
+      z.chargeCd = 7;
+      z.chargeState = 'telegraph';
+      z.chargeT = stats.chargeTelegraph;
+      z.chargeDir = new THREE.Vector3().subVectors(t.p.pos, z.pos).setY(0).normalize();
+      this.events.push({ e: 'roar', id: z.id, p: z.pos.toArray() });
+      return true;
+    }
+    return false;   // default lumbering chase
   }
 
   _stepGrenades(dt) {
@@ -788,7 +982,7 @@ export class HostSim {
       }
       g.fuse -= dt;
       // Molotovs shatter on first impact; frags and smokes cook off.
-      if ((g.kind === 'molotov' && (hitGround || hitWall)) || g.fuse <= 0) {
+      if (((g.kind === 'molotov' || g.kind === 'spit') && (hitGround || hitWall)) || g.fuse <= 0) {
         this.grenades.delete(g.id);
         this._detonate(g);
       }
@@ -796,6 +990,16 @@ export class HostSim {
   }
 
   _detonate(g) {
+    if (g.kind === 'spit') {
+      this.events.push({ e: 'acid', p: g.pos.toArray() });
+      for (const [pid, p] of this.players) {
+        if (p.down) continue;
+        if (p.pos.distanceTo(g.pos) < 1.5) {
+          this.damagePlayer(pid, TUNING.enemies.spitter.spitDamage);
+        }
+      }
+      return;
+    }
     if (g.kind === 'smoke') {
       const S = TUNING.weapons.smokeGrenade;
       this.clouds.push({ pos: g.pos.clone(), t: S.cloudDuration });
@@ -954,7 +1158,7 @@ export class HostSim {
         +z.pos.x.toFixed(2), +z.pos.y.toFixed(2), +z.pos.z.toFixed(2), z.hp]);
     }
     const gs = [];
-    const GKINDS = ['frag', 'smoke', 'molotov'];
+    const GKINDS = ['frag', 'smoke', 'molotov', 'spit'];
     for (const g of this.grenades.values()) {
       gs.push([g.id, +g.pos.x.toFixed(2), +g.pos.y.toFixed(2), +g.pos.z.toFixed(2), GKINDS.indexOf(g.kind || 'frag')]);
     }
@@ -975,7 +1179,7 @@ export class HostSim {
     const w = this.wave;
     return {
       t: 'snap', ts, players, zs, gs, is, ms, ds,
-      wave: { ph: w.phase, n: w.night, lv: w.level, t: Math.max(0, Math.ceil(w.t)), left: w.left },
+      wave: { ph: w.phase, n: w.night, lv: w.level, t: Math.max(0, Math.ceil(w.t)), left: w.left, mod: this.mod || null },
       ev,
     };
   }

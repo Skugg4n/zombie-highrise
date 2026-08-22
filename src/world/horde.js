@@ -10,6 +10,10 @@ const LOOKS = {
   walker: { accent: new THREE.Color(0x8c3b2e), sx: 1.0, sy: 1.0, lean: 0.10, armLen: 0.55 },
   runner: { accent: new THREE.Color(0xd8a020), sx: 0.78, sy: 1.08, lean: 0.55, armLen: 0.45 },
   brute: { accent: new THREE.Color(0x6e1f18), sx: 1.7, sy: 1.05, lean: 0.18, armLen: 0.65 },
+  spitter: { accent: new THREE.Color(0x5da048), sx: 0.85, sy: 1.06, lean: 0.35, armLen: 0.4 },
+  crawler: { accent: new THREE.Color(0x707a58), sx: 0.9, sy: 0.9, lean: 0.2, armLen: 0.6, crawl: true },
+  screamer: { accent: new THREE.Color(0xc8c2ee), sx: 0.72, sy: 1.18, lean: 0.05, armLen: 0.5 },
+  butcher: { accent: new THREE.Color(0x8a1f2a), sx: 2.1, sy: 1.22, lean: 0.22, armLen: 0.7 },
 };
 const FLASH = new THREE.Color(0xff5040);
 
@@ -87,13 +91,15 @@ export class HordeRenderer {
       // roll so bodies do not fall in identical clone poses; + bite lunge
       // pitching the whole body at its victim).
       const fall2 = (z.fall || 0) ** 2;
+      // Crawlers move prone: whole body pitched forward onto all fours.
+      const crawl = look.crawl ? 1.25 : 0;
       this._e.set(
-        -(Math.PI / 2) * fall2 + (z.lunge || 0) * 0.45,
+        -(Math.PI / 2) * fall2 + (z.lunge || 0) * 0.45 + crawl,
         z.rotY,
-        (z.roll || 0) * fall2, 'YXZ');
+        (z.roll || 0) * (0.12 + fall2), 'YXZ');
       this._q.setFromEuler(this._e);
       this._base.compose(
-        this._v.set(z.x, z.y - (z.sink || 0), z.z),
+        this._v.set(z.x, z.y - (z.sink || 0) - (look.crawl ? 0.62 : 0), z.z),
         this._q, this._s.setScalar(z.scale || 1));
 
       // Legs: pivot at hip (y 0.75), swing +-0.45.

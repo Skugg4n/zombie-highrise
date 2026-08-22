@@ -78,6 +78,42 @@ expensive.
       reload, impact, empty click, enemy sounds, wave stingers)
       synthesized in code so there are no asset downloads
 
+## Phase 3.5 - Depth and replayability (added per Ola's ambition brief:
+## Quest 2 caps rendering only; feel, content depth and functional quality
+## are judged against full commercial titles. Boredom is a bug.)
+
+- [ ] Enemy roster expansion (readable silhouettes + distinct behavior):
+      SPITTER (ranged acid arc, forces repositioning, fragile),
+      CRAWLER (low fast silhouette, ducks under sightlines, lunges),
+      SCREAMER (support: scream summons a burst wave, priority target)
+- [ ] BOSS floor every 6th level: the BUTCHER guards the elevator
+      (heavy charge attack, stagger windows, weak-point back plate,
+      scrap jackpot). Boss floor = difficulty peak by design.
+- [ ] Night modifiers rolled per night and announced at countdown (fog
+      night, frenzy, blackout, swarm of weaklings, loot night) so floors
+      6+ differ structurally, not just numerically
+- [ ] Day-phase events with real decisions: SUPPLY DROP (rich crate lands
+      OUTSIDE the walls: risk/reward run), GENERATOR (dark levels: find
+      and start it to keep the lights on all night)
+- [ ] Hazards: explosive barrels (shootable, chain into the horde)
+- [ ] Upgrade paths as late-game scrap sinks: weapon tier upgrades
+      (damage/magazine, 2 tiers per gun), armor vest (absorbs damage,
+      breaks), bandolier (carry caps up)
+- [ ] Weapon role audit: every weapon has a distinct moment where it is
+      the right choice; no strict dominance (tuning + playtest critic)
+- [ ] Difficulty curve with peaks and breathers: surge nights every 3rd
+      night, calmer post-surge days with bonus loot, wagon floors as
+      breathers, boss floors as peaks
+- [ ] Playtest critic loop: an autopilot bot (?autoplay=1) plays a full
+      multi-floor session headless at accelerated speed, logging pacing
+      metrics (night lengths, damage, economy flow, idle time); a
+      SEPARATE critic sub-agent reviews the session log + periodic
+      screenshots and reports where it got bored, confused or frustrated;
+      loop on its findings like the visual and feel critics (6-round cap
+      per pass)
+- [ ] Final placeholder purge: every sound, animation, reaction,
+      transition and UI state deliberate; nothing left as scaffold
+
 ## Phase 4 - Release
 
 - [ ] GitHub Pages deploy documented in README

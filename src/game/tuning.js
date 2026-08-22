@@ -13,12 +13,33 @@ export const TUNING = {
     budgetPoints: (night) => Math.round(8 * Math.pow(1.25, night - 1)),
     threatCost: { walker: 1, runner: 1.5, brute: 4 },
     mixWeights: (night) => {
-      const runner = Math.min(0.40, Math.max(0, 0.12 * (night - 1))); // runners from night 2
-      const brute = Math.min(0.25, Math.max(0, 0.07 * (night - 3)));  // brutes from night 4
-      return { walker: 1 - runner - brute, runner, brute };
+      const runner = Math.min(0.34, Math.max(0, 0.12 * (night - 1)));   // from night 2
+      const brute = Math.min(0.20, Math.max(0, 0.07 * (night - 3)));    // from night 4
+      const spitter = Math.min(0.14, Math.max(0, 0.05 * (night - 4)));  // from night 5
+      const crawler = Math.min(0.14, Math.max(0, 0.05 * (night - 5)));  // from night 6
+      const screamer = Math.min(0.08, Math.max(0, 0.04 * (night - 6))); // from night 7
+      const walker = 1 - runner - brute - spitter - crawler - screamer;
+      return { walker, runner, brute, spitter, crawler, screamer };
     },
+    // Peaks and breathers: every 3rd night surges; the day after a surge
+    // is longer and richer (see state.js).
+    surgeEvery: 3,
+    surgeBudgetMult: 1.35,
     maxAlive: 20,           // Quest 2 hard cap, all player counts
-    levelTypeModifier: { ground: 1.15, basement: 0.90, upper: 1.00 },
+    levelTypeModifier: { ground: 1.15, basement: 0.90, upper: 1.00, trench: 0.95, wagon: 0.85, boss: 1.0 },
+  },
+
+  // Night modifiers: rolled per night, announced at the countdown. They
+  // make later floors structurally different, not numerically bigger.
+  modifiers: {
+    chanceNone: 0.4,
+    list: ['fog', 'frenzy', 'blackout', 'swarm', 'loot'],
+    fromNight: 3,
+    fog: { fogFarMult: 0.35 },
+    frenzy: { runnerSpeedMult: 1.3, runnerWeightAdd: 0.2 },
+    blackout: { hemiMult: 0.45 },        // night vision's moment
+    swarm: { budgetMult: 1.6, hpMult: 0.4 },
+    loot: { dropMult: 3, scrapMult: 1.25 },
   },
 
   // ---- 2. Enemies -------------------------------------------------------
@@ -31,6 +52,14 @@ export const TUNING = {
     walker: { hp: 3, speed: 1.3, biteDamage: 10, biteInterval: 1.0, scrap: 10, radius: 0.55 },
     runner: { hp: 2, speed: 3.4, biteDamage: 6, biteInterval: 0.7, scrap: 15, radius: 0.45 },
     brute: { hp: 15, speed: 0.85, biteDamage: 25, biteInterval: 1.5, scrap: 40, radius: 0.75 },
+    // Phase 3.5 depth roster. Each changes HOW you play, not just numbers:
+    // spitter forces repositioning, crawler punishes tunnel vision under
+    // sightlines, screamer is a priority-target puzzle, butcher is the
+    // boss-floor peak.
+    spitter: { hp: 2, speed: 1.0, biteDamage: 8, biteInterval: 1.2, scrap: 25, radius: 0.5, spitRange: 12, spitKeep: 7, spitInterval: 3.0, spitDamage: 8 },
+    crawler: { hp: 2, speed: 2.6, lungeSpeed: 5.0, lungeRange: 4, biteDamage: 8, biteInterval: 0.8, scrap: 20, radius: 0.35 },
+    screamer: { hp: 4, speed: 1.6, keepRange: 10, screamInterval: 6.0, screamSpawns: 3, biteDamage: 5, biteInterval: 1.2, scrap: 50, radius: 0.5 },
+    butcher: { hp: 60, speed: 0.9, chargeSpeed: 6.5, chargeRange: 9, chargeTelegraph: 1.0, chargeRecover: 2.0, chargeDamage: 35, biteDamage: 20, biteInterval: 1.4, scrap: 400, radius: 0.95, backstabMult: 2.0 },
   },
 
   // ---- 3. Weapons -------------------------------------------------------

@@ -30,7 +30,13 @@ export const PALETTE = {
 // Six-level cycle keeps "ground roughly every 3rd" while weaving in the
 // Phase 2 set pieces: 1 ground, 2 basement, 3 upper, 4 ground, 5 trench
 // (tight, night, flashlight), 6 wagon (moving platform), then repeat.
-export const LEVEL_TYPES = ['ground', 'basement', 'upper', 'ground', 'trench', 'wagon'];
+// 12-level supercycle: two runs of the 6-type rotation, with the second
+// wagon slot replaced by the BOSS arena (floors 12, 24, ...). Peaks and
+// breathers by construction: wagon = breather, boss = peak.
+export const LEVEL_TYPES = [
+  'ground', 'basement', 'upper', 'ground', 'trench', 'wagon',
+  'ground', 'basement', 'upper', 'ground', 'trench', 'boss',
+];
 export function levelTypeFor(levelIndex) {
   return LEVEL_TYPES[(levelIndex - 1) % LEVEL_TYPES.length];
 }
@@ -990,6 +996,77 @@ function buildWagon(level, rng) {
   ];
 }
 
+// ---- Boss arena (the Butcher's floor) -----------------------------------
+// A walled slaughteryard on the roof level: pillars for cover against the
+// charge, torch light, the elevator dead ahead. One night, one Butcher.
+function buildBossArena(level, rng) {
+  const g = level.group;
+  const A = Math.max(CONFIG.PLAY_AREA + 4, 12);
+  const half = A / 2;
+  level.floorY = 0;
+  level.heightAt = () => 0;
+  level.lighting = {
+    daySky: 0x3a2c3c, dayHaze: 0x4a3040,
+    fogNear: 14, fogFar: 80, sunDay: 0.9, hemiDay: 0.55, dark: false,
+  };
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 2, A + 2), MATS.concrete);
+  floor.rotation.x = -Math.PI / 2;
+  g.add(floor);
+  // High walls, two door gaps (the Butcher's escort trickles in)
+  for (const [side, rot] of [[[0, -half], 0], [[0, half], 0], [[-half, 0], 1], [[half, 0], 1]]) {
+    const [dx, dz] = side;
+    const hasDoor = rot === 1;   // side doors only; north wall hosts the elevator
+    const len = A;
+    if (!hasDoor) {
+      box(g, rot ? 0.4 : len, 3.2, rot ? len : 0.4, MATS.basementWall, dx, 1.6, dz);
+      level.colliders.push(rot
+        ? { x: dx, z: dz, hx: 0.2, hz: half, tall: true }
+        : { x: dx, z: dz, hx: half, hz: 0.2, tall: true });
+    } else {
+      const segLen = (len - 2.0) / 2;
+      for (const sign of [-1, 1]) {
+        const off = sign * (1.0 + segLen / 2);
+        const x = rot ? dx : dx + off;
+        const z = rot ? dz + off : dz;
+        box(g, rot ? 0.4 : segLen, 3.2, rot ? segLen : 0.4, MATS.basementWall, x, 1.6, z);
+        level.colliders.push(rot
+          ? { x, z, hx: 0.2, hz: segLen / 2, tall: true }
+          : { x, z, hx: segLen / 2, hz: 0.2, tall: true });
+      }
+      const entry = new THREE.Vector3(dx, 0, dz);
+      level.entries.push(entry);
+      level.zombieSpawns.push(entry.clone());
+    }
+  }
+  // Cover pillars: survive the charge by putting stone between you and it
+  const pillarSpots = [[-half / 2, -half / 2], [half / 2, -half / 2], [-half / 2, half / 2], [half / 2, half / 2]];
+  for (const [px, pz] of pillarSpots) {
+    box(g, 0.9, 3.2, 0.9, MATS.basementWall, px, 1.6, pz);
+    level.colliders.push({ x: px, z: pz, hx: 0.45, hz: 0.45, tall: true });
+  }
+  // Torches: violet-dusk arena mood
+  for (const [tx, tz] of [[-half + 1, -half + 1], [half - 1, -half + 1], [-half + 1, half - 1], [half - 1, half - 1]]) {
+    const torch = new THREE.PointLight(0xff9040, 1.6, 10);
+    torch.position.set(tx, 2.4, tz);
+    g.add(torch);
+    box(g, 0.1, 0.8, 0.1, mat(0x3a2c20), tx, 2.0, tz);
+  }
+
+  level.elevator = makeElevator();
+  level.elevator.group.position.set(0, 0, -half + 1.3);
+  g.add(level.elevator.group);
+  addElevatorColliders(level, 0, -half + 1.3);
+  level.elevatorZone = { x: 0, z: Math.max(-CONFIG.PLAY_AREA / 2 + 0.9, -half + 3.0), hx: 1.3, hz: 0.9 };
+
+  const qb = Math.min(half * 0.3, 2);
+  level.playerSpawns = [
+    new THREE.Vector3(0, 0, qb + 1), new THREE.Vector3(qb, 0, qb),
+    new THREE.Vector3(-qb, 0, qb), new THREE.Vector3(0, 0, qb + 2),
+    new THREE.Vector3(qb, 0, qb + 2),
+  ];
+}
+
 // ---- Entry point --------------------------------------------------------
 export function buildLevel(scene, quality, runSeed, levelIndex) {
   const type = levelTypeFor(levelIndex);
@@ -1005,6 +1082,7 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
   else if (type === 'basement') buildBasement(level, rng);
   else if (type === 'upper') buildUpper(level, rng, quality);
   else if (type === 'trench') buildTrench(level, rng);
+  else if (type === 'boss') buildBossArena(level, rng);
   else buildWagon(level, rng);
   // Bake all static geometry into one mesh per material (draw-call diet;
   // Quest 2 budget). Doors and scrolling scenery are marked dynamic.
