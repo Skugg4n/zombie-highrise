@@ -4,7 +4,7 @@
 // data), ?autohost=1 / ?autojoin=CODE (smoke test hooks), ?seed=N.
 import * as THREE from 'three';
 import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY, PLAY_SIZES, setPlayArea } from './config.js';
-import { buildLevel, disposeLevel, MATS, makeHelicopter, FINAL_LEVEL } from './world/levelgen.js';
+import { buildLevel, disposeLevel, MATS, makeHelicopter, FINAL_LEVEL, LEVEL_SIZE } from './world/levelgen.js';
 import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
 import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
@@ -133,6 +133,11 @@ function updateDayNight(force = false) {
   const modNow = lastWave && lastWave.ph === 'night' ? lastWave.mod : null;
   if (scene.fog) {
     scene.fog.far = L.fogFar * (modNow === 'fog' ? TUNING.modifiers.fog.fogFarMult : 1);
+  } else if (mapSavedFog) {
+    // Map view suspended the fog; keep the stored one in step so closing
+    // the map does not snap the world to a stale colour.
+    mapSavedFog.color.copy(colTmp2);
+    mapSavedFog.far = L.fogFar * (modNow === 'fog' ? TUNING.modifiers.fog.fogFarMult : 1);
   }
   const blackout = modNow === 'blackout' ? TUNING.modifiers.blackout.hemiMult : 1;
   if (L.dark) {   // basements/trenches: the sky barely matters
@@ -150,7 +155,7 @@ function updateDayNight(force = false) {
   sky.uniforms.uTop.value.copy(colTmp);
   sky.uniforms.uHorizon.value.copy(colTmp2);
   sky.uniforms.uGround.value.copy(colDayGround).lerp(colNightGround, nightT);
-  scene.fog.color.copy(colTmp2);
+  if (scene.fog) scene.fog.color.copy(colTmp2);
   sun.intensity = L.sunDay * (1 - nightT * 0.92);
   sun.color.setHex(nightT > 0.5 ? 0xa8c0e8 : 0xffe8c0);   // moonlight is cool
   hemi.intensity = L.hemiDay * (1 - nightT * 0.72) * blackout;
@@ -183,10 +188,13 @@ function loadLevel(idx) {
   const spawn = level.playerSpawns[0];
   rig.group.position.copy(spawn);
   rig.group.rotation.y = rig.yaw = 0;
-  // VR re-center: put the HEAD on the spawn point, not the play-space
-  // origin, so the world quietly re-centers around the player's physical
-  // position (the elevator trick from the vision doc).
+  // VR re-center: put the HEAD on the level's marked ROOMSCALE ZONE, so a
+  // roomscale player's real floor maps onto the patch of level that is
+  // sized for their room. The level itself stays big around them; they
+  // shoot far and walk near (the elevator trick from the vision doc).
   if (vrInput && vrInput.active) {
+    const rz = level.roomZone;
+    if (rz) rig.group.position.set(rz.x, rig.group.position.y, rz.z);
     rig.group.position.x -= camera.position.x;
     rig.group.position.z -= camera.position.z;
   }
@@ -1182,6 +1190,7 @@ mapCam.up.set(0, 0, -1);
 mapCam.lookAt(0, 0, 0);
 let mapActive = false;
 let mapMode = 'ping';
+let mapSavedFog = null;
 
 function setMapMode(mode) {
   mapMode = mode;
@@ -1199,6 +1208,19 @@ function toggleMap(force) {
   const next = force !== undefined ? force : !mapActive;
   if (next === mapActive) return;
   mapActive = next;
+  // Interior levels have a ceiling; the overhead map must see past it.
+  level.group.traverse((o) => {
+    if (o.userData && o.userData.ceiling) o.visible = !mapActive;
+  });
+  // The map camera sits far above the level, so per-level fog would paint
+  // the whole readout a flat colour. Suspend it while the map is open.
+  if (mapActive) {
+    mapSavedFog = scene.fog;
+    scene.fog = null;
+  } else if (mapSavedFog) {
+    scene.fog = mapSavedFog;
+    mapSavedFog = null;
+  }
   $('map-ui').classList.toggle('hidden', !mapActive);
   $('map-grid').classList.toggle('hidden', !mapActive);
   // On touch devices the stick/look zones cover the canvas; they must let
@@ -1207,7 +1229,7 @@ function toggleMap(force) {
   if (mapActive) {
     setMapMode('ping');
     if (document.pointerLockElement) document.exitPointerLock();
-    const ext = CONFIG.PLAY_AREA * 0.7 + 6;
+    const ext = LEVEL_SIZE * 0.62;
     const aspect = innerWidth / innerHeight;
     if (aspect >= 1) {
       mapCam.top = ext; mapCam.bottom = -ext;
@@ -2251,6 +2273,7 @@ window.__zhr = {
     for (const z of [...sim.zombies.values()]) sim.damageZombie(z, 9999, false, 'H');
   },
   levelType: () => level.type,
+  debugMap: (on) => toggleMap(on),
   elevatorZone: () => (level.elevatorZone ? { x: level.elevatorZone.x, z: level.elevatorZone.z } : null),
   shopOpen: () => shopOpen,
   debugShootZombie: () => {

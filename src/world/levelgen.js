@@ -1,21 +1,28 @@
 // Level generator. Every peer builds the SAME level locally from the
 // shared (runSeed, levelIndex) pair; geometry is never networked.
 //
-// Level types cycle with height: level 1 ground, 2 basement, 3 upper
-// floor, 4 ground, ... (ground roughly every 3rd, per the vision doc).
-// Every layout fits the physical play footprint (CONFIG.PLAY_AREA) and
-// follows "shoot far, walk near": tight walkable space, long sightlines.
+// PLAYTEST LAW (Ola, 2026-08-23): the physical play area constrains ONLY
+// where a roomscale VR player may walk. It NEVER constrains the level.
+// Levels are large (LEVEL_SIZE), open and multi-route for every platform:
+// corridors, connected spaces, cover, verticality and long sightlines.
+// The roomscale zone is a marked patch of floor placed inside them.
 //
 // A Level object owns: one THREE.Group (whole level, easy dispose),
 // colliders ({x,z,hx,hz,tall}) where tall=true also blocks bullets,
-// entries (where zombies enter the playable area), far zombie spawns,
-// player spawns, the elevator, and lighting parameters for the day/night
-// controller in main.js.
+// ramps (walkable tops), entries (where zombies enter), spawnSources
+// (the VISIBLE fiction for each entry: stairwell, shaft, breach, gate),
+// player spawns, barrels, the elevator and per-level lighting.
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeRng } from '../util/rng.js';
 import { noiseTexture, plankTexture, metalTexture, sandbagTexture, facadeTexture } from './textures.js';
 import { mergeStaticMeshes } from './merge.js';
+import {
+  LEVEL_SIZE, scaleBoxUVs, box, wall, cover, platform, railing,
+  stairwell, openShaft, breach, facadeClimb, roomscaleZone, makeHeightAt,
+} from './kit.js';
+
+export { LEVEL_SIZE };
 
 export const PALETTE = {
   daySky: 0xa8c8e0, dayHaze: 0xd6c9a8,
@@ -88,35 +95,6 @@ function buildHighRise(group, x, z, { w = 15, h = 48, d = 13 } = {}) {
     new THREE.MeshStandardMaterial({ color: 0x333333 }));
   antenna.position.set(x + w * 0.1, h + 3.5, z - d * 0.2);
   group.add(antenna);
-}
-
-// Boxes scale their UVs by physical size so a tiling texture has ONE
-// world-space scale everywhere (mismatched tiling across differently
-// sized walls was the most-flagged texture flaw in the critic pass).
-// BoxGeometry vertex order: +x,-x (d*h faces), +y,-y (w*d), +z,-z (w*h).
-function scaleBoxUVs(geo, w, h, d) {
-  const uv = geo.attributes.uv;
-  const faceDims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
-  for (let f = 0; f < 6; f++) {
-    // Clamp thin faces: a 0.08 m edge would sample a 1-pixel smear.
-    const uw = Math.max(faceDims[f][0], 0.5), vh = Math.max(faceDims[f][1], 0.5);
-    for (let v = 0; v < 4; v++) {
-      const i = f * 4 + v;
-      uv.setXY(i, uv.getX(i) * uw * 0.5, uv.getY(i) * vh * 0.5);
-    }
-  }
-  uv.needsUpdate = true;
-  return geo;
-}
-
-function box(group, w, h, d, material, x, y, z, ry = 0) {
-  const geo = new THREE.BoxGeometry(w, h, d);
-  if (material.map) scaleBoxUVs(geo, w, h, d);
-  const m = new THREE.Mesh(geo, material);
-  m.position.set(x, y, z);
-  m.rotation.y = ry;
-  group.add(m);
-  return m;
 }
 
 // ---- The elevator (shared by every level) -------------------------------
@@ -270,720 +248,605 @@ function buildWasteland(group, rng, { ruinCount = 5, hillCount = 6 }) {
   }
 }
 
-// ---- Ground level -------------------------------------------------------
+// =========================================================================
+// LEVEL BUILDERS
+//
+// Rewritten after Ola's playtest. The old builders sized every level from
+// CONFIG.PLAY_AREA, so picking SMALL gave a 3 m shoebox on every platform.
+// Now: LEVEL_SIZE is fixed and generous, levels are multi-route with
+// corridors, cover and verticality, and the play area only decides where
+// the roomscale zone is painted. "Shoot far, walk near."
+// =========================================================================
+
+// ---- Ground level: a fortified compound with an outer yard --------------
 function buildGround(level, rng, quality) {
   const g = level.group;
-  const A = CONFIG.PLAY_AREA, half = A / 2;
-  level.floorY = 0.1;
-  level.heightAt = (x, z) => (Math.abs(x) < half && Math.abs(z) < half ? 0.1 : 0);
+  const S = LEVEL_SIZE;              // 34 m compound, always
+  const half = S / 2;
+  level.floorY = 0;
+  level.baseY = 0;
+
   level.lighting = {
     daySky: PALETTE.daySky, dayHaze: PALETTE.dayHaze,
-    fogNear: 60, fogFar: 260, sunDay: 2.2, hemiDay: 0.9, dark: false,
+    fogNear: 70, fogFar: 300, sunDay: 2.2, hemiDay: 0.95, dark: false,
   };
 
-  // Ground plane and a road
+  // Open wasteland floor far past the compound: the long sightlines.
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), MATS.sandGround);
-  ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02;
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.02;
   ground.receiveShadow = quality === 'DESKTOP';
   g.add(ground);
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(7, 600), mat(PALETTE.road, 1.0));
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(9, 600), mat(PALETTE.road, 1.0));
   road.rotation.x = -Math.PI / 2;
-  road.position.set(rng.pick([-18, 18]), 0, 0);
+  road.position.set(rng.pick([-1, 1]) * (half + 12), 0.01, 0);
   g.add(road);
 
-  // Base floor
-  const floor = box(g, A, 0.2, A, MATS.concrete, 0, 0, 0);
-  floor.receiveShadow = quality === 'DESKTOP';
+  // Compound slab
+  const slab = box(g, S, 0.2, S, MATS.concrete, 0, 0, 0);
+  slab.receiveShadow = quality === 'DESKTOP';
 
-  // Sandbag perimeter with a gap per side (entries). Sandbags are LOW:
-  // they block walking but not bullets. Everything scales with the chosen
-  // play-area footprint (SMALL layouts skip clutter entirely).
+  // Perimeter: tall wall segments with THREE gates. Gates are the only
+  // ways in, and each is a visible, readable source of the horde.
   const wallMat = MATS.sandbag;
-  const H = 1.0, T = 0.6;
-  const gap = Math.min(3, Math.max(1.2, A / 5));
-  const segLen = (A - gap) / 2;
-  for (const [side, rot] of [[[0, -half], 0], [[0, half], 0], [[-half, 0], Math.PI / 2], [[half, 0], Math.PI / 2]]) {
-    const [dx, dz] = side;
-    if (segLen > 0.4) {
-      for (const sign of [-1, 1]) {
-        const off = sign * (gap / 2 + segLen / 2);
-        const x = rot === 0 ? dx + off : dx;
-        const z = rot === 0 ? dz : dz + off;
-        const seg = box(g, segLen, H, T, wallMat, x, H / 2, z, rot);
-        seg.castShadow = seg.receiveShadow = quality === 'DESKTOP';
-        level.colliders.push(rot === 0
-          ? { x, z, hx: segLen / 2, hz: T / 2, tall: false }
-          : { x, z, hx: T / 2, hz: segLen / 2, tall: false });
+  const gates = [
+    { x: 0, z: -half, ax: 'x' },
+    { x: -half, z: 0, ax: 'z' },
+    { x: half, z: 4, ax: 'z' },
+  ];
+  const GATE_W = 3.4;
+  const isGate = (side, along) => gates.some((gt) =>
+    gt.ax === side && Math.abs(along - (side === 'x' ? gt.x : gt.z)) < GATE_W / 2 + 0.1);
+  // Build each side as a run of 1 m posts, skipping gate spans.
+  for (const side of ['x', 'z']) {
+    for (const sign of [-1, 1]) {
+      for (let a = -half + 0.5; a <= half - 0.5; a += 1) {
+        const onGate = gates.some((gt) => {
+          const gtSide = gt.ax;
+          const gtPos = gtSide === 'x' ? gt.z : gt.x;
+          if (gtSide !== side) return false;
+          if (Math.sign(gtPos) !== sign && Math.abs(gtPos) > 0.5) return false;
+          const gtAlong = gtSide === 'x' ? gt.x : gt.z;
+          return Math.abs(a - gtAlong) < GATE_W / 2;
+        });
+        if (onGate) continue;
+        const x = side === 'x' ? a : sign * half;
+        const z = side === 'x' ? sign * half : a;
+        box(g, side === 'x' ? 1.02 : 0.7, 2.6, side === 'x' ? 0.7 : 1.02, wallMat, x, 1.3, z);
+        level.colliders.push({
+          x, z,
+          hx: side === 'x' ? 0.51 : 0.35,
+          hz: side === 'x' ? 0.35 : 0.51,
+          tall: true,
+        });
       }
     }
-    level.entries.push(new THREE.Vector3(dx, 0.1, dz));
+  }
+  void isGate;
+  // Gate frames + the entries themselves
+  for (const gt of gates) {
+    const gx = gt.ax === 'x' ? gt.x : gt.x;
+    const gz = gt.ax === 'x' ? gt.z : gt.z;
+    for (const s of [-1, 1]) {
+      const px = gt.ax === 'x' ? gx + s * (GATE_W / 2 + 0.3) : gx;
+      const pz = gt.ax === 'x' ? gz : gz + s * (GATE_W / 2 + 0.3);
+      box(g, 0.5, 3.4, 0.5, MATS.metalShell, px, 1.7, pz);
+      level.colliders.push({ x: px, z: pz, hx: 0.25, hz: 0.25, tall: true });
+    }
+    box(g, gt.ax === 'x' ? GATE_W + 1.0 : 0.4, 0.4, gt.ax === 'x' ? 0.4 : GATE_W + 1.0,
+      MATS.metalShell, gx, 3.2, gz);
+    level.entries.push(new THREE.Vector3(gx * 0.86, 0, gz * 0.86));
+    level.spawnSources.push({ x: gx, z: gz, kind: 'gate' });
+    // Far approach: the horde walks in from the wasteland through the gate
+    const ox = gt.ax === 'x' ? gx : gx * 1.5;
+    const oz = gt.ax === 'x' ? gz * 1.5 : gz;
+    level.zombieSpawns.push(new THREE.Vector3(ox, 0, oz));
   }
 
-  // Crates and barrels inside (only when the footprint has room)
-  if (A >= 8) {
-    const crateMat = MATS.crate;
-    const barrelMat = mat(PALETTE.rust, 0.7, 0.2);
-    for (let i = 0; i < Math.round(A / 3); i++) {
-      const s = rng.range(0.6, 1.1);
-      const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
-      if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;  // keep centre open
-      box(g, s, s, s, crateMat, x, s / 2 + 0.1, z, rng.range(0, 1));
-      level.colliders.push({ x, z, hx: s / 2, hz: s / 2, tall: false });
-    }
-    for (let i = 0; i < 3; i++) {
-      const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.9, 8), barrelMat);
-      b.position.set(x, 0.55, z);
-      g.add(b);
-      level.colliders.push({ x, z, hx: 0.35, hz: 0.35, tall: false });
-    }
-    // Explosive barrels: shootable, chain into the horde. Placed near the
-    // wall gaps where the zombies funnel in (the whole point of them).
-    for (const e of level.entries) {
-      if (!rng.chance(0.7)) continue;
-      const bx = e.x * 0.72 + rng.range(-0.8, 0.8);
-      const bz = e.z * 0.72 + rng.range(-0.8, 0.8);
-      level.barrels.push({ x: bx, z: bz });
-    }
+  // Interior architecture: two inner buildings split the compound into
+  // connected yards, so there is never one square to stand in.
+  const bMat = MATS.plaster;
+  // Building A (west), with a through-corridor
+  wall(level, bMat, -8, -6, 12, 0.5, 3.2);
+  wall(level, bMat, -8, 0.5, 12, 0.5, 3.2);
+  wall(level, bMat, -14, -2.75, 0.5, 7, 3.2);
+  wall(level, bMat, -2, -5, 0.5, 3, 3.2);      // leaves a doorway gap
+  wall(level, bMat, -2, 0, 0.5, 1.4, 3.2);
+  // Building B (east)
+  wall(level, bMat, 8, 7, 0.5, 10, 3.2);
+  wall(level, bMat, 13, 12.2, 10.5, 0.5, 3.2);
+  wall(level, bMat, 13, 2.2, 10.5, 0.5, 3.2);
+
+  // Watchtower: verticality with a real firing position over the walls.
+  const towerX = 6, towerZ = -9;
+  platform(level, MATS.planksOld, towerX, towerZ, 4.4, 4.4, 2.4, 'south');
+  railing(level, MATS.metalDoor, towerX, towerZ - 2.2, 4.4, 0.12);
+  railing(level, MATS.metalDoor, towerX - 2.2, towerZ, 0.12, 4.4);
+
+  // Cover scattered along the fighting lanes
+  const coverSpots = [
+    [-4, 6, 2.4, 0.8], [1, 8, 0.8, 2.6], [4, 3, 2.2, 0.8],
+    [-10, 6, 0.8, 2.4], [10, -4, 2.6, 0.8], [-6, -10, 2.2, 0.9],
+    [2, -3, 0.9, 2.2], [-12, 10, 2.0, 0.9], [12, 8, 0.9, 2.4],
+  ];
+  for (const [cx, cz, cw, cd] of coverSpots) cover(level, MATS.sandbag, cx, cz, cw, cd);
+  for (let i = 0; i < 8; i++) {
+    const s = rng.range(0.7, 1.2);
+    const cx = rng.range(-half + 3, half - 3), cz = rng.range(-half + 3, half - 3);
+    if (Math.hypot(cx, cz) < 4) continue;
+    cover(level, MATS.crate, cx, cz, s, s, s);
   }
 
-  // Foreground scatter: debris ring just outside the walls so every shot
-  // has a near layer (critic pass: "no foreground layer at all").
-  const debrisMat = MATS.planksOld;
-  const rockMat = mat(0x9a8d76, 1.0);
-  for (let i = 0; i < 10; i++) {
-    const ang = rng.range(0, Math.PI * 2);
-    const dist = half + rng.range(1.5, 9);
-    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
-    if (rng.chance(0.5)) {
-      box(g, rng.range(0.6, 1.4), 0.06, rng.range(0.15, 0.3), debrisMat, x, 0.03, z, rng.range(0, Math.PI));
-    } else {
-      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rng.range(0.15, 0.45), 0), rockMat);
-      rock.position.set(x, 0.12, z);
-      rock.rotation.set(rng.range(0, 3), rng.range(0, 3), 0);
-      g.add(rock);
-    }
-  }
-  // Tire tracks on the road: two long dark strips
-  for (const off of [-1.1, 1.1]) {
-    const track = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 600),
-      new THREE.MeshBasicMaterial({ color: 0x55514a, transparent: true, opacity: 0.5, depthWrite: false }));
-    track.rotation.x = -Math.PI / 2;
-    track.position.set(road.position.x + off, 0.012, 0);
-    g.add(track);
+  // Explosive barrels near the gates (where the horde funnels)
+  for (const gt of gates) {
+    if (!rng.chance(0.8)) continue;
+    level.barrels.push({ x: gt.x * 0.7 + rng.range(-1.5, 1.5), z: gt.z * 0.7 + rng.range(-1.5, 1.5) });
   }
 
   buildWasteland(g, rng, {});
+  buildHighRise(g, 0, -half - 16);
 
-  // Midground kit (the critic's three-depth-layers demand): a fence line
-  // along the road, debris clusters and scrub tufts between the base and
-  // the horizon so no sightline crosses empty sand.
-  {
-    const postMat = mat(0x4f4336, 1.0);
-    for (let i = -6; i <= 6; i++) {
-      const px = road.position.x + (road.position.x > 0 ? 4 : -4);
-      box(g, 0.12, 1.1, 0.12, postMat, px, 0.55, i * 9 + rng.range(-1, 1));
-    }
-    const scrubMat = mat(0x7a7d4a, 1.0);
-    for (let i = 0; i < 26; i++) {
-      const ang = rng.range(0, Math.PI * 2);
-      const dist = rng.range(half + 4, half + 30);
-      const sx = Math.cos(ang) * dist, sz = Math.sin(ang) * dist;
-      const tuft = new THREE.Mesh(new THREE.ConeGeometry(rng.range(0.25, 0.5), rng.range(0.3, 0.6), 5), scrubMat);
-      tuft.position.set(sx, 0.15, sz);
-      tuft.rotation.y = rng.range(0, 3);
-      g.add(tuft);
-    }
-    for (let i = 0; i < 4; i++) {
-      const ang = rng.range(0, Math.PI * 2);
-      const dist = rng.range(half + 6, half + 22);
-      const cx = Math.cos(ang) * dist, cz = Math.sin(ang) * dist;
-      for (let j = 0; j < 3; j++) {
-        box(g, rng.range(0.4, 1.2), rng.range(0.2, 0.5), rng.range(0.4, 1.0),
-          rng.chance(0.5) ? MATS.crate : mat(0x8a8578),
-          cx + rng.range(-1.2, 1.2), 0.2, cz + rng.range(-1.2, 1.2), rng.range(0, 3));
-      }
-    }
-  }
-
-  // THE high-rise looms right behind the elevator: the base is its ground
-  // floor, and the tower explains where the elevator goes.
-  buildHighRise(g, 0, -half - 10);
-
-  // Elevator just beyond the north gap, doors facing into the base. The
-  // BOARDING ZONE sits inside the footprint (roomscale players can only
-  // physically reach the playable area): standing in front of the open
-  // doors counts as boarding.
+  // Elevator inside the compound, reachable from every yard.
   level.elevator = makeElevator();
-  level.elevator.group.position.set(0, 0.1, -half - 1.2);
+  level.elevator.group.position.set(-half + 2.2, 0, half - 3.0);
+  level.elevator.group.rotation.y = -Math.PI / 4;
   g.add(level.elevator.group);
-  addElevatorColliders(level, 0, -half - 1.2);
-  level.elevatorZone = { x: 0, z: -half + 0.9, hx: 1.3, hz: 0.9 };
+  addElevatorColliders(level, -half + 2.2, half - 3.0);
+  level.elevatorZone = { x: -half + 4.0, z: half - 4.6, hx: 1.9, hz: 1.9 };
 
-  // Spawns (fractions of the footprint so every play size works)
-  const q = half * 0.3;
+  level.heightAt = makeHeightAt(level, 0);
+  roomscaleZone(level, 0, 4);
   level.playerSpawns = [
-    new THREE.Vector3(0, 0.1, q), new THREE.Vector3(q, 0.1, -q * 0.5),
-    new THREE.Vector3(-q, 0.1, -q * 0.5), new THREE.Vector3(0, 0.1, -q),
-    new THREE.Vector3(q, 0.1, q),
+    new THREE.Vector3(0, 0, 4), new THREE.Vector3(1.6, 0, 5.4),
+    new THREE.Vector3(-1.6, 0, 5.4), new THREE.Vector3(1.6, 0, 2.6),
+    new THREE.Vector3(-1.6, 0, 2.6),
   ];
-  // Far spawns: the horde walks in from the wasteland (visible at range).
-  for (let i = 0; i < 8; i++) {
-    const ang = rng.range(0, Math.PI * 2);
-    const dist = rng.range(26, 42);
-    level.zombieSpawns.push(new THREE.Vector3(Math.cos(ang) * dist, 0, Math.sin(ang) * dist));
-  }
 }
 
-// ---- Basement level -----------------------------------------------------
+// ---- Basement: a boiler-room maze of rooms and corridors ---------------
 function buildBasement(level, rng) {
   const g = level.group;
-  const A = CONFIG.PLAY_AREA + 4;    // walls sit just outside the footprint
-  const half = A / 2;
-  level.floorY = 0.0;
-  level.heightAt = () => 0;
+  const S = LEVEL_SIZE;
+  const half = S / 2;
+  level.floorY = 0;
+  level.baseY = 0;
   level.lighting = {
     daySky: 0x0a1018, dayHaze: 0x101828,
-    fogNear: 5, fogFar: 30, sunDay: 0.0, hemiDay: 0.42, dark: true,
+    fogNear: 7, fogFar: 44, sunDay: 0.0, hemiDay: 0.8, dark: true,
   };
 
-  const floorMat = MATS.basementFloor;
-  const wallMat = MATS.basementWall;
-  const ceilMat = mat(0x4a4741, 1.0);
-
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(A, A), floorMat);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(S, S), MATS.basementFloor);
   floor.rotation.x = -Math.PI / 2;
   g.add(floor);
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(A, A), ceilMat);
-  ceil.rotation.x = Math.PI / 2; ceil.position.y = 2.6;
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(S, S), mat(0x3a3831, 1.0));
+  ceil.rotation.x = Math.PI / 2;
+  ceil.position.y = 3.0;
+  ceil.userData.dynamic = true;   // never merged, so the map can hide it
+  ceil.userData.ceiling = true;
   g.add(ceil);
 
-  // Perimeter walls with 3 doorway entries (dark openings). The north
-  // side (index 0) hosts the elevator and stays solid. NOTE: an earlier
-  // version shuffled sides with Array.sort and a random comparator, which
-  // is ENGINE-DEFINED and desynced peers on different browsers.
-  const doorSides = [1, 2, 3];
-  const sides = [
-    { x: 0, z: -half, hx: half, hz: 0.15, rot: 0 },
-    { x: 0, z: half, hx: half, hz: 0.15, rot: 0 },
-    { x: -half, z: 0, hx: 0.15, hz: half, rot: 1 },
-    { x: half, z: 0, hx: 0.15, hz: half, rot: 1 },
-  ];
-  sides.forEach((s, i) => {
-    const hasDoor = doorSides.includes(i);
-    const len = half * 2;
-    if (!hasDoor) {
-      box(g, s.rot ? 0.3 : len, 2.6, s.rot ? len : 0.3, wallMat, s.x, 1.3, s.z);
-      level.colliders.push({ x: s.x, z: s.z, hx: s.hx, hz: s.hz, tall: true });
-    } else {
-      // Two wall segments leaving a 1.6 m doorway in the middle.
-      const segLen = (len - 1.6) / 2;
-      for (const sign of [-1, 1]) {
-        const off = sign * (0.8 + segLen / 2);
-        const x = s.rot ? s.x : s.x + off;
-        const z = s.rot ? s.z + off : s.z;
-        box(g, s.rot ? 0.3 : segLen, 2.6, s.rot ? segLen : 0.3, wallMat, x, 1.3, z);
-        level.colliders.push(s.rot
-          ? { x, z, hx: 0.15, hz: segLen / 2, tall: true }
-          : { x, z, hx: segLen / 2, hz: 0.15, tall: true });
-      }
-      // Door lintel + pitch-black doorway plane (reads as a hole)
-      box(g, s.rot ? 0.3 : 1.6, 0.5, s.rot ? 1.6 : 0.3, wallMat, s.x, 2.35, s.z);
-      const dark = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.05),
-        new THREE.MeshBasicMaterial({ color: 0x000000 }));
-      dark.position.set(s.x, 1.05, s.z);
-      if (s.rot) dark.rotation.y = Math.PI / 2 * (s.x > 0 ? -1 : 1);
-      else if (s.z > 0) dark.rotation.y = Math.PI;
-      dark.position.x += s.rot ? (s.x > 0 ? -0.16 : 0.16) : 0;
-      dark.position.z += s.rot ? 0 : (s.z > 0 ? -0.16 : 0.16);
-      g.add(dark);
-      const entry = new THREE.Vector3(s.x, 0, s.z);
-      level.entries.push(entry);
-      level.zombieSpawns.push(entry.clone());
-    }
-  });
+  const wMat = MATS.basementWall;
+  // Outer shell (solid; the ways in are the stairwell and the breaches)
+  wall(level, wMat, 0, -half, S, 0.6, 3.0);
+  wall(level, wMat, 0, half, S, 0.6, 3.0);
+  wall(level, wMat, -half, 0, 0.6, S, 3.0);
+  wall(level, wMat, half, 0, 0.6, S, 3.0);
 
-  // Pillar grid + shelving clutter (never near the elevator or its zone)
-  const pillarMat = mat(0x5e5a52, 1.0);
-  const elevX = 0, elevZ = -half + 1.3;
-  const zoneZ = Math.max(-CONFIG.PLAY_AREA / 2 + 0.9, -half + 3.0);
-  for (const px of [-half / 2, half / 2]) {
-    for (const pz of [-half / 2, half / 2]) {
-      const x = px + rng.range(-1, 1), z = pz + rng.range(-1, 1);
-      if (Math.hypot(x - elevX, z - elevZ) < 2.6) continue;
-      if (Math.hypot(x - elevX, z - zoneZ) < 2.2) continue;
-      box(g, 0.6, 2.6, 0.6, pillarMat, x, 1.3, z);
-      level.colliders.push({ x, z, hx: 0.3, hz: 0.3, tall: true });
-    }
-  }
-  if (A >= 10) {
-    const shelfMat = MATS.crate;
-    for (let i = 0; i < 4; i++) {
-      const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
-      if (Math.abs(x) < 2.5 && Math.abs(z) < 2.5) continue;
-      box(g, 1.6, 1.8, 0.5, shelfMat, x, 0.9, z, rng.pick([0, Math.PI / 2]));
-      level.colliders.push({ x, z, hx: 0.8, hz: 0.8, tall: false });
-    }
+  // Interior partitions forming rooms + corridors. Gaps are doorways.
+  // Long spine corridor down the middle, rooms hanging off both sides.
+  wall(level, wMat, -6, -3, 16, 0.5, 3.0);
+  wall(level, wMat, 9, -3, 12, 0.5, 3.0);
+  wall(level, wMat, -6, 3.5, 16, 0.5, 3.0);
+  wall(level, wMat, 9, 3.5, 12, 0.5, 3.0);
+  // Cross walls with doorway gaps
+  wall(level, wMat, -12, -9, 0.5, 11, 3.0);
+  wall(level, wMat, -2, -10.5, 0.5, 8, 3.0);
+  wall(level, wMat, 6, -9, 0.5, 11, 3.0);
+  wall(level, wMat, -12, 9.5, 0.5, 11, 3.0);
+  wall(level, wMat, -2, 10.5, 0.5, 8, 3.0);
+  wall(level, wMat, 8, 9.5, 0.5, 11, 3.0);
+  wall(level, wMat, 13, 8, 8, 0.5, 3.0);
+  wall(level, wMat, -13, -14, 8, 0.5, 3.0);
+
+  // Pillars along the spine
+  for (let px = -14; px <= 14; px += 7) {
+    box(g, 0.7, 3.0, 0.7, wMat, px, 1.5, 0.25);
+    level.colliders.push({ x: px, z: 0.25, hx: 0.35, hz: 0.35, tall: true });
   }
 
-  // Sparse hanging work lamps (the flashlight does the real work)
-  for (let i = 0; i < 2; i++) {
-    const x = rng.range(-half / 2, half / 2), z = rng.range(-half / 2, half / 2);
-    const lamp = new THREE.PointLight(0xffd9a0, 1.1, 11);
-    lamp.position.set(x, 2.3, z);
+  // A raised maintenance deck: verticality in a basement
+  platform(level, MATS.planksOld, 12, -11, 6, 5, 1.5, 'south');
+  railing(level, MATS.metalDoor, 12, -13.4, 6, 0.12);
+
+  // Cover: shelving, crates, pipe banks
+  for (let i = 0; i < 14; i++) {
+    const cx = rng.range(-half + 2.5, half - 2.5);
+    const cz = rng.range(-half + 2.5, half - 2.5);
+    if (Math.abs(cz) < 1.6) continue;           // keep the spine walkable
+    const w = rng.chance(0.5) ? 1.8 : 0.7;
+    cover(level, rng.chance(0.5) ? MATS.crate : MATS.planksOld, cx, cz, w, w === 1.8 ? 0.7 : 1.8);
+  }
+  // Pipes overhead so the ceiling reads as a boiler room
+  for (let i = 0; i < 8; i++) {
+    const pz = rng.range(-half + 2, half - 2);
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, S - 2, 6), MATS.metalShell);
+    pipe.rotation.z = Math.PI / 2;
+    pipe.position.set(0, 2.6 + rng.range(-0.2, 0.2), pz);
+    g.add(pipe);
+  }
+
+  // VISIBLE sources: a stairwell you can see people climbing out of, plus
+  // two breached walls. Nothing appears from thin air.
+  stairwell(level, wMat, MATS.metalDoor, -half + 4, half - 4, 0);
+  breach(level, wMat, mat(0x4a463f, 1.0), 5, -half + 0.4, 3.4, 'x');
+  breach(level, wMat, mat(0x4a463f, 1.0), half - 0.4, 6, 3.0, 'z');
+  for (const e of level.entries) level.zombieSpawns.push(e.clone());
+
+  // Work lamps: pools of warm light, never pure black
+  for (const [lx, lz] of [[-10, 0], [-2, 0], [6, 0], [14, 2], [-14, 10], [2, 10], [12, 10], [-8, -10], [6, -12], [-14, -6]]) {
+    const lamp = new THREE.PointLight(0xffd9a0, 1.9, 16);
+    lamp.position.set(lx, 2.7, lz);
     g.add(lamp);
-    box(g, 0.25, 0.1, 0.25, mat(0x333333), x, 2.45, z);
+    box(g, 0.26, 0.1, 0.26, mat(0x2a2a2a), lx, 2.86, lz);
   }
 
-  // Elevator against the north wall, doors facing into the room (+Z is
-  // the cab's door side; no rotation needed). Boarding zone inside the
-  // play footprint so roomscale players can reach it.
-  const playHalf = CONFIG.PLAY_AREA / 2;
+  level.barrels.push({ x: 4, z: -6 }, { x: -8, z: 7 });
+
   level.elevator = makeElevator();
-  level.elevator.group.position.set(0, 0, -half + 1.3);
+  level.elevator.group.position.set(-half + 2.4, 0, -half + 3.0);
+  level.elevator.group.rotation.y = Math.PI / 2;
   g.add(level.elevator.group);
-  addElevatorColliders(level, 0, -half + 1.3);
-  level.elevatorZone = { x: 0, z: Math.max(-playHalf + 0.9, -half + 3.0), hx: 1.3, hz: 0.9 };
-  // Explosive barrels by the doorways (basement chokepoints)
-  for (const e of level.entries) {
-    if (rng.chance(0.6)) level.barrels.push({ x: e.x * 0.7, z: e.z * 0.7 });
-  }
+  addElevatorColliders(level, -half + 2.4, -half + 3.0);
+  level.elevatorZone = { x: -half + 4.6, z: -half + 3.0, hx: 1.8, hz: 1.8 };
 
-  const qb = half * 0.28;
+  level.heightAt = makeHeightAt(level, 0);
+  roomscaleZone(level, -6, 0);
   level.playerSpawns = [
-    new THREE.Vector3(0, 0, qb), new THREE.Vector3(qb, 0, -qb * 0.5),
-    new THREE.Vector3(-qb, 0, -qb * 0.5), new THREE.Vector3(0, 0, -qb),
-    new THREE.Vector3(qb, 0, qb),
+    new THREE.Vector3(-6, 0, 0), new THREE.Vector3(-4.4, 0, 1.2),
+    new THREE.Vector3(-7.6, 0, 1.2), new THREE.Vector3(-4.4, 0, -1.2),
+    new THREE.Vector3(-7.6, 0, -1.2),
   ];
 }
 
-// ---- Upper floor --------------------------------------------------------
+// ---- Upper floor: offices, a corridor ring and a balcony ---------------
+// The playtest question was "where do the zombies even come from up here?"
+// Answer, visibly: the stairwell, the open elevator shaft, and the facade.
 function buildUpper(level, rng, quality) {
   const g = level.group;
-  const A = CONFIG.PLAY_AREA + 2;
-  const half = A / 2;
-  const STOREY = 12;                 // how high up we are
+  const S = LEVEL_SIZE;
+  const half = S / 2;
+  const STOREY = 24;
   level.floorY = 0;
-  // Room and balcony are at 0; everything beyond the walls drops to the
-  // street (so grenades over the balcony fall and burn down there, and
-  // nothing floats at window height).
-  const inHalf = A / 2 + 0.6;
-  level.heightAt = (x, z) => {
-    if (Math.abs(x) <= inHalf && Math.abs(z) <= inHalf) return 0;
-    if (Math.abs(x) <= A * 0.3 && z > A / 2 && z < A / 2 + 2.5) return 0;   // balcony
-    return -STOREY;
-  };
+  level.baseY = 0;
   level.lighting = {
     daySky: PALETTE.daySky, dayHaze: PALETTE.dayHaze,
-    fogNear: 70, fogFar: 300, sunDay: 2.0, hemiDay: 0.8, dark: false,
+    fogNear: 60, fogFar: 280, sunDay: 2.0, hemiDay: 0.85, dark: false,
   };
 
-  const floorMat = MATS.parquet;
-  const wallMat = MATS.plaster;
-
-  // Room floor and ceiling
-  const floor = box(g, A, 0.2, A, floorMat, 0, -0.1, 0);
+  const floor = box(g, S, 0.3, S, MATS.parquet, 0, -0.15, 0);
   floor.receiveShadow = quality === 'DESKTOP';
-  box(g, A, 0.15, A, mat(0x6d6355, 1.0), 0, 2.8, 0);
-  // Interior fill: window bounce light (the sun itself cannot reach in
-  // without shadows, so the room needs its own warmth to stay readable).
-  for (const lx of [-3, 3]) {
-    const fill = new THREE.PointLight(0xffeecd, 1.4, 18);
-    fill.position.set(lx, 2.2, 2.0);
+  const upCeil = box(g, S, 0.2, S, mat(0x6d6355, 1.0), 0, 3.1, 0);
+  upCeil.userData.dynamic = true;
+  upCeil.userData.ceiling = true;
+
+  const wMat = MATS.plaster;
+  // North / east / west shell walls (south is the window wall + balcony)
+  wall(level, wMat, 0, -half, S, 0.5, 3.0);
+  wall(level, wMat, -half, -4, 0.5, S - 8, 3.0);
+  wall(level, wMat, half, -4, 0.5, S - 8, 3.0);
+
+  // South window wall: piers with wide openings, chest-high sills.
+  const winW = 4.0, pierW = 2.2;
+  let cx = -half + pierW / 2;
+  while (cx < half) {
+    wall(level, wMat, cx, half, pierW, 0.4, 3.0);
+    cx += pierW + winW;
+  }
+  // Continuous sill: blocks walking out, not shooting out.
+  cover(level, wMat, 0, half, S, 0.4, 1.0);
+  box(g, S, 0.5, 0.4, wMat, 0, 2.75, half);
+
+  // Balcony strip beyond the windows, with a railing and ONE breached
+  // section where the climbers come over.
+  const balc = box(g, S * 0.8, 0.2, 3.0, MATS.concrete, 0, -0.1, half + 1.7);
+  balc.receiveShadow = quality === 'DESKTOP';
+  const railMat = MATS.metalDoor;
+  const climbX = rng.range(-6, 6);
+  for (let bx = -S * 0.4 + 1; bx < S * 0.4; bx += 2) {
+    if (Math.abs(bx - climbX) < 1.6) continue;      // the breached span
+    box(g, 1.9, 0.9, 0.1, railMat, bx, 0.45, half + 3.15);
+  }
+  facadeClimb(level, railMat, MATS.metalShell, climbX, half + 3.15);
+
+  // Interior offices: rooms off a corridor ring, multiple routes.
+  wall(level, wMat, -9, -8, 14, 0.5, 3.0);
+  wall(level, wMat, 10, -8, 12, 0.5, 3.0);
+  wall(level, wMat, -16, -3, 0.5, 10, 3.0);
+  wall(level, wMat, -2, -12, 0.5, 8, 3.0);
+  wall(level, wMat, 4, -3, 0.5, 10, 3.0);
+  wall(level, wMat, 12, -13, 0.5, 8, 3.0);
+  wall(level, wMat, -8, 3, 10, 0.5, 3.0);
+  wall(level, wMat, 9, 3, 10, 0.5, 3.0);
+  wall(level, wMat, -13, 7, 0.5, 8, 3.0);
+  wall(level, wMat, 13, 7, 0.5, 8, 3.0);
+
+  // A mezzanine over the west offices: verticality + a sniping perch.
+  platform(level, MATS.planksOld, -12, 10, 7, 6, 1.6, 'east');
+  railing(level, railMat, -12, 13, 7, 0.12);
+
+  // Office furniture as cover
+  for (let i = 0; i < 16; i++) {
+    const dx = rng.range(-half + 2, half - 2), dz = rng.range(-half + 2, half - 3);
+    if (Math.abs(dx) < 2 && Math.abs(dz) < 2) continue;
+    const long = rng.chance(0.5);
+    cover(level, MATS.crate, dx, dz, long ? 1.8 : 0.8, long ? 0.8 : 1.8, 0.78);
+  }
+
+  // VISIBLE sources on a high floor
+  stairwell(level, wMat, MATS.metalDoor, -half + 4.5, -half + 4.5, 0);
+  openShaft(level, wMat, MATS.metalShell, half - 5, -half + 3);
+  for (const e of level.entries) level.zombieSpawns.push(e.clone());
+
+  // The city below and around, seen through the windows
+  const streetY = -STOREY;
+  const street = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat(PALETTE.road, 1.0));
+  street.rotation.x = -Math.PI / 2;
+  street.position.y = streetY;
+  g.add(street);
+  for (const [tx, tz, tw, th, td] of [
+    [-14, half + 40, 14, 30, 12], [12, half + 52, 16, 40, 14],
+    [30, half + 30, 12, 24, 12], [-34, half + 34, 12, 26, 12]]) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(tw, th, td), MATS.facade);
+    scaleBoxUVs(t.geometry, tw / 5, th / 5, td / 5);
+    t.position.set(tx, streetY + th / 2, tz);
+    g.add(t);
+  }
+  // Interior fill light so the room reads without shadow maps
+  for (const lx of [-8, 8]) {
+    const fill = new THREE.PointLight(0xffeecd, 1.3, 22);
+    fill.position.set(lx, 2.5, 6);
     g.add(fill);
   }
 
-  // South side: window wall with sills (shoot out, low collider) + balcony
-  const sillH = 1.0;
-  const winW = Math.min(1.8, A / 3);
-  const nWin = Math.max(1, Math.min(3, Math.floor(A / 4)));
-  const gapTotal = A - nWin * winW;
-  const pierW = gapTotal / (nWin + 1);
-  let cx = -half + pierW / 2;
-  for (let i = 0; i <= nWin; i++) {
-    box(g, pierW, 2.8, 0.25, wallMat, cx, 1.4, half);
-    level.colliders.push({ x: cx, z: half, hx: pierW / 2, hz: 0.125, tall: true });
-    cx += pierW + winW;
-  }
-  // Continuous sill under the windows (low: blocks walking, not shooting)
-  box(g, A, sillH, 0.25, wallMat, 0, sillH / 2, half);
-  level.colliders.push({ x: 0, z: half, hx: half, hz: 0.125, tall: false });
-  // Window headers
-  box(g, A, 0.5, 0.25, wallMat, 0, 2.55, half);
-  // Window frames (dark trim around each opening) + warm light pools on
-  // the floor under the windows to sell the light coming in.
-  const frameMat = mat(0x4a4038, 0.85);
-  let fx = -half + pierW + winW / 2;
-  for (let i = 0; i < nWin; i++) {
-    box(g, winW + 0.12, 0.08, 0.3, frameMat, fx, sillH + 0.02, half);        // sill trim
-    box(g, winW + 0.12, 0.08, 0.3, frameMat, fx, 2.52, half);                // top trim
-    box(g, 0.08, 1.6, 0.3, frameMat, fx - winW / 2, sillH + 0.78, half);
-    box(g, 0.08, 1.6, 0.3, frameMat, fx + winW / 2, sillH + 0.78, half);
-    const pool = new THREE.Mesh(new THREE.PlaneGeometry(winW * 1.2, 2.6),
-      new THREE.MeshBasicMaterial({ color: 0xffe8b8, transparent: true, opacity: 0.16, depthWrite: false }));
-    pool.rotation.x = -Math.PI / 2;
-    pool.position.set(fx - 1.1, 0.015, half - 1.6);   // skewed with the sun
-    g.add(pool);
-    fx += winW + pierW;
-  }
-  // Baseboards where floor meets the walls
-  for (const [bx, bz, bw, brot] of [[0, -half + 0.15, A, 0], [-half + 0.15, 0, A, 1], [half - 0.15, 0, A, 1]]) {
-    box(g, brot ? 0.06 : bw, 0.14, brot ? bw : 0.06, frameMat, bx, 0.07, bz);
-  }
+  // Outside the walls it is a long way down.
+  const inHalf = half + 0.4;
+  level.heightAt = (x, z) => {
+    if (Math.abs(x) <= inHalf && z <= inHalf && z >= -inHalf) return makeHeightAt(level, 0)(x, z);
+    if (Math.abs(x) <= S * 0.4 && z > half && z < half + 3.3) return 0;   // balcony
+    return -STOREY;
+  };
 
-  // Balcony outside the window wall with a railing
-  const balc = box(g, A * 0.6, 0.15, 2.2, mat(PALETTE.concrete), 0, -0.075, half + 1.35);
-  balc.receiveShadow = quality === 'DESKTOP';
-  box(g, A * 0.6, 0.9, 0.08, mat(PALETTE.metalDark, 0.6, 0.4), 0, 0.45, half + 2.4);
+  level.barrels.push({ x: half - 6, z: -half + 6 }, { x: -6, z: -6 });
 
-  // Other three walls, two with stairwell door entries
-  const walls = [
-    { x: 0, z: -half, rot: 0, door: true },
-    { x: -half, z: 0, rot: 1, door: true },
-    { x: half, z: 0, rot: 1, door: false },
-  ];
-  for (const w of walls) {
-    const len = A;
-    if (!w.door) {
-      box(g, w.rot ? 0.25 : len, 2.8, w.rot ? len : 0.25, wallMat, w.x, 1.4, w.z);
-      level.colliders.push(w.rot
-        ? { x: w.x, z: w.z, hx: 0.125, hz: half, tall: true }
-        : { x: w.x, z: w.z, hx: half, hz: 0.125, tall: true });
-    } else {
-      const segLen = (len - 1.6) / 2;
-      for (const sign of [-1, 1]) {
-        const off = sign * (0.8 + segLen / 2);
-        const x = w.rot ? w.x : w.x + off;
-        const z = w.rot ? w.z + off : w.z;
-        box(g, w.rot ? 0.25 : segLen, 2.8, w.rot ? segLen : 0.25, wallMat, x, 1.4, z);
-        level.colliders.push(w.rot
-          ? { x, z, hx: 0.125, hz: segLen / 2, tall: true }
-          : { x, z, hx: segLen / 2, hz: 0.125, tall: true });
-      }
-      box(g, w.rot ? 0.25 : 1.6, 0.6, w.rot ? 1.6 : 0.25, wallMat, w.x, 2.5, w.z);
-      const entry = new THREE.Vector3(w.x, 0, w.z);
-      level.entries.push(entry);
-      level.zombieSpawns.push(entry.clone());
-    }
-  }
-
-  // Interior clutter: desks, filing cabinets (skipped in tight footprints)
-  if (A >= 9) {
-    const deskMat = MATS.crate;
-    for (let i = 0; i < 4; i++) {
-      const x = rng.range(-half + 2, half - 3), z = rng.range(-half + 2, half - 3);
-      if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;
-      box(g, 1.4, 0.75, 0.7, deskMat, x, 0.375, z, rng.pick([0, Math.PI / 2]));
-      level.colliders.push({ x, z, hx: 0.7, hz: 0.7, tall: false });
-    }
-  }
-
-  // The world below: street, opposing buildings, wasteland horizon
-  const streetY = -STOREY;
-  const street = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(PALETTE.road, 1.0));
-  street.rotation.x = -Math.PI / 2; street.position.y = streetY;
-  g.add(street);
-  // A guaranteed skyline framed by the windows: two facade towers dead
-  // ahead plus randomized filler blocks. Lamp posts line the street.
-  {
-    const t1 = new THREE.Mesh(new THREE.BoxGeometry(10, 22, 9), MATS.facade);
-    scaleBoxUVs(t1.geometry, 2, 11, 2);
-    t1.position.set(-6, streetY + 11, half + 24);
-    g.add(t1);
-    const t2 = new THREE.Mesh(new THREE.BoxGeometry(12, 30, 10), MATS.facade);
-    scaleBoxUVs(t2.geometry, 2.4, 15, 2);
-    t2.position.set(9, streetY + 15, half + 34);
-    g.add(t2);
-    for (const lx of [-8, 0, 8]) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 5, 5), mat(0x3a3a3a));
-      pole.position.set(lx, streetY + 2.5, half + 8);
-      g.add(pole);
-    }
-  }
-  const facadeMat = mat(0x8f8578);
-  for (let i = 0; i < 4; i++) {
-    const w = rng.range(8, 16), h = rng.range(6, STOREY + 6), d = rng.range(8, 14);
-    const x = rng.pick([-1, 1]) * rng.range(20, 60);
-    const z = half + rng.range(18, 60);
-    box(g, w, h, d, facadeMat, x, streetY + h / 2, z, 0);
-  }
-  // Our own building's facade below the balcony
-  box(g, A + 6, STOREY, 3, mat(PALETTE.interiorWall), 0, streetY + STOREY / 2 - 0.2, half + 0.5 - 1.5 + 1.5);
-
-  // Elevator on the windowless east wall, doors facing -X into the room.
-  // Boarding zone in front of the doors, inside the play footprint.
   level.elevator = makeElevator();
-  level.elevator.group.position.set(half - 1.6, 0, half / 2);
+  level.elevator.group.position.set(half - 3.0, 0, half - 6);
   level.elevator.group.rotation.y = -Math.PI / 2;
   g.add(level.elevator.group);
-  addElevatorColliders(level, half - 1.6, half / 2);
-  level.elevatorZone = { x: half - 3.2, z: half / 2, hx: 1.3, hz: 1.1 };
+  addElevatorColliders(level, half - 3.0, half - 6);
+  level.elevatorZone = { x: half - 5.2, z: half - 6, hx: 1.8, hz: 1.9 };
 
-  const qu = half * 0.3;
+  roomscaleZone(level, 0, 8);
   level.playerSpawns = [
-    new THREE.Vector3(0, 0, qu), new THREE.Vector3(qu, 0, 0),
-    new THREE.Vector3(-qu, 0, 0), new THREE.Vector3(0, 0, -qu),
-    new THREE.Vector3(-qu, 0, qu),
-  ];
-  // NOTE: street-level "target practice" spawns were removed: the sim's
-  // heightAt() would teleport them to room height where they float at the
-  // windows and bite through the sill (review find). Street ambience
-  // returns as pure visuals in the Phase 3 polish pass; all real pressure
-  // comes through the stairwell doors.
-}
-
-// ---- Trench (tight, night, flashlight) ----------------------------------
-// A serpentine dirt trench carved through a raised night field. Corridors
-// are the walkable cells; everything else is dirt wall (tall colliders).
-// Compact variant for SMALL/MEDIUM play areas: one straight trench lane
-// that fits the physical footprint (the serpentine needs 8 m+).
-function buildTrenchSmall(level, rng) {
-  const g = level.group;
-  const play = CONFIG.PLAY_AREA;
-  const half = play / 2 + 1;                 // walls just outside the footprint
-  level.floorY = 0;
-  level.heightAt = () => 0;
-  level.lighting = {
-    daySky: 0x16203a, dayHaze: 0x1b2742,
-    fogNear: 8, fogFar: 60, sunDay: 0.35, hemiDay: 0.5, dark: true,
-  };
-  const dirtMat = MATS.dirt;
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + 2, half * 2 + 2), MATS.basementFloor);
-  floor.rotation.x = -Math.PI / 2;
-  g.add(floor);
-  const field = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(0x2c3226, 1.0));
-  field.rotation.x = -Math.PI / 2;
-  field.position.y = 2.3;
-  g.add(field);
-  // North and south dirt walls form the lane; east end open (entry),
-  // west end holds the elevator.
-  for (const z of [-half, half]) {
-    box(g, half * 2 + 2, 2.4, 1.6, dirtMat, 0, 1.2, z);
-    level.colliders.push({ x: 0, z, hx: half + 1, hz: 0.8, tall: true });
-  }
-  const flare = new THREE.PointLight(0xff7030, 1.6, 8);
-  flare.position.set(0, 0.3, 0);
-  g.add(flare);
-  box(g, 0.05, 0.25, 0.05, mat(0xff5020, 0.5), 0, 0.12, 0);
-
-  level.elevator = makeElevator();
-  level.elevator.group.position.set(-half - 1.2, 0, 0);
-  level.elevator.group.rotation.y = Math.PI / 2;   // doors face +X down the lane
-  g.add(level.elevator.group);
-  addElevatorColliders(level, -half - 1.2, 0);
-  level.elevatorZone = { x: -play / 2 + 0.9, z: 0, hx: 1.2, hz: 1.0 };
-
-  const entry = new THREE.Vector3(half + 0.5, 0, 0);
-  level.entries.push(entry);
-  level.zombieSpawns.push(entry.clone());
-  level.playerSpawns = [
-    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.8, 0, 0.5),
-    new THREE.Vector3(-0.8, 0, -0.5), new THREE.Vector3(0.5, 0, -0.5),
-    new THREE.Vector3(-0.5, 0, 0.5),
+    new THREE.Vector3(0, 0, 8), new THREE.Vector3(1.8, 0, 9.2),
+    new THREE.Vector3(-1.8, 0, 9.2), new THREE.Vector3(1.8, 0, 6.8),
+    new THREE.Vector3(-1.8, 0, 6.8),
   ];
 }
 
+// ---- Trench: a long serpentine network with dugouts and firing steps ---
 function buildTrench(level, rng) {
-  if (CONFIG.PLAY_AREA < 8) { buildTrenchSmall(level, rng); return; }
   const g = level.group;
-  const A = CONFIG.PLAY_AREA;                // serpentine fits the footprint
-  const half = A / 2;
+  const S = LEVEL_SIZE;
+  const half = S / 2;
   level.floorY = 0;
-  level.heightAt = () => 0;
+  level.baseY = 0;
   level.lighting = {
     daySky: 0x16203a, dayHaze: 0x1b2742,
-    fogNear: 8, fogFar: 60, sunDay: 0.35, hemiDay: 0.5, dark: true,
+    fogNear: 9, fogFar: 80, sunDay: 0.45, hemiDay: 0.78, dark: true,
   };
 
-  const dirtMat = MATS.dirt;
   const floorMat = MATS.basementFloor;
-
-  // Floor of the whole trench area + raised field beyond
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 2, A + 2), floorMat);
+  const dirtMat = MATS.dirt;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(S + 4, S + 4), floorMat);
   floor.rotation.x = -Math.PI / 2;
   g.add(floor);
-  const field = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(0x2c3226, 1.0));
+  // The raised field above the trench line
+  const field = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), mat(0x2c3226, 1.0));
   field.rotation.x = -Math.PI / 2;
-  field.position.y = 2.3;
+  field.position.y = 2.6;
   g.add(field);
-  // Carve a hole illusion: the field plane sits above; the trench area is
-  // sunk. Rim walls around the whole area:
-  for (const [x, z, w, d] of [
-    [0, -half - 1, A + 4, 2], [0, half + 1, A + 4, 2],
-    [-half - 1, 0, 2, A + 4], [half + 1, 0, 2, A + 4]]) {
-    box(g, w, 2.4, d, dirtMat, x, 1.2, z);
-    level.colliders.push({ x, z, hx: w / 2, hz: d / 2, tall: true });
-  }
 
-  // Serpentine: three lanes (south, middle, north) joined by connectors at
-  // alternating ends. Dirt blocks fill the gaps between lanes.
-  const laneZ = [-A / 3, 0, A / 3];
-  const laneHalfW = 1.15;
-  // Lane0<->lane1 connector is ALWAYS on the east side: the elevator sits
-  // at lane 0's west end and its collider would seal a west connector
-  // (softlock found in review). Only the second connector varies.
-  const conn = [1, rng.chance(0.5) ? -1 : 1];
-  // Between lane 0-1 and 1-2, place a dirt block covering everything
-  // except the connector opening.
-  const connectorPoints = [];
-  for (let i = 0; i < 2; i++) {
+  // Serpentine: four lanes joined by alternating connectors, plus two
+  // dugout side rooms. Every lane is 2.6 m wide.
+  const laneZ = [-11, -3.6, 3.6, 11];
+  const LANE_HW = 1.3;
+  const conn = [1, -1, 1];
+  const connX = [];
+  for (let i = 0; i < 3; i++) {
     const zMid = (laneZ[i] + laneZ[i + 1]) / 2;
-    const gapX = conn[i] * (half - 1.6);
-    connectorPoints.push(new THREE.Vector3(gapX, 0, zMid));
-    const blockD = (laneZ[i + 1] - laneZ[i]) - laneHalfW * 2;
-    // Two blocks: from -half to gap-1.4, and gap+1.4 to half
-    const leftW = (gapX - 1.4) - (-half);
-    if (leftW > 0.5) {
-      const cx = -half + leftW / 2;
-      box(g, leftW, 2.4, blockD, dirtMat, cx, 1.2, zMid);
-      level.colliders.push({ x: cx, z: zMid, hx: leftW / 2, hz: blockD / 2, tall: true });
-    }
-    const rightW = half - (gapX + 1.4);
-    if (rightW > 0.5) {
-      const cx = gapX + 1.4 + rightW / 2;
-      box(g, rightW, 2.4, blockD, dirtMat, cx, 1.2, zMid);
-      level.colliders.push({ x: cx, z: zMid, hx: rightW / 2, hz: blockD / 2, tall: true });
-    }
+    const gapX = conn[i] * (half - 4);
+    connX.push({ x: gapX, z: zMid });
+    const blockD = (laneZ[i + 1] - laneZ[i]) - LANE_HW * 2;
+    const leftW = (gapX - 1.5) - (-half);
+    if (leftW > 0.5) wall(level, dirtMat, -half + leftW / 2, zMid, leftW, blockD, 2.6);
+    const rightW = half - (gapX + 1.5);
+    if (rightW > 0.5) wall(level, dirtMat, gapX + 1.5 + rightW / 2, zMid, rightW, blockD, 2.6);
   }
+  // Rim walls
+  wall(level, dirtMat, 0, -half - 1, S + 4, 2, 2.6);
+  wall(level, dirtMat, 0, half + 1, S + 4, 2, 2.6);
+  wall(level, dirtMat, -half - 1, 0, 2, S + 4, 2.6);
+  wall(level, dirtMat, half + 1, 0, 2, S + 4, 2.6);
 
-  // Duckboard runs along every lane (intentional foreground layer),
-  // overhead support beams, sandbag silhouettes on the trench rim.
-  for (const lz of laneZ) {
-    box(g, A - 2, 0.06, 1.6, MATS.planksOld, 0, 0.04, lz);
+  // Firing steps: raised ledges you climb to shoot over the parapet.
+  for (const [fx, fz] of [[-half + 5, laneZ[0]], [half - 5, laneZ[3]], [0, laneZ[1]]]) {
+    platform(level, MATS.planksOld, fx, fz - 0.9, 3.4, 0.9, 0.9, 'south');
   }
-  const beamMat = mat(0x3c332a, 1.0);
+  // Duckboards along every lane
+  for (const lz of laneZ) box(g, S - 3, 0.06, 1.7, MATS.planksOld, 0, 0.04, lz);
+  // Overhead beams + sandbags on the rim
   for (const lz of laneZ) {
     for (const bx of [-half / 2, half / 2]) {
-      box(g, 0.18, 0.18, 2.6, beamMat, bx, 2.3, lz);
-      box(g, 0.15, 2.3, 0.15, beamMat, bx - 1.0, 1.15, lz + 1.05);
-      box(g, 0.15, 2.3, 0.15, beamMat, bx + 1.0, 1.15, lz - 1.05);
+      box(g, 0.18, 0.18, 2.8, mat(0x3c332a, 1.0), bx, 2.5, lz);
+      box(g, 0.15, 2.5, 0.15, mat(0x3c332a, 1.0), bx - 1.1, 1.25, lz + 1.15);
     }
   }
-  for (let i = 0; i < 8; i++) {
-    const along = rng.range(-half, half);
-    const side = rng.pick([-1, 1]);
-    box(g, rng.range(0.7, 1.1), 0.45, 0.5, MATS.sandbag, along, 2.55, side * (half + 0.7), rng.range(-0.2, 0.2));
+  for (let i = 0; i < 14; i++) {
+    box(g, rng.range(0.7, 1.1), 0.45, 0.5, MATS.sandbag,
+      rng.range(-half, half), 2.85, rng.pick([-1, 1]) * (half + 1), rng.range(-0.2, 0.2));
   }
-  // Flares: warm pools of light with visible sticks
-  for (const i of [0, 1]) {
-    const x = rng.range(-half + 2, half - 2);
-    const z = laneZ[rng.int(0, 2)];
-    const flare = new THREE.PointLight(0xff7030, 2.6, 10, 1.6);
-    flare.position.set(x, 0.3, z);
+  // Cover inside the lanes
+  for (let i = 0; i < 10; i++) {
+    const lz = laneZ[rng.int(0, 3)];
+    cover(level, MATS.crate, rng.range(-half + 3, half - 3), lz + rng.range(-0.5, 0.5), 0.8, 0.8, 0.8);
+  }
+  // Flares
+  for (let i = 0; i < 3; i++) {
+    const fx = rng.range(-half + 3, half - 3), fz = laneZ[rng.int(0, 3)];
+    const flare = new THREE.PointLight(0xff7030, 2.8, 12, 1.6);
+    flare.position.set(fx, 0.35, fz);
     g.add(flare);
     const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.25, 5),
-      new THREE.MeshStandardMaterial({ color: 0xff5020, emissive: 0xff4010, emissiveIntensity: 1.5 }));
-    stick.position.set(x, 0.12, z);
+      new THREE.MeshStandardMaterial({ color: 0xff5020, emissive: 0xff4010, emissiveIntensity: 1.6 }));
+    stick.position.set(fx, 0.14, fz);
     stick.rotation.z = 0.4;
     g.add(stick);
   }
 
-  // Entries: the two open lane-ends without the elevator; elevator takes
-  // the south-west lane end.
-  level.elevator = makeElevator();
-  level.elevator.group.position.set(-half + 1.2, 0, laneZ[0]);
-  level.elevator.group.rotation.y = Math.PI / 2;   // doors face +X into the lane
-  g.add(level.elevator.group);
-  addElevatorColliders(level, -half + 1.2, laneZ[0]);
-  level.elevatorZone = { x: -half + 3.0, z: laneZ[0], hx: 1.2, hz: 1.0 };
-
-  for (const e of [[half - 0.6, laneZ[0]], [-half + 0.6, laneZ[2]], [half - 0.6, laneZ[2]]]) {
-    const entry = new THREE.Vector3(e[0], 0, e[1]);
+  // VISIBLE sources: open trench mouths at three lane ends, framed by
+  // timber so they read as tunnels rather than gaps.
+  for (const [ex, ez] of [[half - 0.5, laneZ[0]], [-half + 0.5, laneZ[3]], [half - 0.5, laneZ[2]]]) {
+    box(g, 0.3, 2.6, 0.25, mat(0x3c332a, 1.0), ex, 1.3, ez - 1.5);
+    box(g, 0.3, 2.6, 0.25, mat(0x3c332a, 1.0), ex, 1.3, ez + 1.5);
+    box(g, 0.35, 0.3, 3.2, mat(0x3c332a, 1.0), ex, 2.6, ez);
+    const dark = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.4),
+      new THREE.MeshBasicMaterial({ color: 0x04060a }));
+    dark.position.set(ex + Math.sign(ex) * 0.16, 1.2, ez);
+    dark.rotation.y = Math.PI / 2;
+    g.add(dark);
+    const entry = new THREE.Vector3(ex * 0.94, 0, ez);
     level.entries.push(entry);
     level.zombieSpawns.push(entry.clone());
+    level.spawnSources.push({ x: ex, z: ez, kind: 'tunnel' });
   }
-  // Connector openings double as routing waypoints so zombies can walk
-  // the serpentine hop by hop (entries are used as goals when line of
-  // sight is blocked); they are NOT spawn points.
-  for (const c of connectorPoints) level.entries.push(c);
+  // Connector openings are routing waypoints, not spawns.
+  for (const c of connX) level.entries.push(new THREE.Vector3(c.x, 0, c.z));
 
-  const qt = half * 0.25;
+  level.barrels.push({ x: -half + 6, z: laneZ[1] }, { x: half - 6, z: laneZ[2] });
+
+  level.elevator = makeElevator();
+  level.elevator.group.position.set(-half + 1.6, 0, laneZ[0]);
+  level.elevator.group.rotation.y = Math.PI / 2;
+  g.add(level.elevator.group);
+  addElevatorColliders(level, -half + 1.6, laneZ[0]);
+  level.elevatorZone = { x: -half + 4.0, z: laneZ[0], hx: 1.8, hz: 1.3 };
+
+  level.heightAt = makeHeightAt(level, 0);
+  roomscaleZone(level, 0, laneZ[1]);
   level.playerSpawns = [
-    new THREE.Vector3(0, 0, laneZ[1]), new THREE.Vector3(qt, 0, laneZ[1]),
-    new THREE.Vector3(-qt, 0, laneZ[1]), new THREE.Vector3(0, 0, laneZ[0]),
-    new THREE.Vector3(qt, 0, laneZ[0]),
+    new THREE.Vector3(0, 0, laneZ[1]), new THREE.Vector3(1.5, 0, laneZ[1]),
+    new THREE.Vector3(-1.5, 0, laneZ[1]), new THREE.Vector3(3, 0, laneZ[1]),
+    new THREE.Vector3(-3, 0, laneZ[1]),
   ];
 }
 
-// ---- Wagon (moving platform) --------------------------------------------
-// A flatbed rail wagon rolling through the night wasteland. Players stand
-// on the bed; the world scrolls past; zombies lunge in over the open ends.
+// ---- Wagon: a rolling train of connected cars --------------------------
 function buildWagon(level, rng) {
   const g = level.group;
-  const A = CONFIG.PLAY_AREA;
-  const W = Math.max(3, Math.min(A * 0.8, 5));    // bed width
-  const L = Math.max(6, A);                       // bed length
+  const W = 5.4;                     // car width
+  const CAR_L = 11;                  // car length
+  const CARS = 3;
+  const TOTAL = CAR_L * CARS + 2 * (CARS - 1);
   level.floorY = 0.5;
-  level.heightAt = (x, z) => (Math.abs(x) < W / 2 && Math.abs(z) < L / 2 ? 0.5 : 0);
+  level.baseY = 0.5;
   level.lighting = {
     daySky: 0x2c3450, dayHaze: 0x2a3048,
-    fogNear: 25, fogFar: 160, sunDay: 0.5, hemiDay: 0.5, dark: false,
+    fogNear: 25, fogFar: 170, sunDay: 0.6, hemiDay: 0.55, dark: false,
   };
 
-  // Bed, rails, wheels
-  const bed = box(g, W, 0.24, L, MATS.planksOld, 0, 0.38, 0);
-  bed.receiveShadow = false;
   const railMat = mat(PALETTE.metalDark, 0.5, 0.6);
-  for (const dx of [-0.8, 0.8]) {
-    box(g, 0.12, 0.1, 400, railMat, dx, 0.05, 0);
-  }
-  for (const dz of [-L / 3, L / 3]) {
-    for (const dx of [-0.8, 0.8]) {
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.1, 10), railMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(dx, 0.28, dz);
-      g.add(wheel);
+  // Cars laid along Z, joined by gangways: corridors, not one square.
+  for (let c = 0; c < CARS; c++) {
+    const cz = (c - (CARS - 1) / 2) * (CAR_L + 2);
+    box(g, W, 0.24, CAR_L, MATS.planksOld, 0, 0.38, cz);
+    level.colliders.push({ x: 0, z: cz, hx: W / 2, hz: CAR_L / 2, tall: false, top: 0.5 });
+    level.ramps.push({ x: 0, z: cz, hx: W / 2, hz: CAR_L / 2, top: 0.5 });
+    // Side railings (walk-blocking, not shot-blocking)
+    for (const dx of [-W / 2, W / 2]) {
+      box(g, 0.1, 0.95, CAR_L, mat(PALETTE.rust, 0.8), dx, 1.0, cz);
+      level.colliders.push({ x: dx, z: cz, hx: 0.07, hz: CAR_L / 2, tall: false });
+    }
+    // Wheels + a lantern per car
+    for (const dz of [-CAR_L / 3, CAR_L / 3]) {
+      for (const dx of [-0.9, 0.9]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.12, 10), railMat);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(dx, 0.3, cz + dz);
+        g.add(wheel);
+      }
+    }
+    const lamp = new THREE.PointLight(0xffd9a0, 1.3, 12);
+    lamp.position.set(0, 2.6, cz);
+    g.add(lamp);
+    box(g, 0.06, 2.1, 0.06, railMat, 0, 1.55, cz);
+    // Cargo cover, different per car so they read as different spaces
+    if (c === 0) {
+      cover(level, MATS.crate, -1.4, cz + 2, 1.4, 1.4, 1.0);
+      cover(level, MATS.crate, 1.5, cz - 2.5, 1.2, 1.8, 1.0);
+    } else if (c === 1) {
+      cover(level, MATS.crate, 0, cz, 2.2, 1.2, 1.0);
+      level.barrels.push({ x: -1.6, z: cz + 3.5 });
+    } else {
+      cover(level, MATS.crate, -1.5, cz - 1, 1.2, 2.0, 1.0);
+      cover(level, MATS.crate, 1.6, cz + 2.5, 1.2, 1.2, 1.0);
+    }
+    // Gangway to the next car
+    if (c < CARS - 1) {
+      const gz = cz + CAR_L / 2 + 1;
+      box(g, 2.2, 0.2, 2.2, railMat, 0, 0.4, gz);
+      level.colliders.push({ x: 0, z: gz, hx: 1.1, hz: 1.1, tall: false, top: 0.5 });
+      level.ramps.push({ x: 0, z: gz, hx: 1.1, hz: 1.1, top: 0.5 });
+      for (const dx of [-1.25, 1.25]) {
+        box(g, 0.08, 0.9, 2.2, railMat, dx, 0.95, gz);
+        level.colliders.push({ x: dx, z: gz, hx: 0.06, hz: 1.1, tall: false });
+      }
     }
   }
-  // Side railings: low, block walking off the sides (not the ends)
-  for (const dx of [-W / 2, W / 2]) {
-    box(g, 0.08, 0.85, L, mat(PALETTE.rust, 0.8), dx, 0.92, 0);
-    level.colliders.push({ x: dx, z: 0, hx: 0.06, hz: L / 2, tall: false });
-  }
-  // A crate to duck behind
-  box(g, 1.0, 0.9, 1.0, MATS.crate, 0, 0.95, 0);
-  level.colliders.push({ x: 0, z: 0, hx: 0.5, hz: 0.5, tall: false });
-  // Lantern on a pole
-  const lamp = new THREE.PointLight(0xffd9a0, 1.2, 10);
-  lamp.position.set(0, 2.4, -L / 4);
-  g.add(lamp);
-  box(g, 0.06, 2.0, 0.06, railMat, 0, 1.4, -L / 4);
+  // Long rails under everything
+  for (const dx of [-0.9, 0.9]) box(g, 0.14, 0.1, 500, railMat, dx, 0.05, 0);
 
-  // Scrolling scenery: two long ground segments leapfrogging along Z,
-  // dressed with hills/ruins. level.tick(dt) drives the motion.
-  const SEG = 220;
+  // Scrolling scenery (two leapfrogging segments)
+  const SEG = 240;
   const segs = [];
   for (let i = 0; i < 2; i++) {
     const seg = new THREE.Group();
-    const groundPlane = new THREE.Mesh(new THREE.PlaneGeometry(400, SEG), MATS.sandGround);
-    groundPlane.rotation.x = -Math.PI / 2;
-    groundPlane.position.y = -0.02;
-    seg.add(groundPlane);
-    const segRng = makeRng(1000 + i);
-    for (let h = 0; h < 5; h++) {
-      const hill = new THREE.Mesh(
-        new THREE.ConeGeometry(segRng.range(30, 70), segRng.range(10, 24), 7),
-        mat(PALETTE.hills));
-      hill.position.set(segRng.pick([-1, 1]) * segRng.range(40, 120), 0, segRng.range(-SEG / 2, SEG / 2));
+    const gp = new THREE.Mesh(new THREE.PlaneGeometry(400, SEG), MATS.sandGround);
+    gp.rotation.x = -Math.PI / 2;
+    gp.position.y = -0.02;
+    seg.add(gp);
+    const sr = makeRng(1000 + i);
+    for (let h = 0; h < 6; h++) {
+      const hill = new THREE.Mesh(new THREE.ConeGeometry(sr.range(30, 70), sr.range(10, 26), 7), mat(PALETTE.hills));
+      hill.position.set(sr.pick([-1, 1]) * sr.range(40, 130), 0, sr.range(-SEG / 2, SEG / 2));
       seg.add(hill);
     }
-    for (let r = 0; r < 3; r++) {
-      const w = segRng.range(6, 12), hh = segRng.range(6, 16), d = segRng.range(6, 12);
-      const ruin = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), mat(0x6f675c));
-      ruin.position.set(segRng.pick([-1, 1]) * segRng.range(12, 60), hh / 2, segRng.range(-SEG / 2, SEG / 2));
+    for (let r = 0; r < 4; r++) {
+      const hh = sr.range(6, 18);
+      const ruin = new THREE.Mesh(new THREE.BoxGeometry(sr.range(6, 12), hh, sr.range(6, 12)), mat(0x6f675c));
+      ruin.position.set(sr.pick([-1, 1]) * sr.range(12, 60), hh / 2, sr.range(-SEG / 2, SEG / 2));
       seg.add(ruin);
     }
-    for (let t = 0; t < 4; t++) {
+    for (let t = 0; t < 6; t++) {
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 5, 5), mat(0x4a4038));
-      pole.position.set(segRng.pick([-1, 1]) * 3.2, 2.5, segRng.range(-SEG / 2, SEG / 2));
+      pole.position.set(sr.pick([-1, 1]) * 3.4, 2.5, sr.range(-SEG / 2, SEG / 2));
       seg.add(pole);
     }
     seg.position.z = -i * SEG;
-    seg.traverse((o) => { o.userData.dynamic = true; });   // scrolls; never merge
+    seg.traverse((o) => { o.userData.dynamic = true; });
     g.add(seg);
     segs.push(seg);
   }
-  const SPEED = 9;   // m/s, forward = -Z
+  const SPEED = 11;
   level.tick = (dt) => {
     for (const seg of segs) {
       seg.position.z += SPEED * dt;
@@ -991,98 +854,112 @@ function buildWagon(level, rng) {
     }
   };
 
-  // No elevator on a wagon: the ride simply arrives (state.js handles it).
-  level.elevator = null;
-  level.elevatorZone = null;
-
-  // Zombies vault in over the open ends of the bed.
-  for (const ez of [-L / 2 - 1.5, L / 2 + 1.5]) {
-    const entry = new THREE.Vector3(0, 0, ez);
+  // VISIBLE sources: they clamber over the couplings at both ends and
+  // haul themselves over the side rails at marked bent sections.
+  for (const ez of [-TOTAL / 2 - 1.2, TOTAL / 2 + 1.2]) {
+    box(g, 1.4, 0.5, 0.5, railMat, 0, 0.45, ez);
+    const entry = new THREE.Vector3(0, 0.5, ez * 0.94);
     level.entries.push(entry);
     level.zombieSpawns.push(entry.clone());
-    level.zombieSpawns.push(new THREE.Vector3(1.5, 0, ez * 1.2));
-    level.zombieSpawns.push(new THREE.Vector3(-1.5, 0, ez * 1.2));
+    level.spawnSources.push({ x: 0, z: ez, kind: 'coupling' });
+  }
+  for (const [cx, cz] of [[-W / 2, -4], [W / 2, 5]]) {
+    facadeClimb(level, mat(PALETTE.rust, 0.8), railMat, cx, cz);
+    level.zombieSpawns.push(new THREE.Vector3(cx * 1.1, 0.5, cz));
   }
 
+  level.elevator = null;
+  level.elevatorZone = null;
+  level.heightAt = (x, z) => {
+    const onCar = Math.abs(x) < W / 2 && Math.abs(z) < TOTAL / 2 + 0.6;
+    return onCar ? 0.5 : 0;
+  };
+  roomscaleZone(level, 0, 0);
   level.playerSpawns = [
-    new THREE.Vector3(0, 0.5, 1.5), new THREE.Vector3(0.8, 0.5, -1.5),
-    new THREE.Vector3(-0.8, 0.5, -1.5), new THREE.Vector3(0.8, 0.5, 1.5),
-    new THREE.Vector3(-0.8, 0.5, 2.5),
+    new THREE.Vector3(0, 0.5, 1.5), new THREE.Vector3(1.2, 0.5, -1.5),
+    new THREE.Vector3(-1.2, 0.5, -1.5), new THREE.Vector3(1.2, 0.5, 1.5),
+    new THREE.Vector3(-1.2, 0.5, 3),
   ];
 }
 
-// ---- Boss arena (the Butcher's floor) -----------------------------------
-// A walled slaughteryard on the roof level: pillars for cover against the
-// charge, torch light, the elevator dead ahead. One night, one Butcher.
+// ---- Boss arena: the Butcher's roof slaughteryard -----------------------
 function buildBossArena(level, rng) {
   const g = level.group;
-  const A = Math.max(CONFIG.PLAY_AREA + 4, 12);
-  const half = A / 2;
+  const S = LEVEL_SIZE;
+  const half = S / 2;
   level.floorY = 0;
-  level.heightAt = () => 0;
+  level.baseY = 0;
   level.lighting = {
     daySky: 0x6a5a72, dayHaze: 0x8a6a5c,
-    fogNear: 18, fogFar: 120, sunDay: 1.5, hemiDay: 0.85, dark: false,
+    fogNear: 20, fogFar: 140, sunDay: 1.5, hemiDay: 0.9, dark: false,
   };
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 2, A + 2), MATS.concrete);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(S + 2, S + 2), MATS.concrete);
   floor.rotation.x = -Math.PI / 2;
   g.add(floor);
-  // High walls, two door gaps (the Butcher's escort trickles in)
-  for (const [side, rot] of [[[0, -half], 0], [[0, half], 0], [[-half, 0], 1], [[half, 0], 1]]) {
-    const [dx, dz] = side;
-    const hasDoor = rot === 1;   // side doors only; north wall hosts the elevator
-    const len = A;
-    if (!hasDoor) {
-      box(g, rot ? 0.4 : len, 3.2, rot ? len : 0.4, MATS.basementWall, dx, 1.6, dz);
-      level.colliders.push(rot
-        ? { x: dx, z: dz, hx: 0.2, hz: half, tall: true }
-        : { x: dx, z: dz, hx: half, hz: 0.2, tall: true });
-    } else {
-      const segLen = (len - 2.0) / 2;
-      for (const sign of [-1, 1]) {
-        const off = sign * (1.0 + segLen / 2);
-        const x = rot ? dx : dx + off;
-        const z = rot ? dz + off : dz;
-        box(g, rot ? 0.4 : segLen, 3.2, rot ? segLen : 0.4, MATS.basementWall, x, 1.6, z);
-        level.colliders.push(rot
-          ? { x, z, hx: 0.2, hz: segLen / 2, tall: true }
-          : { x, z, hx: segLen / 2, hz: 0.2, tall: true });
-      }
-      const entry = new THREE.Vector3(dx, 0, dz);
-      level.entries.push(entry);
-      level.zombieSpawns.push(entry.clone());
-    }
+
+  const wMat = MATS.basementWall;
+  // Parapet walls with two big gates
+  wall(level, wMat, 0, -half, S, 0.5, 3.4);
+  wall(level, wMat, -half, 0, 0.5, S, 3.4);
+  wall(level, wMat, half, 0, 0.5, S, 3.4);
+  for (const s of [-1, 1]) {
+    wall(level, wMat, s * (half / 2 + 2.5), half, half - 5, 0.5, 3.4);
   }
-  // Cover pillars: survive the charge by putting stone between you and it
-  const pillarSpots = [[-half / 2, -half / 2], [half / 2, -half / 2], [-half / 2, half / 2], [half / 2, half / 2]];
-  for (const [px, pz] of pillarSpots) {
-    box(g, 0.9, 3.2, 0.9, MATS.basementWall, px, 1.6, pz);
-    level.colliders.push({ x: px, z: pz, hx: 0.45, hz: 0.45, tall: true });
+
+  // A raised gantry ring: dodge the charge by going up.
+  platform(level, MATS.planksOld, -half + 5, -half + 7, 7, 8, 1.8, 'east');
+  railing(level, MATS.metalDoor, -half + 5, -half + 3, 7, 0.12);
+  platform(level, MATS.planksOld, half - 5, half - 7, 7, 8, 1.8, 'west');
+  railing(level, MATS.metalDoor, half - 5, half - 3, 7, 0.12);
+
+  // Cover pillars: the charge has to be dodged around something.
+  for (const [px, pz] of [[-7, -5], [7, -5], [-7, 6], [7, 6], [0, 0]]) {
+    wall(level, wMat, px, pz, 1.2, 1.2, 3.4);
   }
-  // Torches: violet-dusk arena mood
-  // Barrels in the boss arena: the Butcher's charge can detonate them
-  for (const [bx, bz] of [[-half / 2 + 1.6, 0], [half / 2 - 1.6, 0], [0, half / 2]]) {
-    level.barrels.push({ x: bx, z: bz });
+  // Meat hooks and chains: it is a slaughteryard
+  for (let i = 0; i < 8; i++) {
+    const hx = rng.range(-half + 3, half - 3), hz = rng.range(-half + 3, half - 3);
+    const chain = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.0, 4), MATS.metalShell);
+    chain.position.set(hx, 2.6, hz);
+    g.add(chain);
   }
-  for (const [tx, tz] of [[-half + 1, -half + 1], [half - 1, -half + 1], [-half + 1, half - 1], [half - 1, half - 1]]) {
-    const torch = new THREE.PointLight(0xff9040, 1.6, 10);
-    torch.position.set(tx, 2.4, tz);
+  // Braziers
+  for (const [tx, tz] of [[-half + 2, -half + 2], [half - 2, -half + 2], [-half + 2, half - 2], [half - 2, half - 2]]) {
+    const torch = new THREE.PointLight(0xff9040, 2.2, 16);
+    torch.position.set(tx, 2.6, tz);
     g.add(torch);
-    box(g, 0.1, 0.8, 0.1, mat(0x3a2c20), tx, 2.0, tz);
+    box(g, 0.5, 0.5, 0.5, mat(0x3a2c20), tx, 0.25, tz);
   }
+
+  // VISIBLE sources: two gates plus a shaft the escort climbs out of.
+  for (const s of [-1, 1]) {
+    const gx = s * (half / 2 - 2.0);
+    box(g, 0.5, 3.6, 0.5, MATS.metalShell, gx - 1.7, 1.8, half);
+    box(g, 0.5, 3.6, 0.5, MATS.metalShell, gx + 1.7, 1.8, half);
+    const entry = new THREE.Vector3(gx, 0, half - 1.2);
+    level.entries.push(entry);
+    level.zombieSpawns.push(entry.clone());
+    level.spawnSources.push({ x: gx, z: half, kind: 'gate' });
+  }
+  openShaft(level, wMat, MATS.metalShell, 0, -half + 4);
+  level.zombieSpawns.push(new THREE.Vector3(0, 0, -half + 5.5));
+
+  for (const [bx, bz] of [[-5, 0], [5, 0], [0, 8]]) level.barrels.push({ x: bx, z: bz });
 
   level.elevator = makeElevator();
-  level.elevator.group.position.set(0, 0, -half + 1.3);
+  level.elevator.group.position.set(-half + 2.6, 0, -half + 3.0);
+  level.elevator.group.rotation.y = Math.PI / 2;
   g.add(level.elevator.group);
-  addElevatorColliders(level, 0, -half + 1.3);
-  level.elevatorZone = { x: 0, z: Math.max(-CONFIG.PLAY_AREA / 2 + 0.9, -half + 3.0), hx: 1.3, hz: 0.9 };
+  addElevatorColliders(level, -half + 2.6, -half + 3.0);
+  level.elevatorZone = { x: -half + 5.0, z: -half + 3.0, hx: 1.9, hz: 1.9 };
 
-  const qb = Math.min(half * 0.3, 2);
+  level.heightAt = makeHeightAt(level, 0);
+  roomscaleZone(level, 0, 4);
   level.playerSpawns = [
-    new THREE.Vector3(0, 0, qb + 1), new THREE.Vector3(qb, 0, qb),
-    new THREE.Vector3(-qb, 0, qb), new THREE.Vector3(0, 0, qb + 2),
-    new THREE.Vector3(qb, 0, qb + 2),
+    new THREE.Vector3(0, 0, 4), new THREE.Vector3(2, 0, 5.5),
+    new THREE.Vector3(-2, 0, 5.5), new THREE.Vector3(2, 0, 2.5),
+    new THREE.Vector3(-2, 0, 2.5),
   ];
 }
 
@@ -1171,10 +1048,11 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
   const level = {
     type, index: levelIndex,
     group: new THREE.Group(),
-    colliders: [], entries: [], zombieSpawns: [], playerSpawns: [],
-    barrels: [],   // explosive barrels: {x, z} seeded by the generator
-    elevator: null, elevatorZone: null,
-    floorY: 0, heightAt: () => 0, lighting: null,
+    colliders: [], ramps: [], entries: [], zombieSpawns: [], playerSpawns: [],
+    spawnSources: [],   // VISIBLE fiction for each entry (never thin air)
+    barrels: [],        // explosive barrels: {x, z} seeded by the generator
+    elevator: null, elevatorZone: null, roomZone: null,
+    floorY: 0, baseY: 0, heightAt: () => 0, lighting: null,
   };
   if (type === 'ground') buildGround(level, rng, quality);
   else if (type === 'basement') buildBasement(level, rng);

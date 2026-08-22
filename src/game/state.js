@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
-import { levelTypeFor, FINAL_LEVEL } from '../world/levelgen.js';
+import { levelTypeFor, FINAL_LEVEL, LEVEL_SIZE } from '../world/levelgen.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 'screamer', 'butcher'];
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
@@ -904,7 +904,9 @@ export class HostSim {
       // entry first. Low colliders block movement via pushout (slide).
       let goal = target.pos;
       const losBlocked = segmentBlocked(z.pos.x, z.pos.z, target.pos.x, target.pos.z, this._tall());
-      const half = CONFIG.PLAY_AREA / 2;
+      // Outside a walled compound: route to a gate/entry first. Level
+      // size, NOT the physical play area, defines "outside".
+      const half = LEVEL_SIZE / 2;
       const outsideGround = this.level.type === 'ground'
         && (Math.abs(z.pos.x) > half || Math.abs(z.pos.z) > half);
       if ((losBlocked || outsideGround) && this.level.entries.length) {
