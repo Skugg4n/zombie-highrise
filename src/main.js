@@ -971,7 +971,7 @@ function closeShop() {
 }
 function refreshShop() {
   if (!shopOpen) return;
-  $('shop-status').textContent = `SCRAP ${scrap} - doors close in ${lastWave ? lastWave.t : 20}s`;
+  $('shop-status').textContent = `SCRAP ${scrap}  ·  doors close in ${lastWave ? lastWave.t : 20}s  ·  floor ${(lastWave ? lastWave.lv : 1) + 1} next`;
   const P = TUNING.economy.shopPrices;
   const labels = {
     shotgun: 'SHOTGUN', smg: 'SMG',
@@ -984,19 +984,19 @@ function refreshShop() {
     const item = btn.dataset.item;
     let label = `${labels[item]}  ·  ${P[item]}`;
     let blocked = scrap < P[item];
-    if (item === 'shotgun' && arsenal.owned.includes('shotgun')) { label = 'SHOTGUN - OWNED'; blocked = true; }
-    if (item === 'smg' && arsenal.owned.includes('smg')) { label = 'SMG - OWNED'; blocked = true; }
+    if (item === 'shotgun' && arsenal.owned.includes('shotgun')) { label = 'SHOTGUN · OWNED'; blocked = true; }
+    if (item === 'smg' && arsenal.owned.includes('smg')) { label = 'SMG · OWNED'; blocked = true; }
     if (item === 'ammoRefillShotgun' && !arsenal.owned.includes('shotgun')) blocked = true;
     if (item === 'ammoRefillSmg' && !arsenal.owned.includes('smg')) blocked = true;
-    if (item === 'healthPack' && arsenal.packs >= 2) { label = 'HEALTH PACK - FULL'; blocked = true; }
-    if (item === 'grenadePack' && arsenal.grenades >= 5) { label = '2 GRENADES - FULL'; blocked = true; }
-    if (item === 'mine' && arsenal.mines >= 3) { label = 'MINE - FULL'; blocked = true; }
-    if (item === 'ak' && arsenal.owned.includes('ak')) { label = 'AK - OWNED'; blocked = true; }
+    if (item === 'healthPack' && arsenal.packs >= 2) { label = 'HEALTH PACK · FULL'; blocked = true; }
+    if (item === 'grenadePack' && arsenal.grenades >= 5) { label = '2 GRENADES · FULL'; blocked = true; }
+    if (item === 'mine' && arsenal.mines >= 3) { label = 'MINE · FULL'; blocked = true; }
+    if (item === 'ak' && arsenal.owned.includes('ak')) { label = 'AK · OWNED'; blocked = true; }
     if (item === 'ammoRefillAk' && !arsenal.owned.includes('ak')) blocked = true;
-    if (item === 'akimbo' && arsenal.owned.includes('akimbo')) { label = 'DUAL PISTOLS - OWNED'; blocked = true; }
-    if (item === 'smokePack' && arsenal.smokes >= 4) { label = '2 SMOKES - FULL'; blocked = true; }
-    if (item === 'molotovPack' && arsenal.molotovs >= 4) { label = '2 MOLOTOVS - FULL'; blocked = true; }
-    if (item === 'nightVision' && arsenal.nightVision) { label = 'NIGHT VISION - OWNED'; blocked = true; }
+    if (item === 'akimbo' && arsenal.owned.includes('akimbo')) { label = 'DUAL PISTOLS · OWNED'; blocked = true; }
+    if (item === 'smokePack' && arsenal.smokes >= 4) { label = '2 SMOKES · FULL'; blocked = true; }
+    if (item === 'molotovPack' && arsenal.molotovs >= 4) { label = '2 MOLOTOVS · FULL'; blocked = true; }
+    if (item === 'nightVision' && arsenal.nightVision) { label = 'NIGHT VISION · OWNED'; blocked = true; }
     btn.textContent = label;
     btn.disabled = blocked;
   }
@@ -1695,7 +1695,16 @@ function handleEvents(evs) {
       }
       case 'bought': {
         const me = role === 'client' ? net?.myId : 'H';
-        if (ev.id === me) { showToast('Purchased: ' + ev.item, 1500); audio.play('buy'); }
+        if (ev.id === me) {
+          const NICE = {
+            shotgun: 'Shotgun', smg: 'SMG', ak: 'AK', akimbo: 'Dual pistols',
+            ammoRefillShotgun: 'Shells', ammoRefillSmg: 'SMG ammo', ammoRefillAk: 'AK ammo',
+            healthPack: 'Health pack', grenadePack: 'Grenades', mine: 'Mine',
+            smokePack: 'Smoke grenades', molotovPack: 'Molotovs', nightVision: 'Night vision',
+          };
+          showToast((NICE[ev.item] || ev.item) + ' purchased', 1500);
+          audio.play('buy');
+        }
         refreshShop();
         break;
       }

@@ -157,9 +157,9 @@ export class LobbyUI {
     $('connected-room').textContent = 'Room XK42';
     $('hud-room').textContent = 'ROOM XK42';
     $('hud-health').textContent = 'HP 80';
-    $('hud-ammo').textContent = '4 / 8';
-    $('hud-weapon').textContent = 'PISTOL';
-    $('hud-items').textContent = 'G 1  P 1  M 1';
+    $('hud-ammo').textContent = '3 / 18';
+    $('hud-weapon').textContent = 'SHOTGUN';
+    $('hud-items').textContent = 'FRAG x2  PACK 1  MINE 1';
     $('hud-scrap').textContent = 'SCRAP 135';
     $('hud-wave').textContent = 'NIGHT 2 - 6 left';
     $('join-code').value = 'XK';
