@@ -25,6 +25,8 @@ export class Net {
     this.hostConn = null;      // client: connection to host
     this.nextClientNum = 2;    // host: P2, P3, ...
     this.established = false;  // host: broker accepted our id; client: welcomed
+    // Host: extra fields merged into the welcome message (level seed etc.).
+    this.getWelcomeExtras = () => ({});
     // Callbacks the game wires up:
     this.onHostReady = () => {};      // (code)
     this.onPeerJoin = () => {};       // host: (id, hello)
@@ -86,7 +88,7 @@ export class Net {
     const id = 'P' + this.nextClientNum++;
     conn.on('open', () => {
       this.conns.set(id, conn);
-      conn.send(msg.welcome(id, this.code, VERSION));
+      conn.send({ ...msg.welcome(id, this.code, VERSION), ...this.getWelcomeExtras() });
     });
     conn.on('data', (data) => {
       if (!data || typeof data !== 'object') return;

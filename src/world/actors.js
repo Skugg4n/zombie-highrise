@@ -30,35 +30,48 @@ export function makeBlobShadow(radius = 0.5) {
   return m;
 }
 
-// Zombie: pale gray body, one clear accent (rust-red torn shirt) readable
-// at range. Group origin at the feet.
-export function makeZombieMesh() {
+// Zombies: pale gray bodies with ONE clear accent color per type so the
+// silhouette + color identify the enemy in a tenth of a second at range
+// (art direction rule). Group origin at the feet.
+//   walker: medium build, rust-red torn shirt
+//   runner: lean and tall, hunched sprint pose, yellow sash
+//   brute:  massive shoulders, dark red, head sunk into the torso
+const ZOMBIE_LOOKS = {
+  walker: { accent: 0x8c3b2e, scaleX: 1.0, scaleY: 1.0, lean: 0.10, armLen: 0.55 },
+  runner: { accent: 0xd8a020, scaleX: 0.78, scaleY: 1.08, lean: 0.55, armLen: 0.45 },
+  brute: { accent: 0x6e1f18, scaleX: 1.7, scaleY: 1.05, lean: 0.18, armLen: 0.65 },
+};
+
+export function makeZombieMesh(type = 'walker') {
+  const look = ZOMBIE_LOOKS[type] || ZOMBIE_LOOKS.walker;
   const g = new THREE.Group();
   const skin = new THREE.MeshStandardMaterial({ color: 0xb8bdb4, roughness: 0.95 });
-  const shirt = new THREE.MeshStandardMaterial({ color: 0x8c3b2e, roughness: 0.95 });
+  const shirt = new THREE.MeshStandardMaterial({ color: look.accent, roughness: 0.95 });
   const pants = new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.95 });
 
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.75, 0.16), pants);
-  legL.position.set(-0.11, 0.375, 0);
-  const legR = legL.clone(); legR.position.x = 0.11;
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.16 * look.scaleX, 0.75, 0.16), pants);
+  legL.position.set(-0.11 * look.scaleX, 0.375, 0);
+  const legR = legL.clone(); legR.position.x = 0.11 * look.scaleX;
 
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.6, 0.24), shirt);
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.44 * look.scaleX, 0.6 * look.scaleY, 0.24 * look.scaleX), shirt);
   torso.position.y = 1.05;
+  torso.rotation.x = look.lean * 0.5;
 
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.24), skin);
-  head.position.y = 1.52;
-  head.rotation.x = 0.25; // lolling head
+  head.position.y = type === 'brute' ? 1.42 : 1.52 * look.scaleY;
+  head.position.z = look.lean * 0.3;
+  head.rotation.x = 0.25;
 
-  // Arms stretched forward, the classic silhouette
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.55), skin);
-  armL.position.set(-0.28, 1.22, 0.28);
-  const armR = armL.clone(); armR.position.x = 0.28;
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, look.armLen), skin);
+  armL.position.set(-0.28 * look.scaleX, 1.22, 0.28);
+  const armR = armL.clone(); armR.position.x = 0.28 * look.scaleX;
 
-  const shadow = makeBlobShadow(0.45);
+  const shadow = makeBlobShadow(type === 'brute' ? 0.65 : 0.45);
   shadow.position.y = 0.02;
 
   g.add(legL, legR, torso, head, armL, armR, shadow);
   g.userData.parts = { legL, legR, armL, armR, torso, head };
+  g.userData.type = type;
   return g;
 }
 

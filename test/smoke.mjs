@@ -151,21 +151,25 @@ if (code) {
     note(false, 'client movement did not reach the host: ' + e.message);
   }
 
-  // Both sides can enter playing state; zombie exists on both.
+  // Both sides can enter playing state; the wave machine runs; zombies
+  // spawn at night and replicate to the client; the weapon fires.
   try {
     await host.click('#btn-start-host');
     await client.click('#btn-start-client');
     await host.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
     await client.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
-    const zh = await host.evaluate(() => window.__zhr.zombie());
-    const zc = await client.evaluate(() => window.__zhr.zombie());
-    note(zh.visible && zc.visible, 'both sides playing, zombie present on both');
-    // The host can damage the zombie with the one weapon.
+    const wave = await host.evaluate(() => window.__zhr.wave());
+    note(wave && wave.ph === 'day', `wave machine running (phase ${wave && wave.ph})`);
+    await host.evaluate(() => window.__zhr.forceNight());
+    await host.waitForFunction(() => window.__zhr.zombies().length > 0, null, { timeout: 15000 });
+    note(true, 'night forced, zombies spawn on the host');
+    await client.waitForFunction(() => window.__zhr.zombies().length > 0, null, { timeout: 10000 });
+    note(true, 'zombies replicate to the client');
     await host.evaluate(() => window.__zhr.debugShootZombie());
     const ammo = await host.evaluate(() => window.__zhr.ammo());
-    note(ammo === 11, `weapon fires and spends ammo (ammo ${ammo})`);
+    note(ammo === 7, `weapon fires and spends ammo (ammo ${ammo}/8)`);
   } catch (e) {
-    note(false, 'playing state / weapon check failed: ' + e.message);
+    note(false, 'playing/wave/weapon check failed: ' + e.message);
   }
 }
 
@@ -263,7 +267,7 @@ await galleryCtx.close();
 console.log('PHOTOMODE');
 const photoCtx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 await photoCtx.addInitScript(XR_STUB);
-for (const n of [1, 9]) {
+for (const n of [1, 2, 3, 6, 9]) {
   const page = await newPage(photoCtx, `photomode-${n}`, errs);
   await page.goto(`${BASE}/?photomode=${n}`);
   try {

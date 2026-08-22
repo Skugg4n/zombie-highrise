@@ -60,10 +60,14 @@ export class Replica {
         hr: pb.hr && pa.hr ? { p: lerpArr(pa.hr.p, pb.hr.p, f), q: pb.hr.q } : pb.hr,
       };
     }
-    const za = a.snap.z, zb = b.snap.z;
-    const z = zb && za && zb.alive && za.alive
-      ? { ...zb, p: lerpArr(za.p, zb.p, f) }
-      : zb;
-    return { players, z };
+    // Zombies: compact rows [id, type, x, y, z, hp], interpolated by id.
+    const zaMap = new Map((a.snap.zs || []).map((r) => [r[0], r]));
+    const zs = (b.snap.zs || []).map((rb) => {
+      const ra = zaMap.get(rb[0]);
+      if (!ra) return rb;
+      return [rb[0], rb[1],
+        lerp(ra[2], rb[2], f), lerp(ra[3], rb[3], f), lerp(ra[4], rb[4], f), rb[5]];
+    });
+    return { players, zs, wave: b.snap.wave };
   }
 }

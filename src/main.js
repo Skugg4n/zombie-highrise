@@ -1,15 +1,17 @@
-// Bootstrap: renderer, platform detection, quality tier, world, inputs,
-// net wiring and the frame loop. Special boots: ?photomode=N (deterministic
-// critic captures), ?uistate=<name> (UI gallery with fake data),
-// ?autohost=1 / ?autojoin=CODE (smoke test hooks).
+// Bootstrap: renderer, platform detection, quality tier, level lifecycle,
+// inputs, net wiring and the frame loop. Special boots: ?photomode=N
+// (deterministic critic captures), ?uistate=<name> (UI gallery with fake
+// data), ?autohost=1 / ?autojoin=CODE (smoke test hooks), ?seed=N.
 import * as THREE from 'three';
 import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY } from './config.js';
-import { buildWorld, terrainHeight } from './world/world.js';
+import { buildLevel, disposeLevel } from './world/levelgen.js';
+import { resolveCircle } from './game/collision.js';
 import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS } from './world/actors.js';
-import { applyPhotomode } from './views/photomode.js';
+import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
-import { HostSim } from './game/state.js';
+import { HostSim, ZOMBIE_TYPES } from './game/state.js';
+import { TUNING } from './game/tuning.js';
 import { Replica } from './game/replica.js';
 import { KeyboardInput } from './input/keyboard.js';
 import { TouchInput } from './input/touch.js';
@@ -28,7 +30,7 @@ const PLATFORM = isQuest ? 'quest' : (isTouch && !hasFinePointer ? 'mobile' : 'd
 const QUALITY = (FORCE_QUALITY || (isQuest ? 'vr' : PLATFORM)).toUpperCase() === 'VR' ? 'VR'
   : (FORCE_QUALITY || PLATFORM).toUpperCase() === 'MOBILE' ? 'MOBILE' : 'DESKTOP';
 
-// ---- Renderer, scene, rig ----------------------------------------------
+// ---- Renderer -----------------------------------------------------------
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -40,16 +42,95 @@ document.getElementById('gl-root').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 400);
-const world = buildWorld(scene, QUALITY);
 
-// Player rig: group origin at the feet / XR floor origin. Flat modes put
-// the camera at eye height and use rig.yaw/pitch; VR lets the headset
-// drive the camera inside the group.
+// ---- Lighting rig (persistent; per-level parameters + day/night) --------
+const hemi = new THREE.HemisphereLight(0xcfe5ff, 0x8a7a5a, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffe8c0, 2.2);
+sun.position.set(40, 60, 25);
+scene.add(sun);
+if (QUALITY === 'DESKTOP') {
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  const s = 30;
+  sun.shadow.camera.left = -s; sun.shadow.camera.right = s;
+  sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
+  sun.shadow.camera.far = 150;
+}
+// Headlamp-style flashlight (auto-on in dark levels, F toggles on desktop).
+const flashlight = new THREE.SpotLight(0xd8e8ff, 0, 22, 0.42, 0.45, 1.2);
+const flashlightTarget = new THREE.Object3D();
+flashlightTarget.position.set(0, 0, -6);
+camera.add(flashlight, flashlightTarget);
+flashlight.position.set(0, 0.05, 0.05);
+flashlight.target = flashlightTarget;
+let flashlightOn = false;
+
+// Day/night: nightT 0 = full day, 1 = full night. Lerped smoothly.
+let nightT = 0, nightTarget = 0;
+const colDaySky = new THREE.Color(), colNightSky = new THREE.Color(0x101a2e);
+const colDayHaze = new THREE.Color(), colNightHaze = new THREE.Color(0x18223a);
+const colTmp = new THREE.Color(), colTmp2 = new THREE.Color();
+
+function applyLevelLighting(level) {
+  const L = level.lighting;
+  colDaySky.setHex(L.daySky);
+  colDayHaze.setHex(L.dayHaze);
+  scene.background = new THREE.Color(L.daySky);
+  scene.fog = new THREE.Fog(L.dayHaze, L.fogNear, L.fogFar);
+  flashlightOn = L.dark;
+  updateDayNight(true);
+}
+
+function updateDayNight(force = false) {
+  const L = level.lighting;
+  if (L.dark) {   // basements ignore the sky entirely
+    sun.intensity = 0;
+    hemi.intensity = L.hemiDay;
+    return;
+  }
+  const speed = force ? 1 : 0.02;
+  nightT += (nightTarget - nightT) * (force ? 1 : Math.min(1, speed));
+  colTmp.copy(colDaySky).lerp(colNightSky, nightT);
+  colTmp2.copy(colDayHaze).lerp(colNightHaze, nightT);
+  scene.background.copy(colTmp);
+  scene.fog.color.copy(colTmp2);
+  sun.intensity = L.sunDay * (1 - nightT * 0.92);
+  sun.color.setHex(nightT > 0.5 ? 0xa8c0e8 : 0xffe8c0);   // moonlight is cool
+  hemi.intensity = L.hemiDay * (1 - nightT * 0.72);
+}
+
+// ---- Level lifecycle ----------------------------------------------------
+// All peers build identical geometry from (runSeed, levelIndex); the host
+// picks the seed and hands it out in the welcome message.
+const PHOTO_LEVEL = { 2: 2, 6: 3 };
+let runSeed = (PHOTOMODE || UISTATE) ? 1337
+  : (parseInt(PARAMS.get('seed') || '0', 10) || ((Math.random() * 1e9) >>> 0));
+let levelIndex = PHOTOMODE ? (PHOTO_LEVEL[PHOTOMODE] || 1) : 1;
+let level = buildLevel(scene, QUALITY, runSeed, levelIndex);
+let doorT = 0;   // elevator doors 0 closed .. 1 open (visual)
+
+function loadLevel(idx) {
+  disposeLevel(scene, level);
+  clearZombieVisuals();
+  levelIndex = idx;
+  level = buildLevel(scene, QUALITY, runSeed, idx);
+  applyLevelLighting(level);
+  nightTarget = 0; nightT = 0;
+  doorT = 0;
+  const spawn = level.playerSpawns[0];
+  rig.group.position.copy(spawn);
+  rig.group.rotation.y = rig.yaw = 0;
+  if (sim) sim.setLevel(level);
+}
+
+// ---- Player rig ---------------------------------------------------------
 const rig = { group: new THREE.Group(), yaw: 0, pitch: 0, camera };
 camera.position.set(0, CONFIG.PLAYER_HEIGHT, 0);
 rig.group.add(camera);
-rig.group.position.copy(world.playerSpawns[0]);
+rig.group.position.copy(level.playerSpawns[0] || new THREE.Vector3());
 scene.add(rig.group);
+applyLevelLighting(level);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -60,14 +141,81 @@ addEventListener('resize', () => {
 // clock so the first frame is not a huge step (LESSONS.md).
 document.addEventListener('visibilitychange', () => { last = performance.now(); });
 
-// ---- Actors -------------------------------------------------------------
-const zombieMesh = makeZombieMesh();
-zombieMesh.position.copy(world.zombieSpawn);
-scene.add(zombieMesh);
-let zombiePrev = zombieMesh.position.clone();
-let zombieAnimT = 0;
-let zombieDeathT = 0;
+// ---- Zombie visuals pool ------------------------------------------------
+const zombieVisuals = new Map();  // id -> {group, prev:V3, animT, flashT, type}
+const dyingZombies = [];          // [{group, t}] short shrink-out corpses
+const tmpV = new THREE.Vector3();
+const tmpQ = new THREE.Quaternion();
 
+function poseZombie(group, animT) {
+  const s = Math.sin(animT);
+  const parts = group.userData.parts;
+  parts.legL.rotation.x = s * 0.45;
+  parts.legR.rotation.x = -s * 0.45;
+  parts.armL.position.y = 1.22 + s * 0.03;
+  parts.armR.position.y = 1.22 - s * 0.03;
+  parts.torso.rotation.z = s * 0.06;
+}
+
+function ensureZombieVisual(id, type) {
+  let v = zombieVisuals.get(id);
+  if (!v) {
+    v = { group: makeZombieMesh(type), prev: new THREE.Vector3(), animT: Math.random() * 6, flashT: 0, type };
+    zombieVisuals.set(id, v);
+    scene.add(v.group);
+  }
+  return v;
+}
+
+function clearZombieVisuals() {
+  for (const v of zombieVisuals.values()) scene.remove(v.group);
+  zombieVisuals.clear();
+  for (const d of dyingZombies) scene.remove(d.group);
+  dyingZombies.length = 0;
+}
+
+// rows: [id, typeIndex, x, y, z, hp][]
+function updateZombieVisuals(rows, dt) {
+  const keep = new Set();
+  for (const r of rows) {
+    const [id, ti, x, y, z] = r;
+    keep.add(id);
+    const v = ensureZombieVisual(id, ZOMBIE_TYPES[ti] || 'walker');
+    v.prev.copy(v.group.position);
+    v.group.position.set(x, y, z);
+    const dx = x - v.prev.x, dz = z - v.prev.z;
+    if (dx * dx + dz * dz > 1e-8) {
+      v.group.rotation.y = Math.atan2(dx, dz);
+      v.animT += dt * (v.type === 'runner' ? 11 : v.type === 'brute' ? 3.5 : 5.5);
+      poseZombie(v.group, v.animT);
+    }
+    if (v.flashT > 0) {
+      v.flashT -= dt;
+      if (v.flashT <= 0) setZombieEmissive(v.group, 0x000000, 0);
+    }
+  }
+  for (const [id, v] of zombieVisuals) {
+    if (!keep.has(id)) { scene.remove(v.group); zombieVisuals.delete(id); }
+  }
+  for (let i = dyingZombies.length - 1; i >= 0; i--) {
+    const d = dyingZombies[i];
+    d.t -= dt;
+    const k = Math.max(0.05, d.t / 0.45);
+    d.group.scale.set(1, k, 1);
+    if (d.t <= 0) { scene.remove(d.group); dyingZombies.splice(i, 1); }
+  }
+}
+
+function setZombieEmissive(group, hex, intensity) {
+  for (const part of Object.values(group.userData.parts)) {
+    if (part.material.emissive) {
+      part.material.emissive.setHex(hex);
+      part.material.emissiveIntensity = intensity;
+    }
+  }
+}
+
+// ---- Remote player avatars ----------------------------------------------
 const avatars = new Map();   // playerId -> mesh group
 let avatarColorIdx = 0;
 function ensureAvatar(id) {
@@ -84,20 +232,19 @@ function pruneAvatars(keepIds) {
     if (!keepIds.has(id)) { scene.remove(a); avatars.delete(id); }
   }
 }
-const tmpV = new THREE.Vector3();
-const tmpQ = new THREE.Quaternion();
 function updateAvatar(id, p) {
   const a = ensureAvatar(id);
   const parts = a.userData.parts;
   a.position.fromArray(p.p);
   a.rotation.y = p.ry || 0;
   parts.head.rotation.x = p.rx || 0;
+  // Downed players lie flat.
+  a.rotation.x = p.down ? -Math.PI / 2 * 0.9 : 0;
   const isVR = !!(p.vr && p.h);
   parts.handL.visible = isVR && !!p.hl;
   parts.handR.visible = isVR && !!p.hr;
   if (isVR) {
     a.updateMatrixWorld(true);
-    // Head height follows the tracked head (crouching reads over the net).
     parts.head.position.y = Math.max(0.4, (p.h.p[1] - p.p[1]));
     parts.body.scale.y = Math.max(0.5, parts.head.position.y / 1.55);
     for (const [hand, data] of [[parts.handL, p.hl], [parts.handR, p.hr]]) {
@@ -125,19 +272,35 @@ const lobby = new LobbyUI({
   onStart: startPlaying,
   onLeave: leaveToMenu,
 });
+const $ = (id) => document.getElementById(id);
+$('btn-go-retry').addEventListener('click', () => {
+  if (sim) {
+    $('panel-gameover').classList.add('hidden');
+    sim.restartLevel();
+  } else {
+    leaveToMenu();   // clients cannot restart; the host does
+  }
+});
+$('btn-go-lobby').addEventListener('click', () => {
+  $('panel-gameover').classList.add('hidden');
+  leaveToMenu();
+});
 
 // ---- Game session state -------------------------------------------------
 let role = null;             // null | 'solo' | 'host' | 'client'
 let net = null;
 let sim = null;              // HostSim (solo/host)
 let replica = null;          // Replica (client)
-let myHp = CONFIG.PLAYER_HP;
+let myHp = TUNING.player.maxHp;
+let myDown = false;
+let scrap = TUNING.economy.startingScrap;
 let lastSnapAt = 0;          // client: when the last snapshot arrived
 let staleShown = false;
 let toastTimer = 0;
+let lastWave = null;         // latest wave block (host: sim.wave mirror)
 
 function showToast(text, ms = 4000) {
-  const el = document.getElementById('toast');
+  const el = $('toast');
   el.textContent = text;
   el.classList.remove('hidden');
   clearTimeout(toastTimer);
@@ -145,31 +308,37 @@ function showToast(text, ms = 4000) {
 }
 function hideToast() {
   clearTimeout(toastTimer);
-  document.getElementById('toast').classList.add('hidden');
+  $('toast').classList.add('hidden');
 }
-const weapon = { ammo: CONFIG.PISTOL_MAG, reloading: false, reloadT: 0, cooldown: 0 };
+
+const weapon = { ammo: TUNING.weapons.pistol.magazine, reloading: false, reloadT: 0, cooldown: 0 };
 const playerName = PARAMS.get('name') || 'Player';
 
 function isPlaying() { return lobby.state === 'playing'; }
+function canAct() { return isPlaying() && !myDown; }
 
 // Tear down any previous session completely before starting a new one.
-// Orphaned Nets keep live Peers registered at the broker and their stale
-// callbacks would fire into the new session's UI.
 function resetSession() {
   if (net) net.leave();          // leave() detaches all callbacks first
   net = null; sim = null; replica = null; role = null;
-  myHp = CONFIG.PLAYER_HP;
-  weapon.ammo = CONFIG.PISTOL_MAG;
+  myHp = TUNING.player.maxHp; myDown = false;
+  scrap = TUNING.economy.startingScrap;
+  weapon.ammo = TUNING.weapons.pistol.magazine;
   weapon.reloading = false; weapon.reloadT = 0; weapon.cooldown = 0;
-  lastSnapAt = 0;
+  lastSnapAt = 0; lastWave = null;
+  hideToast();
+  $('panel-gameover').classList.add('hidden');
+  $('downed-note').classList.add('hidden');
   pruneAvatars(new Set());
+  clearZombieVisuals();
   lobby.setMenuBusy(false);
+  if (levelIndex !== 1) { runSeed = ((Math.random() * 1e9) >>> 0); loadLevel(1); }
 }
 
 function startSolo() {
   resetSession();
   role = 'solo';
-  sim = new HostSim(world);
+  sim = new HostSim(level);
   sim.addPlayer('H', playerName, PLATFORM);
   hud.setRoom(null);
   startPlaying();
@@ -180,7 +349,7 @@ function startHosting() {
   role = 'host';
   lobby.setMenuBusy(true, 'Contacting the connection broker...');
   net = new Net();
-  sim = new HostSim(world);
+  sim = new HostSim(level);
   sim.addPlayer('H', playerName, PLATFORM);
   net.onHostReady = (code) => { lobby.setMenuBusy(false); lobby.showCode(code); hud.setRoom(code); };
   net.onPeerJoin = (id, hi) => {
@@ -193,6 +362,7 @@ function startHosting() {
     else if (m.t === 'shoot') sim.shoot(m.o, m.d);
   };
   net.onError = onNetError;
+  net.getWelcomeExtras = () => ({ seed: runSeed, level: levelIndex });
   net.host();
 }
 
@@ -208,13 +378,24 @@ function startJoining(code) {
   replica = new Replica();
   lobby.setState('joining');
   lobby.setJoinStatus('Connecting to ' + code + '...');
-  net.onWelcome = (w) => { lobby.showConnected(w.code); hud.setRoom(w.code); };
+  net.onWelcome = (w) => {
+    lobby.showConnected(w.code);
+    hud.setRoom(w.code);
+    if (typeof w.seed === 'number' && w.seed !== runSeed) {
+      runSeed = w.seed;
+      loadLevel(w.level || 1);
+    }
+  };
   net.onSnapshot = (snap) => {
     lastSnapAt = performance.now();
     replica.push(snap);
+    lastWave = snap.wave;
     handleEvents(snap.ev || []);
     const me = snap.players?.[net.myId];
-    if (me && me.hp !== myHp) { myHp = me.hp; hud.setHealth(myHp); }
+    if (me) {
+      if (me.hp !== myHp) { myHp = me.hp; hud.setHealth(myHp); }
+      if (me.down !== myDown) setDowned(me.down);
+    }
   };
   net.onDisconnected = () => lobby.showError('Lost the connection to the host.');
   net.onError = onNetError;
@@ -224,8 +405,8 @@ function startJoining(code) {
 function startPlaying() {
   lobby.setState('playing');
   hud.setHealth(myHp);
-  hud.setAmmo(weapon.ammo, CONFIG.PISTOL_MAG, false);
-  hud.setWave('NIGHT 1');
+  hud.setAmmo(weapon.ammo, TUNING.weapons.pistol.magazine, false);
+  if (sim && (sim.wave.phase === 'lobby' || sim.wave.phase === 'gameover')) sim.startRun();
 }
 
 function leaveToMenu() {
@@ -236,63 +417,119 @@ function leaveToMenu() {
 
 function onNetError(text, fatal) {
   if (fatal) {
-    // Fatal errors only happen before a session is established (broker
-    // unreachable). Reset everything so the next attempt starts clean.
     resetSession();
     lobby.setState('menu');
     lobby.setJoinStatus(text, true);
-    document.getElementById('menu-status').textContent = text;
+    $('menu-status').textContent = text;
   } else if (lobby.state === 'menu' || lobby.state === 'joining') {
     lobby.setJoinStatus(text, true);
-    document.getElementById('menu-status').textContent = text;
+    $('menu-status').textContent = text;
   } else {
     showToast(text, 6000);
   }
+}
+
+function setDowned(down) {
+  myDown = down;
+  $('downed-note').classList.toggle('hidden', !down);
 }
 
 // ---- Events from the sim / snapshots ------------------------------------
 function handleEvents(evs) {
   for (const ev of evs) {
     switch (ev.e) {
-      case 'zhit': flashZombie(0xff5040); break;
-      case 'zdie': zombieDeathT = 0.45; break;
-      case 'zspawn': zombieMesh.scale.set(1, 1, 1); break;
+      case 'zhit': {
+        const v = zombieVisuals.get(ev.id);
+        if (v) { v.flashT = 0.12; setZombieEmissive(v.group, 0xff5040, 0.8); }
+        break;
+      }
+      case 'zdie': {
+        const v = zombieVisuals.get(ev.id);
+        if (v) {
+          zombieVisuals.delete(ev.id);
+          dyingZombies.push({ group: v.group, t: 0.45 });
+        }
+        if (role !== 'client') scrap += ev.scrap || 0;   // client scrap arrives in Pass C economy sync
+        break;
+      }
       case 'phit':
         if (role !== 'client' && ev.id === 'H') { myHp = ev.hp; hud.setHealth(myHp); }
         break;
+      case 'down':
+        if (ev.id === (role === 'client' ? net?.myId : 'H')) setDowned(true);
+        break;
+      case 'revive':
+        if (ev.id === (role === 'client' ? net?.myId : 'H')) {
+          setDowned(false);
+          myHp = ev.hp; hud.setHealth(myHp);
+        }
+        break;
+      case 'day':
+        nightTarget = 0;
+        $('panel-gameover').classList.add('hidden');
+        showCenterText('DAY', 1.6);
+        break;
+      case 'countdown':
+        break;   // ticking text driven from the wave block each frame
+      case 'night':
+        nightTarget = 1;
+        showCenterText('NIGHT ' + ev.n, 2.0);
+        break;
+      case 'elevator':
+        nightTarget = 0.35;
+        showCenterText('CLEARED', 1.6);
+        showToast('Board the elevator!', 5000);
+        break;
+      case 'ride':
+        showCenterText('GOING UP', 1.4);
+        break;
+      case 'level':
+        loadLevel(ev.index);
+        break;
+      case 'gameover': {
+        const s = ev.stats || {};
+        $('go-stats').textContent =
+          `You survived ${s.nights || 0} night${s.nights === 1 ? '' : 's'} and reached level ${s.level || 1}. ` +
+          `${s.kills || 0} zombies down.`;
+        $('btn-go-retry').style.display = role === 'client' ? 'none' : '';
+        $('panel-gameover').classList.remove('hidden');
+        break;
+      }
       case 'join': if (role === 'host') refreshHostPlayers(); break;
     }
   }
 }
 
-let zombieFlashT = 0;
-function flashZombie(color) {
-  zombieFlashT = 0.12;
-  for (const part of Object.values(zombieMesh.userData.parts)) {
-    part.material.emissive?.setHex(color);
-    part.material.emissiveIntensity = 0.8;
-  }
+// Big centre text with auto-hide.
+let centerT = 0;
+function showCenterText(text, seconds) {
+  const el = $('countdown');
+  el.textContent = text;
+  el.classList.remove('hidden');
+  centerT = seconds;
 }
 
-// ---- Weapon -------------------------------------------------------------
+// ---- Weapon (Phase 1 Pass A: the pistol; full arsenal lands in Pass B) --
 function tryFire(origin, dir) {
-  if (!isPlaying() || weapon.reloading || weapon.cooldown > 0) return;
+  if (!canAct() || weapon.reloading || weapon.cooldown > 0) return;
   if (weapon.ammo <= 0) { reload(); return; }
+  const W = TUNING.weapons.pistol;
   weapon.ammo--;
-  weapon.cooldown = CONFIG.PISTOL_COOLDOWN_S;
-  hud.setAmmo(weapon.ammo, CONFIG.PISTOL_MAG, false);
+  weapon.cooldown = W.fireCooldown;
+  hud.setAmmo(weapon.ammo, W.magazine, false);
   flash.intensity = 10;
   flash.position.copy(origin).addScaledVector(dir, 0.3);
   const o = origin.toArray(), d = dir.toArray();
   if (role === 'client') net.sendToHost(msg.shoot(o, d));
-  else if (sim) { sim.shoot(o, d); if (role === 'solo') handleEvents(sim.events.splice(0)); }
+  else if (sim) { sim.shoot(o, d, W.damage); if (role === 'solo') handleEvents(sim.events.splice(0)); }
 }
 
 function reload() {
-  if (weapon.reloading || weapon.ammo >= CONFIG.PISTOL_MAG) return;
+  const W = TUNING.weapons.pistol;
+  if (weapon.reloading || weapon.ammo >= W.magazine) return;
   weapon.reloading = true;
-  weapon.reloadT = CONFIG.PISTOL_RELOAD_S;
-  hud.setAmmo(weapon.ammo, CONFIG.PISTOL_MAG, true);
+  weapon.reloadT = W.reloadTime;
+  hud.setAmmo(weapon.ammo, W.magazine, true);
 }
 
 // ---- Inputs -------------------------------------------------------------
@@ -301,26 +538,23 @@ const inputCtx = {
   dom: renderer.domElement,
   fire: tryFire,
   reload,
-  isPlaying,
+  isPlaying: canAct,
+  toggleFlashlight: () => { flashlightOn = !flashlightOn; },
   getLocoMode: () => lobby.locoMode,
   onSessionChange: (active) => {
     if (active) {
-      // Inside the headset the 2D lobby panels are invisible, so a player
-      // entering VR from the lobby would be dead-ended. Entering VR while
-      // hosting/connected starts the game; from the bare menu it starts a
-      // solo practice session. (Session start itself is always the user's
-      // own button press, per the WebXR gesture rule.)
+      // Inside the headset the 2D lobby panels are invisible; entering VR
+      // from the lobby starts the game (session start itself is always the
+      // user's own button press, per the WebXR gesture rule).
       if (lobby.state === 'hosting' || lobby.state === 'connected') startPlaying();
       else if (lobby.state === 'menu') startSolo();
       return;
     }
-    {
-      // Back to flat controls: adopt whatever yaw the rig ended up with.
-      rig.yaw = rig.group.rotation.y;
-      rig.pitch = 0;
-      camera.position.set(0, CONFIG.PLAYER_HEIGHT, 0);
-      camera.rotation.set(0, 0, 0);
-    }
+    // Back to flat controls: adopt whatever yaw the rig ended up with.
+    rig.yaw = rig.group.rotation.y;
+    rig.pitch = 0;
+    camera.position.set(0, CONFIG.PLAYER_HEIGHT, 0);
+    camera.rotation.set(0, 0, 0);
   },
 };
 let inputs = [];
@@ -336,9 +570,7 @@ if (!PHOTOMODE && !UISTATE) {
 function buildPose() {
   const inVR = !!(vrInput && vrInput.active);
   if (!inVR) {
-    return {
-      p: rig.group.position.toArray(), ry: rig.yaw, rx: rig.pitch, vr: false,
-    };
+    return { p: rig.group.position.toArray(), ry: rig.yaw, rx: rig.pitch, vr: false };
   }
   const hp = camera.getWorldPosition(new THREE.Vector3());
   const hq = camera.getWorldQuaternion(new THREE.Quaternion());
@@ -347,8 +579,6 @@ function buildPose() {
     p: [hp.x, rig.group.position.y, hp.z], ry: e.y, rx: e.x, vr: true,
     h: { p: hp.toArray(), q: hq.toArray() },
   };
-  // Hands come from the handedness map and only while tracked; an asleep
-  // controller must not report a stale or identity transform.
   const hl = vrInput.getHandPose('left');
   const hr = vrInput.getHandPose('right');
   if (hl) pose.hl = hl;
@@ -357,17 +587,20 @@ function buildPose() {
 }
 
 // ---- Special boots ------------------------------------------------------
-let photomodeHud = false;
 if (PHOTOMODE) {
-  // Deterministic scene: zombie mid-approach, one fake teammate, fixed cam.
-  zombieMesh.position.set(-10, 0, 8);
-  zombieMesh.rotation.y = Math.atan2(0 - -10, 0 - 8);
-  zombieAnimT = 1.2;
-  updateAvatar('photobot', { p: [-2, 0.1, -1], ry: 2.3, rx: 0, vr: false, hp: 100 });
-  photomodeHud = applyPhotomode(PHOTOMODE, { camera, scene });
-  scene.remove(rig.group);   // free camera, not the rig camera path
+  for (const [type, x, z, fx, fz, animT] of (PHOTO_ZOMBIES[PHOTOMODE] || [])) {
+    const g = makeZombieMesh(type);
+    g.position.set(x, level.heightAt(x, z), z);
+    g.rotation.y = Math.atan2(fx - x, fz - z);
+    poseZombie(g, animT);
+    scene.add(g);
+  }
+  updateAvatar('photobot', { p: [-2, level.floorY, -1], ry: 2.3, rx: 0, vr: false, hp: 100 });
+  if (PHOTOMODE === 2) { nightTarget = 0; flashlightOn = true; }
+  const wantHud = applyPhotomode(PHOTOMODE, { camera, scene, level });
+  scene.remove(rig.group);
   scene.add(camera);
-  if (photomodeHud) lobby.applyUIState('hud');
+  if (wantHud) lobby.applyUIState('hud');
 } else if (UISTATE) {
   lobby.applyUIState(UISTATE);
   camera.position.set(10, 1.7, 12);
@@ -376,6 +609,24 @@ if (PHOTOMODE) {
   scene.add(camera);
 } else {
   lobby.setState('menu');
+}
+
+// ---- HUD phase text -----------------------------------------------------
+function updateWaveHud(w) {
+  if (!w) { hud.setWave('NIGHT 1'); return; }
+  switch (w.ph) {
+    case 'lobby': hud.setWave(role === 'client' ? 'WAITING FOR HOST' : 'NIGHT 1'); break;
+    case 'day': hud.setWave(`FLOOR ${w.lv} - DAY - night in ${w.t}s`); break;
+    case 'countdown':
+      hud.setWave(`NIGHT ${w.n + 1}`);
+      showCenterText(String(w.t), 0.5);
+      break;
+    case 'night': hud.setWave(`NIGHT ${w.n} - ${w.left} left`); break;
+    case 'elevator': hud.setWave('CLEARED - board the elevator'); break;
+    case 'ride': hud.setWave('GOING UP - floor ' + (w.lv + 1)); break;
+    case 'gameover': hud.setWave('GAME OVER'); break;
+    default: hud.setWave('');
+  }
 }
 
 // ---- Frame loop ---------------------------------------------------------
@@ -388,17 +639,27 @@ renderer.setAnimationLoop(() => {
   last = now;
 
   if (!PHOTOMODE && !UISTATE) {
-    // Inputs and flat-mode camera.
     for (const input of inputs) input.update(dt);
     const inVR = !!(vrInput && vrInput.active);
     if (!inVR) {
       if (!isPlaying()) rig.yaw += dt * 0.02;  // slow menu drift
       rig.group.rotation.y = rig.yaw;
       camera.rotation.x = rig.pitch;
+      // Downed players sink to the floor (flat modes).
+      const eyeTarget = myDown ? 0.55 : CONFIG.PLAYER_HEIGHT;
+      camera.position.y += (eyeTarget - camera.position.y) * Math.min(1, dt * 6);
     }
-    // Terrain clamp under the player (head position in VR, rig in flat).
+    // Collision + terrain under the player (head position in VR).
     const ref = inVR ? camera.getWorldPosition(tmpV) : rig.group.position;
-    rig.group.position.y = terrainHeight(ref.x, ref.z);
+    if (inVR) {
+      const before = tmpV.clone();
+      resolveCircle(tmpV, 0.3, level.colliders);
+      rig.group.position.x += tmpV.x - before.x;
+      rig.group.position.z += tmpV.z - before.z;
+    } else {
+      resolveCircle(rig.group.position, 0.32, level.colliders);
+    }
+    rig.group.position.y = level.heightAt(ref.x, ref.z);
 
     // Weapon timers.
     if (weapon.cooldown > 0) weapon.cooldown -= dt;
@@ -406,17 +667,14 @@ renderer.setAnimationLoop(() => {
       weapon.reloadT -= dt;
       if (weapon.reloadT <= 0) {
         weapon.reloading = false;
-        weapon.ammo = CONFIG.PISTOL_MAG;
-        hud.setAmmo(weapon.ammo, CONFIG.PISTOL_MAG, false);
+        weapon.ammo = TUNING.weapons.pistol.magazine;
+        hud.setAmmo(weapon.ammo, TUNING.weapons.pistol.magazine, false);
       }
     }
 
     // Simulation / replication.
     if (sim) {
       sim.updatePose('H', buildPose());
-      // The world only simulates once the host is actually playing; poses
-      // still sync so lobby members see each other, but the zombie neither
-      // walks nor bites anyone who is still in a lobby panel.
       if (isPlaying()) sim.step(dt);
       if (role === 'solo') handleEvents(sim.events.splice(0));
       if (role === 'host' && net) {
@@ -428,15 +686,19 @@ renderer.setAnimationLoop(() => {
           net.broadcast(snap);
         }
       }
-      // Visuals from the authoritative sim.
-      if (!zombieDeathT) zombieMesh.position.copy(sim.zombie.pos);
-      zombieMesh.visible = sim.zombie.alive || zombieDeathT > 0;
+      lastWave = { ph: sim.wave.phase, n: sim.wave.night, lv: sim.wave.level, t: Math.ceil(sim.wave.t), left: sim.wave.left };
+      // Visuals straight from the authoritative sim.
+      const rows = [];
+      for (const z of sim.zombies.values()) {
+        rows.push([z.id, ZOMBIE_TYPES.indexOf(z.type), z.pos.x, z.pos.y, z.pos.z, z.hp]);
+      }
+      updateZombieVisuals(rows, dt);
       const keep = new Set();
       for (const [id, p] of sim.players) {
         if (id === 'H') continue;
         keep.add(id);
         updateAvatar(id, {
-          p: p.pos.toArray(), ry: p.ry, rx: p.rx, vr: p.vr, h: p.h, hl: p.hl, hr: p.hr,
+          p: p.pos.toArray(), ry: p.ry, rx: p.rx, vr: p.vr, down: p.down, h: p.h, hl: p.hl, hr: p.hr,
         });
       }
       pruneAvatars(keep);
@@ -455,57 +717,32 @@ renderer.setAnimationLoop(() => {
           updateAvatar(id, p);
         }
         pruneAvatars(keep);
-        if (s.z) {
-          if (!zombieDeathT) zombieMesh.position.fromArray(s.z.p);
-          zombieMesh.visible = s.z.alive || zombieDeathT > 0;
-        }
+        updateZombieVisuals(s.zs || [], dt);
+        if (s.wave) lastWave = s.wave;
       }
-      // Stale-connection feedback (LESSONS.md: show "reconnecting" instead
-      // of silently freezing when the host tab is backgrounded).
+      // Stale-connection feedback (LESSONS.md).
       const stale = lastSnapAt > 0 && performance.now() - lastSnapAt > 4000;
       if (stale && !staleShown) { staleShown = true; showToast('Connection stalled, waiting for the host...', 0); }
       else if (!stale && staleShown) { staleShown = false; hideToast(); }
     }
+
+    // Wave-driven presentation.
+    if (isPlaying()) updateWaveHud(lastWave);
+    updateDayNight();
+    // Elevator doors: open while boarding, closed otherwise.
+    const doorTarget = lastWave && lastWave.ph === 'elevator' ? 1 : (lastWave && (lastWave.ph === 'night' || lastWave.ph === 'ride') ? 0 : doorT);
+    doorT += (doorTarget - doorT) * Math.min(1, dt * 3);
+    if (level.elevator) level.elevator.setDoors(doorT);
   }
 
-  // Zombie shuffle animation (all roles, local cosmetic). Faces its
-  // direction of travel; clients derive it from position deltas.
-  const zDelta = tmpV.copy(zombieMesh.position).sub(zombiePrev);
-  const zMoved = zDelta.lengthSq() > 1e-8;
-  if (zMoved) zombieMesh.rotation.y = Math.atan2(zDelta.x, zDelta.z);
-  zombiePrev.copy(zombieMesh.position);
-  // In photomode the pose is set ONCE (fixed zombieAnimT at boot) and never
-  // advanced: captures must be pixel-deterministic across iterations.
-  if (zMoved && !PHOTOMODE) zombieAnimT += dt * 5.5;
-  if (zMoved || PHOTOMODE) {
-    const s = Math.sin(zombieAnimT);
-    const parts = zombieMesh.userData.parts;
-    parts.legL.rotation.x = s * 0.45;
-    parts.legR.rotation.x = -s * 0.45;
-    parts.armL.position.y = 1.22 + s * 0.03;
-    parts.armR.position.y = 1.22 - s * 0.03;
-    parts.torso.rotation.z = s * 0.06;
+  // Centre text timer.
+  if (centerT > 0) {
+    centerT -= dt;
+    if (centerT <= 0) $('countdown').classList.add('hidden');
   }
 
-  // Zombie hit flash / death shrink.
-  if (zombieFlashT > 0) {
-    zombieFlashT -= dt;
-    if (zombieFlashT <= 0) {
-      for (const part of Object.values(zombieMesh.userData.parts)) {
-        part.material.emissive?.setHex(0x000000);
-      }
-    }
-  }
-  if (zombieDeathT > 0) {
-    zombieDeathT -= dt;
-    const k = Math.max(0.05, zombieDeathT / 0.45);
-    zombieMesh.scale.set(1, k, 1);
-    if (zombieDeathT <= 0) {
-      zombieDeathT = 0;   // exactly 0: a negative value would freeze the zombie forever
-      zombieMesh.visible = false;
-      zombieMesh.scale.set(1, 1, 1);
-    }
-  }
+  // Flashlight follows its toggle.
+  flashlight.intensity += ((flashlightOn ? 9 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
 
   // Muzzle flash decay.
   if (flash.intensity > 0) flash.intensity = Math.max(0, flash.intensity - dt * 80);
@@ -524,19 +761,30 @@ window.__zhr = {
   myId: () => (role === 'client' ? net?.myId : role ? 'H' : null),
   hp: () => myHp,
   ammo: () => weapon.ammo,
+  scrap: () => scrap,
+  wave: () => lastWave,
+  levelIndex: () => levelIndex,
   myPos: () => rig.group.position.toArray(),
   remotePlayers: () => {
     const out = {};
     for (const [id, a] of avatars) out[id] = a.position.toArray();
     return out;
   },
-  zombie: () => ({ pos: zombieMesh.position.toArray(), visible: zombieMesh.visible }),
+  zombies: () => {
+    const out = [];
+    for (const [id, v] of zombieVisuals) out.push({ id, type: v.type, pos: v.group.position.toArray() });
+    return out;
+  },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
+  forceNight: () => { if (sim) sim.forceNight(); },
   debugShootZombie: () => {
-    const c = zombieMesh.position.clone(); c.y += 1.1;
+    const first = zombieVisuals.values().next().value;
+    if (!first) return false;
+    const c = first.group.position.clone(); c.y += 1.1;
     const o = camera.getWorldPosition(new THREE.Vector3());
     const d = c.sub(o).normalize();
     tryFire(o, d);
+    return true;
   },
   renderInfo: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }),
 };

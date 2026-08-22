@@ -114,6 +114,20 @@
   #hud-wave { left: 50%; transform: translateX(-50%); top: max(10px, env(safe-area-inset-top)); font-size: 13px; opacity: 0.85; }
   #hud-room { left: max(14px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); font-size: 12px; opacity: 0.8; }
 
+  /* Big centre countdown / phase announcements (HUD layer) */
+  #countdown {
+    position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%);
+    font-size: clamp(42px, 9vw, 110px); font-weight: 800; letter-spacing: 4px;
+    color: var(--accent); text-shadow: 0 4px 24px rgba(0,0,0,0.6);
+    pointer-events: none; text-align: center;
+  }
+  #downed-note {
+    position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%);
+    color: var(--danger); font-weight: 700; font-size: 17px;
+    background: rgba(23,20,15,0.7); padding: 10px 16px; border-radius: 8px;
+    pointer-events: none; text-align: center; max-width: 90vw;
+  }
+
   /* Touch controls (HUD layer, mobile only) */
   #touch-ui { position: absolute; inset: 0; pointer-events: none; }
   #stick-zone { position: absolute; left: 0; bottom: 0; width: 45%; height: 55%; pointer-events: auto; }
@@ -172,6 +186,8 @@
   <div class="layer-hud">
     <div id="hud" class="hidden">
       <div id="crosshair"></div>
+      <div id="countdown" class="hidden"></div>
+      <div id="downed-note" class="hidden">DOWNED - a teammate close to you revives you</div>
       <div id="hud-room" class="hud-box" data-smoke>ROOM ----</div>
       <div id="hud-wave" class="hud-box" data-smoke>NIGHT 1</div>
       <div id="hud-health" class="hud-box" data-smoke>HP 100</div>
@@ -247,9 +263,9 @@
     </div>
     <div id="panel-gameover" class="panel hidden">
       <h2 data-smoke>THE HIGH RISE FELL</h2>
-      <div class="status" data-smoke>You survived 4 nights. 87 zombies down.</div>
-      <button data-smoke>TRY AGAIN</button>
-      <button class="secondary" data-smoke>BACK TO LOBBY</button>
+      <div id="go-stats" class="status" data-smoke>You survived 4 nights. 87 zombies down.</div>
+      <button id="btn-go-retry" data-smoke>TRY AGAIN</button>
+      <button id="btn-go-lobby" class="secondary" data-smoke>BACK TO LOBBY</button>
     </div>
     <div id="panel-error" class="panel hidden">
       <h2>CONNECTION LOST</h2>
