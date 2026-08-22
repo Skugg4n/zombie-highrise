@@ -116,6 +116,7 @@ const RECIPES = {
   throw: (d) => noiseBurst(d, { peak: 0.12, attack: 0.01, decay: 0.1, freq: 1200, q: 1.5 }),
   scream: (d) => { tone(d, { freq: 1450, endFreq: 680, type: 'sawtooth', peak: 0.28, attack: 0.06, decay: 1.1, detune: 40 }); tone(d, { freq: 1480, endFreq: 700, type: 'square', peak: 0.12, attack: 0.08, decay: 1.0, detune: -35 }); },
   roar: (d) => { tone(d, { freq: 95, endFreq: 55, type: 'sawtooth', peak: 0.4, attack: 0.08, decay: 1.1, detune: -25 }); noiseBurst(d, { peak: 0.25, attack: 0.1, decay: 0.9, freq: 260, q: 0.6, type: 'lowpass' }); },
+  crit: (d) => { tone(d, { freq: 1750, endFreq: 2300, type: 'square', peak: 0.2, attack: 0.004, decay: 0.1 }); tone(d, { freq: 900, endFreq: 1400, type: 'sine', peak: 0.16, decay: 0.12 }); },
   acid: (d) => noiseBurst(d, { peak: 0.3, attack: 0.01, decay: 0.35, freq: 800, q: 1.2, type: 'lowpass' }),
 };
 

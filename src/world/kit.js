@@ -80,6 +80,13 @@ export function railing(level, mat, x, z, w, d) {
   box(level.group, w, 0.9, d, mat, x, 1.4, z);
 }
 
+// An invisible barrier that stops PLAYERS but not zombies. Used where an
+// opening has to stay open for the horde but must not let the player walk
+// off into nothing (playtest: "openings that only let you walk OUT").
+export function playerBarrier(level, x, z, w, d) {
+  level.colliders.push({ x, z, hx: w / 2, hz: d / 2, tall: false, playerOnly: true });
+}
+
 // ---- Spawn sources ------------------------------------------------------
 // PLAYTEST RULE: never spawn enemies out of thin air. Every spawn point
 // gets a visible, fiction-carrying source the player can see and read.

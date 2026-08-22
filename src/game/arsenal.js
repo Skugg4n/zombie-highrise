@@ -28,10 +28,17 @@ export class Arsenal {
     this.mines = 0;
     this.nightVision = false;
     this.cooldown = 0;
+    this.cooldownR = 0;      // dual pistols: the right hand has its own timer
+    this.lastHand = 'right'; // so single-click akimbo still alternates
     this.reloading = false;
     this.reloadT = 0;
+    this.reloadTotal = 0;    // for the reload animation curve
     this.reloadGraceT = 0;   // post-reload window before host mag sync resumes
+    this.ads = false;
+    this.adsT = 0;           // 0..1 eased aim-down-sights amount
   }
+
+  isAkimbo() { return this.active === 'akimbo'; }
 
   def(w = this.active) { return TUNING.weapons[w]; }
   isGun(w = this.active) { return w !== 'machete'; }
@@ -84,9 +91,32 @@ export class Arsenal {
   }
 
   // origin/dir: THREE.Vector3 world ray of the aim (camera or VR hand).
-  fire(origin, dir) {
-    if (this.cooldown > 0 || this.reloading) return false;
+  fire(origin, dir, hand = null) {
     const w = this.active;
+    if (w === 'akimbo') {
+      // Alternate hands. An explicit hand comes from the matching mouse
+      // button; a plain click takes whichever hand is ready next.
+      const h = hand || (this.lastHand === 'left' ? 'right' : 'left');
+      if (h === 'right' ? this.cooldownR > 0 : this.cooldown > 0) return false;
+      if (this.reloading) return false;
+      const defA = this.def(w);
+      const a = this.ammo[w];
+      if (!a || a.mag <= 0) {
+        if (this.effects.dry) this.effects.dry();
+        this.reload();
+        return false;
+      }
+      a.mag--;
+      this.lastHand = h;
+      if (h === 'right') this.cooldownR = defA.fireCooldown;
+      else this.cooldown = defA.fireCooldown;
+      this.dispatch({ t: 'shoot', w, o: origin.toArray(), d: dir.toArray(), sp: this.spreadMult() });
+      this.effects.muzzle(origin, dir, w, h);
+      this.onHudChange();
+      if (a.mag === 0) this.reload();
+      return true;
+    }
+    if (this.cooldown > 0 || this.reloading) return false;
     if (w === 'machete') return this.swing(origin, dir);
     const def = this.def(w);
     const a = this.ammo[w];
@@ -97,7 +127,7 @@ export class Arsenal {
     }
     a.mag--;
     this.cooldown = def.fireCooldown;
-    this.dispatch({ t: 'shoot', w, o: origin.toArray(), d: dir.toArray() });
+    this.dispatch({ t: 'shoot', w, o: origin.toArray(), d: dir.toArray(), sp: this.spreadMult() });
     this.effects.muzzle(origin, dir, w);
     this.onHudChange();
     if (a.mag === 0) this.reload();   // auto-reload on empty
@@ -120,6 +150,7 @@ export class Arsenal {
     if (!a || a.mag >= def.magazine || a.reserve <= 0) return;
     this.reloading = true;
     this.reloadT = def.reloadTime;
+    this.reloadTotal = def.reloadTime;
     if (this.effects.reload) this.effects.reload();
     this.onHudChange();
   }
@@ -170,8 +201,13 @@ export class Arsenal {
 
   // ---- Frame -----------------------------------------------------------
   // fireHeld: auto weapons keep firing while the trigger/button is held.
-  update(dt, fireHeld, getAimRay) {
+  update(dt, fireHeld, getAimRay, fireHeldR = false) {
     if (this.cooldown > 0) this.cooldown -= dt;
+    if (this.cooldownR > 0) this.cooldownR -= dt;
+    // Aim-down-sights easing (never instant: the transition IS the feel).
+    const adsTarget = this.ads && this.isGun() && !this.reloading ? 1 : 0;
+    const rate = dt / TUNING.weapons.ads.enterTime;
+    this.adsT += Math.sign(adsTarget - this.adsT) * Math.min(rate, Math.abs(adsTarget - this.adsT));
     if (this.reloadGraceT > 0) this.reloadGraceT -= dt;
     if (this.reloading) {
       this.reloadT -= dt;
@@ -194,6 +230,19 @@ export class Arsenal {
       const ray = getAimRay();
       if (ray) this.fire(ray.origin, ray.dir);
     }
+    // Holding both buttons on dual pistols runs both hands.
+    if (this.isAkimbo()) {
+      const ray = getAimRay();
+      if (ray) {
+        if (fireHeld && this.cooldown <= 0) this.fire(ray.origin, ray.dir, 'left');
+        if (fireHeldR && this.cooldownR <= 0) this.fire(ray.origin, ray.dir, 'right');
+      }
+    }
+  }
+
+  // Spread shrinks hard while aiming: ADS is a real accuracy choice.
+  spreadMult() {
+    return 1 - this.adsT * (1 - TUNING.weapons.ads.spreadMult);
   }
 
   hudInfo() {

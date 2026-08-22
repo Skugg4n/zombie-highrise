@@ -1051,6 +1051,8 @@ const viewmodel = new THREE.Group();
 viewmodel.position.set(0.28, -0.24, -0.5);
 camera.add(viewmodel);
 let viewmodelKick = 0;
+let viewmodelKickL = 0;    // dual pistols: the left gun kicks on its own
+let viewmodelL = null;     // left-hand gun group when akimbo is equipped
 let viewmodelSwingT = 0;   // machete swing arc timer
 let lastActiveWeapon = null;
 let recoilRecover = 0;   // accumulated recoil that eases back down
@@ -1068,17 +1070,18 @@ function makeArsenal() {
     dispatch: dispatchAction,
     onHudChange: refreshWeaponHud,
     effects: {
-      muzzle: (o, d, w) => {
+      muzzle: (o, d, w, hand) => {
         // All shot VFX originate at the WEAPON muzzle, offset right/down
         // from the camera axis in flat modes (VFX on the center ray hide
         // behind the crosshair and render end-on; probe-verified).
         const inVR = vrInput && vrInput.active;
         const right = new THREE.Vector3().crossVectors(d, upV).normalize();
         const mp = o.clone().addScaledVector(d, inVR ? 0.28 : 0.62);
-        if (!inVR) mp.addScaledVector(right, 0.24).addScaledVector(upV, -0.14);
+        const side = hand === 'left' ? -0.24 : 0.24;
+        if (!inVR) mp.addScaledVector(right, side).addScaledVector(upV, -0.14);
         flash.intensity = 11;
         flash.position.copy(mp);
-        viewmodelKick = 0.06;
+        if (hand === 'left') viewmodelKickL = 0.06; else viewmodelKick = 0.06;
         audio.play(w || 'pistol');
         spawnMuzzleSprite(mp, { shotgun: 1.7, ak: 1.25 }[w] || 1);
         const aimPoint = o.clone().addScaledVector(d, 30);
@@ -1115,14 +1118,29 @@ function refreshWeaponHud() {
   if (arsenal.active !== lastActiveWeapon) {
     lastActiveWeapon = arsenal.active;
     viewmodel.clear();
-    viewmodel.add(makeWeaponMesh(arsenal.active));
+    viewmodelL = null;
+    if (arsenal.active === 'akimbo') {
+      // Dual pistols: two separate guns so each hand can kick alone.
+      const right = makeWeaponMesh('pistol');
+      viewmodel.add(right);
+      viewmodelL = new THREE.Group();
+      viewmodelL.add(makeWeaponMesh('pistol'));
+      viewmodelL.position.set(-0.56, 0, 0);   // mirrored across the view
+      viewmodel.add(viewmodelL);
+    } else {
+      viewmodel.add(makeWeaponMesh(arsenal.active));
+    }
     if (vrInput) vrInput.setWeaponModel(arsenal.active);
   }
 }
 
 // Shared action set for every input layer (all gated on canAct).
 const actions = {
-  fire: () => { if (canAct() && !mapActive) { const r = aimRay(); if (r) arsenal.fire(r.origin, r.dir); } },
+  fire: () => { if (canAct() && !mapActive) { const r = aimRay(); if (r) arsenal.fire(r.origin, r.dir, arsenal.isAkimbo() ? 'left' : null); } },
+  fireRight: () => { if (canAct() && !mapActive) { const r = aimRay(); if (r) arsenal.fire(r.origin, r.dir, 'right'); } },
+  isAkimbo: () => arsenal.isAkimbo(),
+  setAds: (on) => { arsenal.ads = !!on && canAct(); },
+  adsAmount: () => arsenal.adsT,
   fireFrom: (o, d) => { if (canAct()) arsenal.fire(o, d); },
   reload: () => { if (canAct()) arsenal.reload(); },
   cycle: () => { if (canAct()) arsenal.cycle(); },
@@ -1534,6 +1552,16 @@ function handleEvents(evs) {
         }
         break;
       }
+      case 'head': {
+        const me = role === 'client' ? net?.myId : 'H';
+        if (ev.by === me) {
+          showHitmarker(true);
+          showCritText();
+          audio.play('crit');
+        }
+        if (Array.isArray(ev.p)) spawnBloodPuff(ev.p[0], ev.p[1] + 0.45, ev.p[2]);
+        break;
+      }
       case 'bhit': {
         const g = barrelVisuals.get(ev.id);
         if (g) audio.play('zhit', g.position);
@@ -1776,6 +1804,15 @@ function updateFinale(dt) {
   if (Math.random() < dt * 3) {
     audio.play('doors', heli.group.position);
   }
+}
+
+// Headshot callout: a short amber word above the crosshair.
+let critTimer = 0;
+function showCritText() {
+  const el = $('crit-text');
+  el.classList.add('show');
+  clearTimeout(critTimer);
+  critTimer = setTimeout(() => el.classList.remove('show'), 450);
 }
 
 // Hit marker: white ticks on a confirmed hit, red on a kill.
@@ -2041,11 +2078,43 @@ renderer.setAnimationLoop(() => {
     // Weapons: auto fire + reload timing, predicted locally.
     stepFeelClip(dt);
     const fireHeld = inputs.some((i) => i.fireHeld) || (clipDef && clipT < clipHoldUntil);
-    arsenal.update(dt, fireHeld && canAct(), aimRay);
-    if (viewmodelKick > 0) {
-      viewmodelKick = Math.max(0, viewmodelKick - dt * 0.4);
+    const fireHeldR = inputs.some((i) => i.fireHeldR);
+    arsenal.update(dt, fireHeld && canAct(), aimRay, fireHeldR && canAct());
+    if (viewmodelKick > 0) viewmodelKick = Math.max(0, viewmodelKick - dt * 0.4);
+    if (viewmodelKickL > 0) viewmodelKickL = Math.max(0, viewmodelKickL - dt * 0.4);
+
+    // ---- Viewmodel pose: ADS, reload animation, per-hand recoil --------
+    const a = arsenal.adsT;
+    // Aiming pulls the gun to the centre of the view and closer in.
+    const restX = 0.28, adsX = 0.055;
+    const restY = -0.24, adsY = -0.105;
+    const baseX = restX + (adsX - restX) * a;
+    const baseY = restY + (adsY - restY) * a;
+    const baseZ = -0.5 + (-0.12) * a;
+    // Reload: the gun drops out of view, mag work, then snaps back up.
+    // Every weapon has one now; the shape differs by reload length.
+    let rlDrop = 0, rlRoll = 0, rlYaw = 0;
+    if (arsenal.reloading && arsenal.reloadTotal > 0) {
+      const p = 1 - arsenal.reloadT / arsenal.reloadTotal;   // 0..1
+      const dip = Math.sin(Math.min(1, p * 1.25) * Math.PI);  // out and back
+      rlDrop = dip * 0.2;
+      rlRoll = dip * 0.85;
+      rlYaw = dip * 0.3;
+      // A shove at the moment the magazine seats.
+      if (p > 0.55 && p < 0.68) rlDrop += 0.03;
     }
-    viewmodel.position.z = -0.5 + viewmodelKick;
+    viewmodel.position.set(baseX, baseY - rlDrop, baseZ + viewmodelKick);
+    if (viewmodelSwingT <= 0) {
+      viewmodel.rotation.set(-rlRoll * 0.6, rlYaw, rlRoll * 0.5);
+    }
+    if (viewmodelL) viewmodelL.position.z = viewmodelKickL;
+
+    // ADS narrows the FOV: the classic "leaning in" read.
+    const wantFov = 75 * (1 - a * (1 - TUNING.weapons.ads.fovMult));
+    if (!inVR && Math.abs(camera.fov - wantFov) > 0.01) {
+      camera.fov = wantFov;
+      camera.updateProjectionMatrix();
+    }
     // Machete swing: a fast diagonal arc with follow-through.
     if (viewmodelSwingT > 0) {
       viewmodelSwingT = Math.max(0, viewmodelSwingT - dt);
@@ -2054,10 +2123,6 @@ renderer.setAnimationLoop(() => {
       viewmodel.rotation.set(-0.9 * arc, 0.5 * arc, -1.1 * arc);
       viewmodel.position.x = 0.28 - 0.22 * arc;
       viewmodel.position.y = -0.24 + 0.08 * arc;
-    } else if (viewmodel.rotation.x !== 0) {
-      viewmodel.rotation.set(0, 0, 0);
-      viewmodel.position.x = 0.28;
-      viewmodel.position.y = -0.24;
     }
 
     // Simulation / replication.
@@ -2184,7 +2249,19 @@ renderer.setAnimationLoop(() => {
     }
     // Elevator doors: open while boarding, closed otherwise. The cab lamp
     // flickers like the worn fluorescent it is.
-    const doorTarget = lastWave && lastWave.ph === 'elevator' ? 1 : (lastWave && (lastWave.ph === 'night' || lastWave.ph === 'ride') ? 0 : doorT);
+    // PLAYTEST FIX: the doors used to shut before you could step in. They
+    // now open whenever anyone is NEAR the cab (any phase) and stay open
+    // for the whole boarding phase; they only close for the ride itself.
+    let doorTarget = 0;
+    if (lastWave && lastWave.ph === 'ride') {
+      doorTarget = 0;
+    } else if (lastWave && lastWave.ph === 'elevator') {
+      doorTarget = 1;
+    } else if (level.elevatorZone) {
+      const ez = level.elevatorZone;
+      const near = Math.hypot(rig.group.position.x - ez.x, rig.group.position.z - ez.z) < 5.0;
+      doorTarget = near ? 1 : 0;
+    }
     doorT += (doorTarget - doorT) * Math.min(1, dt * 3);
     if (level.elevator) {
       level.elevator.setDoors(doorT);

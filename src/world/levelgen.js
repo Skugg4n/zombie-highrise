@@ -20,6 +20,7 @@ import { mergeStaticMeshes } from './merge.js';
 import {
   LEVEL_SIZE, scaleBoxUVs, box, wall, cover, platform, railing,
   stairwell, openShaft, breach, facadeClimb, roomscaleZone, makeHeightAt,
+  playerBarrier,
 } from './kit.js';
 
 export { LEVEL_SIZE };
@@ -858,6 +859,8 @@ function buildWagon(level, rng) {
   // haul themselves over the side rails at marked bent sections.
   for (const ez of [-TOTAL / 2 - 1.2, TOTAL / 2 + 1.2]) {
     box(g, 1.4, 0.5, 0.5, railMat, 0, 0.45, ez);
+    // The end stays open for the horde but the player cannot walk off.
+    playerBarrier(level, 0, ez * 0.93, W + 1, 0.4);
     const entry = new THREE.Vector3(0, 0.5, ez * 0.94);
     level.entries.push(entry);
     level.zombieSpawns.push(entry.clone());

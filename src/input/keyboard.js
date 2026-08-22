@@ -26,12 +26,33 @@ export class KeyboardInput {
       else if (e.code === 'KeyT') act.mine();
       else if (e.code === 'KeyV') act.throwCycle();
       else if (e.code === 'KeyN') act.nightVision();
+      else if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') act.setAds(true);
       else if (SLOT_KEYS[e.code]) act.switchTo(SLOT_KEYS[e.code]);
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => { this.keys.clear(); this.fireHeld = false; });
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') ctx.actions.setAds(false);
+    });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.fireHeld = false; this.fireHeldR = false;
+      ctx.actions.setAds(false);
+    });
 
+    ctx.dom.addEventListener('contextmenu', (e) => e.preventDefault());
     ctx.dom.addEventListener('mousedown', (e) => {
+      if (e.button === 2) {
+        // Right button: with dual pistols it fires the RIGHT gun (so the
+        // pair alternates instead of firing in lifeless sync); with any
+        // other weapon it aims down sights.
+        if (!ctx.isPlaying()) return;
+        if (ctx.isMapActive && ctx.isMapActive()) return;
+        if (ctx.isModalOpen && ctx.isModalOpen()) return;
+        if (document.pointerLockElement !== ctx.dom) return;
+        if (ctx.actions.isAkimbo()) { this.fireHeldR = true; ctx.actions.fireRight(); }
+        else ctx.actions.setAds(true);
+        return;
+      }
       if (e.button !== 0) return;
       if (!ctx.isPlaying()) return;
       if (ctx.isMapActive && ctx.isMapActive()) return;   // map owns clicks
@@ -45,15 +66,21 @@ export class KeyboardInput {
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.fireHeld = false;
+      if (e.button === 2) { this.fireHeldR = false; ctx.actions.setAds(false); }
     });
     document.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== ctx.dom) return;
-      this.ctx.rig.yaw -= e.movementX * 0.0022;
+      const sens = 0.0022 * (this.ctx.actions.adsAmount() > 0.5
+        ? TUNING.weapons.ads.sensMult : 1);
+      this.ctx.rig.yaw -= e.movementX * sens;
       this.ctx.rig.pitch = THREE.MathUtils.clamp(
-        this.ctx.rig.pitch - e.movementY * 0.0022, -1.45, 1.45);
+        this.ctx.rig.pitch - e.movementY * sens, -1.45, 1.45);
     });
     document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement !== ctx.dom) this.fireHeld = false;
+      if (document.pointerLockElement !== ctx.dom) {
+        this.fireHeld = false; this.fireHeldR = false;
+        ctx.actions.setAds(false);
+      }
     });
   }
 

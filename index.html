@@ -119,6 +119,13 @@
     pointer-events: none;
   }
   #hitmarker.show { opacity: 0.95; }
+  #crit-text {
+    position: absolute; left: 50%; top: calc(50% - 46px); transform: translateX(-50%);
+    color: var(--accent); font-weight: 800; font-size: 15px; letter-spacing: 2px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+    opacity: 0; transition: opacity 0.3s; pointer-events: none;
+  }
+  #crit-text.show { opacity: 1; transition: opacity 0.03s; }
   #hitmarker::before, #hitmarker::after {
     content: ""; position: absolute; background: #fff;
   }
@@ -282,6 +289,7 @@
     <div id="hud" class="hidden">
       <div id="crosshair"></div>
       <div id="hitmarker"></div>
+      <div id="crit-text">HEADSHOT</div>
       <div id="map-ui" class="hidden">
         <button id="btn-map-ping" class="small on">PING</button>
         <button id="btn-map-mine" class="small">MINE - 65</button>

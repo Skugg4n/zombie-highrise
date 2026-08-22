@@ -76,6 +76,7 @@ export class HostSim {
       const pos = new THREE.Vector3(b.x, this.level.heightAt(b.x, b.z), b.z);
       this.barrels.set(id, { id, pos, hp: 2 });
       this.level.colliders.push({ x: b.x, z: b.z, hx: 0.36, hz: 0.36, tall: false, barrel: id });
+      this.level.collidersZ = null;
     }
   }
 
@@ -284,7 +285,9 @@ export class HostSim {
     a[0]--;
     this.events.push({ e: 'shot', id, w: m.w, o: m.o, d: m.d });
     const dir = new THREE.Vector3().fromArray(m.d).normalize();
-    const spread = THREE.MathUtils.degToRad(def.spreadDeg || 0);
+    // ADS tightens the cone (client reports its aim state with the shot).
+    const spreadScale = typeof m.sp === 'number' ? Math.max(0.15, Math.min(1, m.sp)) : 1;
+    const spread = THREE.MathUtils.degToRad(def.spreadDeg || 0) * spreadScale;
     // Shotgun pellets shove their target (feel: weight and consequence).
     const knockback = m.w === 'shotgun' ? 0.5 : 0;
     for (let i = 0; i < (def.pellets || 1); i++) {
@@ -653,17 +656,30 @@ export class HostSim {
   shootRay(origin, dir, damage = 1, byId = null, knockback = 0) {
     const o = new THREE.Vector3().fromArray(origin);
     const d = new THREE.Vector3().fromArray(dir).normalize();
-    let best = null, bestT = Infinity;
+    let best = null, bestT = Infinity, bestHead = false;
     for (const z of this.zombies.values()) {
       if (!z.alive) continue;
-      const r = TUNING.enemies[z.type].radius;
-      const centre = z.pos.clone(); centre.y += z.type === 'brute' ? 1.2 : 1.1;
-      const oc = centre.sub(o);
-      const t = oc.dot(d);
-      if (t < 0 || t > 200) continue;
-      const distSq = oc.lengthSq() - t * t;
-      if (distSq > r * r) continue;
-      if (t < bestT) { bestT = t; best = z; }
+      const stats = TUNING.enemies[z.type];
+      const r = stats.radius;
+      const bodyY = z.type === 'brute' || z.type === 'butcher' ? 1.2 : 1.1;
+      const headY = z.type === 'butcher' ? 1.72 : z.type === 'brute' ? 1.42
+        : z.type === 'crawler' ? 0.55 : 1.52;
+      // Head first: a smaller sphere sitting on top of the torso.
+      const head = z.pos.clone(); head.y += headY;
+      const ho = head.sub(o);
+      const ht = ho.dot(d);
+      let hit = false, isHead = false, hitT = Infinity;
+      if (ht > 0 && ht < 200 && ho.lengthSq() - ht * ht <= 0.3 * 0.3) {
+        hit = true; isHead = true; hitT = ht;
+      }
+      if (!hit) {
+        const centre = z.pos.clone(); centre.y += bodyY;
+        const oc = centre.sub(o);
+        const t = oc.dot(d);
+        if (t > 0 && t < 200 && oc.lengthSq() - t * t <= r * r) { hit = true; hitT = t; }
+      }
+      if (!hit) continue;
+      if (hitT < bestT) { bestT = hitT; best = z; bestHead = isHead; }
     }
     // Barrels are shootable too: nearest hit wins.
     let barrelHit = null, barrelT = Infinity;
@@ -699,8 +715,12 @@ export class HostSim {
     if (knockback > 0) {
       const shove = knockback * (best.type === 'brute' ? 0.5 : 1);
       best.pos.addScaledVector(new THREE.Vector3(d.x, 0, d.z).normalize(), shove);
-      resolveCircle(best.pos, TUNING.enemies[best.type].radius * 0.8, this.level.colliders);
+      resolveCircle(best.pos, TUNING.enemies[best.type].radius * 0.8, this._zColliders());
       best.stunT = Math.max(best.stunT || 0, 0.3);   // a visible pause: weight
+    }
+    if (bestHead) {
+      damage *= TUNING.weapons.headshotMult;
+      this.events.push({ e: 'head', id: best.id, by: byId, p: best.pos.toArray() });
     }
     this.damageZombie(best, damage, false, byId);
     return best;
@@ -712,6 +732,13 @@ export class HostSim {
   _tall() {
     return this.level.collidersTall
       || (this.level.collidersTall = this.level.colliders.filter((c) => c.tall));
+  }
+
+  // Colliders the HORDE obeys: player-only barriers are invisible to them
+  // (they are there to stop the player walking off an open edge).
+  _zColliders() {
+    return this.level.collidersZ
+      || (this.level.collidersZ = this.level.colliders.filter((c) => !c.playerOnly));
   }
 
   damageZombie(z, damage, isMelee, byId = null) {
@@ -747,7 +774,8 @@ export class HostSim {
     this.barrels.delete(b.id);
     const idx = this.level.colliders.findIndex((c) => c.barrel === b.id);
     if (idx >= 0) this.level.colliders.splice(idx, 1);
-    this.level.collidersTall = null;   // cached list is stale now
+    this.level.collidersTall = null;   // cached lists are stale now
+    this.level.collidersZ = null;
     this.events.push({ e: 'bboom', id: b.id, p: b.pos.toArray() });
     const R = TUNING.economy.barrel.blastRadius;
     for (const z of [...this.zombies.values()]) {
@@ -983,7 +1011,7 @@ export class HostSim {
         if (to.lengthSq() > 1e-6) {
           to.normalize().multiplyScalar(stats.speed * speedMult * dt);
           z.pos.add(to);
-          resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
+          resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
         }
         z.biteT = 0;
         // Failsafe against any residual stuck case (pinned on geometry far
@@ -1056,7 +1084,7 @@ export class HostSim {
     if (move.lengthSq() > 1e-6) {
       move.normalize().multiplyScalar(stats.speed * dt);
       z.pos.add(move);
-      resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
+      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
       z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
     }
     return true;
@@ -1105,7 +1133,7 @@ export class HostSim {
       const step = stats.chargeSpeed * dt;
       const before = z.pos.clone();
       z.pos.addScaledVector(z.chargeDir, step);
-      resolveCircle(z.pos, stats.radius * 0.8, this.level.colliders);
+      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
       z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
       z.chargeDist += step;
       const moved = z.pos.distanceTo(before);

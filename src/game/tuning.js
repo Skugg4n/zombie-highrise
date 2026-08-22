@@ -85,6 +85,9 @@ export const TUNING = {
     smokeGrenade: { fuseTime: 1.5, cloudRadius: 3.0, cloudDuration: 8, slowFactor: 0.4, throwSpeed: 11 },
     molotov: { fuseTime: 0.0, burnRadius: 2.2, burnDuration: 5, dps: 3, throwSpeed: 11 },
     nightVision: { batterySeconds: 30, rechargePerDaySecond: 1.0 },
+    // Aiming down sights: tighter spread, slower turn, narrower FOV.
+    ads: { spreadMult: 0.25, fovMult: 0.72, sensMult: 0.55, enterTime: 0.14 },
+    headshotMult: 2.5,   // headshots are worth going for
   },
 
   // ---- 4. Economy -------------------------------------------------------
