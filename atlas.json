@@ -1,0 +1,51 @@
+{
+  "atlasVersion": 1,
+  "id": "zombie-high-rise",
+  "name": "Zombie High Rise",
+  "summary": "Co-op zombie wave defense i Three.js för Quest 2/3 (WebXR, room scale eller stationärt), mobil och desktop, med 4-teckens rumskoder via PeerJS och deploy på GitHub Pages.",
+  "aliases": [
+    "zombie high rise",
+    "zhr",
+    "zombiehuset",
+    "höghuset",
+    "hoghuset",
+    "hisspelet",
+    "vr-zombiespelet"
+  ],
+  "tags": [
+    "game",
+    "multiplayer",
+    "vr",
+    "webxr",
+    "coop",
+    "zombies",
+    "jack"
+  ],
+  "stack": [
+    "threejs",
+    "peerjs",
+    "webxr",
+    "javascript",
+    "github-pages",
+    "playwright"
+  ],
+  "status": "active",
+  "entrypoints": [
+    "KICKOFF-PROMPT.md",
+    "CLAUDE.md",
+    "index.html"
+  ],
+  "docs": [
+    "docs/vision.md",
+    "docs/technical-spec.md",
+    "docs/art-direction.md",
+    "docs/projectplan.md",
+    "docs/TODO.md",
+    "LESSONS.md",
+    "README.md"
+  ],
+  "commands": {},
+  "path": "/Users/olabelin/Projects/zombie-high-rise",
+  "secrets": [],
+  "nexusProjectId": null
+}

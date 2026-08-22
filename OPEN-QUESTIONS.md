@@ -1,0 +1,28 @@
+# OPEN-QUESTIONS - decisions made while Ola was away
+
+Decisions taken to keep moving (per the never-stall rule). Each one is
+reversible; say the word and I change it.
+
+## 2026-08-22 (Phase 0)
+
+1. **Pinned versions:** Three.js r170 and PeerJS 1.5.4, vendored into
+   `vendor/` and served same-origin (no CDN at runtime). Rationale:
+   reproducible deploys and no third-party outage can break the game.
+2. **Git:** the folder was not a git repository, so I ran `git init`
+   (branch `main`) and commit locally. You still need to create the GitHub
+   repo, add it as `origin` and push to deploy (README steps 1-3).
+3. **Solo practice mode:** added a PRACTICE SOLO button in the lobby. It
+   runs the host simulation without networking. Not in the spec, but it
+   makes testing (and playing alone) possible; remove it if unwanted.
+4. **Snap turn only in stationary mode:** the spec gives stick locomotion
+   to stationary VR only, so roomscale currently has no snap turn. If
+   roomscale players want snap turn too (common comfort option), it is a
+   two-line change.
+5. **Player names:** no name entry field yet; players are "Player" (or
+   `?name=` in the URL). A name field in the lobby is parked for Phase 1.
+6. **Zombie melee:** damage ticks once per second at close range, 10 HP
+   per hit; no player death/game-over flow yet (game over screen exists as
+   a UI state only). Death/downed logic is Phase 1 (countdown, game over).
+7. **Test dependency:** Playwright is a devDependency in package.json
+   (node_modules is gitignored). The game itself still has no build step
+   and no runtime dependencies beyond the vendored libs.

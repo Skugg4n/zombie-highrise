@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ZOMBIE HIGH RISE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" href="data:,">
+<style>
+  /* ---------------------------------------------------------------
+     UI layering scale (documented, no ad-hoc z-indexes):
+       HUD      100
+       MENUS    200
+       OVERLAYS 300
+       DEBUG    900  (version tag, debug readouts)
+     --------------------------------------------------------------- */
+  :root {
+    --sand: #d8c49a;
+    --dark: #17140f;
+    --panel: rgba(23, 20, 15, 0.88);
+    --accent: #e0a33c;
+    --accent2: #7fb069;
+    --danger: #c0392b;
+    --text: #f0e8d8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100dvh; overflow: hidden;
+    background: var(--dark); color: var(--text);
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  #gl-root { position: fixed; inset: 0; }
+  #gl-root canvas { display: block; }
+
+  #ui { position: fixed; inset: 0; pointer-events: none; }
+  #ui .layer-hud      { position: absolute; inset: 0; z-index: 100; pointer-events: none; }
+  #ui .layer-menus    { position: absolute; inset: 0; z-index: 200; pointer-events: none; }
+  #ui .layer-overlays { position: absolute; inset: 0; z-index: 300; pointer-events: none; }
+  #ui .layer-debug    { position: absolute; inset: 0; z-index: 900; pointer-events: none; }
+
+  .panel {
+    pointer-events: auto;
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
+    background: var(--panel); border: 1px solid rgba(224, 163, 60, 0.35);
+    border-radius: 12px; padding: 22px 26px; min-width: 300px; max-width: 92vw;
+    /* Leave the bottom strip free for #btn-vr on small screens */
+    max-height: calc(100dvh - 160px); overflow-y: auto;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.55);
+    display: flex; flex-direction: column; gap: 14px; align-items: stretch;
+    text-align: center;
+  }
+  .hidden { display: none !important; }
+
+  h1 { font-size: 26px; letter-spacing: 3px; color: var(--accent); font-weight: 800; }
+  .tagline { font-size: 13px; opacity: 0.75; font-style: italic; }
+  h2 { font-size: 18px; letter-spacing: 1px; }
+
+  button {
+    pointer-events: auto;
+    font: inherit; font-weight: 700; letter-spacing: 0.5px;
+    color: var(--dark); background: var(--accent);
+    border: none; border-radius: 8px; padding: 13px 18px;
+    cursor: pointer; min-height: 46px;
+  }
+  button:active { transform: translateY(1px); }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid rgba(240,232,216,0.4); }
+  button.small { padding: 8px 12px; min-height: 36px; font-size: 13px; }
+  button:disabled { opacity: 0.45; cursor: default; }
+
+  input[type="text"] {
+    font: inherit; font-size: 24px; letter-spacing: 8px; text-align: center;
+    text-transform: uppercase; width: 100%;
+    padding: 10px; border-radius: 8px; border: 1px solid rgba(240,232,216,0.4);
+    background: rgba(0,0,0,0.35); color: var(--text);
+  }
+  .status { font-size: 13px; min-height: 18px; opacity: 0.85; }
+  .status.error { color: #ff8a7a; opacity: 1; }
+
+  .room-code {
+    font-size: clamp(48px, 16vw, 96px); font-weight: 800; letter-spacing: 0.18em;
+    color: var(--accent); line-height: 1.1; font-variant-numeric: tabular-nums;
+  }
+  .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .choice { display: flex; gap: 8px; justify-content: center; }
+  .choice button { flex: 1; }
+  .choice button.on { outline: 2px solid var(--accent2); background: var(--accent2); color: var(--dark); }
+  label.field { font-size: 12px; opacity: 0.75; text-align: left; }
+
+  /* Enter VR: its own always-available button, never inside a panel flow */
+  #btn-vr {
+    position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom));
+    z-index: 250; pointer-events: auto;
+    background: var(--accent2); color: var(--dark);
+  }
+
+  /* HUD */
+  #hud { position: absolute; inset: 0; }
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 14px; height: 14px; opacity: 0.9;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: #fff;
+  }
+  #crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #crosshair::after { left: 0; top: 6px; width: 14px; height: 2px; }
+  .hud-box {
+    position: absolute; background: rgba(23,20,15,0.55); border-radius: 8px;
+    padding: 8px 12px; font-weight: 700; font-size: 15px;
+  }
+  #hud-health { left: max(14px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom)); color: var(--accent2); }
+  #hud-ammo { right: max(14px, env(safe-area-inset-right)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 58px); }
+  #hud-wave { left: 50%; transform: translateX(-50%); top: max(10px, env(safe-area-inset-top)); font-size: 13px; opacity: 0.85; }
+  #hud-room { left: max(14px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); font-size: 12px; opacity: 0.8; }
+
+  /* Touch controls (HUD layer, mobile only) */
+  #touch-ui { position: absolute; inset: 0; pointer-events: none; }
+  #stick-zone { position: absolute; left: 0; bottom: 0; width: 45%; height: 55%; pointer-events: auto; }
+  #stick-base {
+    position: absolute; width: 110px; height: 110px; border-radius: 50%;
+    border: 2px solid rgba(240,232,216,0.35); background: rgba(23,20,15,0.3);
+    transform: translate(-50%, -50%); display: none;
+  }
+  #stick-nub {
+    position: absolute; width: 48px; height: 48px; border-radius: 50%;
+    background: rgba(240,232,216,0.55); transform: translate(-50%, -50%); display: none;
+  }
+  #look-zone { position: absolute; right: 0; bottom: 0; width: 55%; height: 100%; pointer-events: auto; }
+  #btn-fire {
+    position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: 110px;
+    width: 76px; height: 76px; border-radius: 50%;
+    background: rgba(192, 57, 43, 0.85); color: #fff; font-size: 14px;
+    display: none; pointer-events: auto;
+  }
+
+  /* Debug layer */
+  #version {
+    position: absolute; right: max(6px, env(safe-area-inset-right)); top: max(4px, env(safe-area-inset-top));
+    font-size: 10px; opacity: 0.45; letter-spacing: 1px; pointer-events: none;
+  }
+
+  @media (max-width: 480px) {
+    .panel { padding: 16px 16px; min-width: 0; width: 92vw; }
+    h1 { font-size: 21px; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js"
+  }
+}
+</script>
+<script src="./vendor/peerjs.min.js"></script>
+</head>
+<body>
+<div id="gl-root"></div>
+
+<div id="ui">
+  <!-- HUD layer: z 100 -->
+  <div class="layer-hud">
+    <div id="hud" class="hidden">
+      <div id="crosshair"></div>
+      <div id="hud-room" class="hud-box" data-smoke>ROOM ----</div>
+      <div id="hud-wave" class="hud-box" data-smoke>NIGHT 1</div>
+      <div id="hud-health" class="hud-box" data-smoke>HP 100</div>
+      <div id="hud-ammo" class="hud-box" data-smoke>12 / 12</div>
+      <div id="touch-ui" class="hidden">
+        <div id="stick-zone"><div id="stick-base"></div><div id="stick-nub"></div></div>
+        <div id="look-zone"></div>
+        <button id="btn-fire">FIRE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Menus layer: z 200 -->
+  <div class="layer-menus">
+    <div id="panel-menu" class="panel hidden">
+      <h1 data-smoke>ZOMBIE HIGH RISE</h1>
+      <div class="tagline" data-smoke>One elevator. Every floor is a last stand.</div>
+      <button id="btn-host" data-smoke>HOST A ROOM</button>
+      <button id="btn-join" data-smoke>JOIN A ROOM</button>
+      <button id="btn-solo" class="secondary" data-smoke>PRACTICE SOLO</button>
+      <div id="menu-status" class="status"></div>
+    </div>
+
+    <div id="panel-hosting" class="panel hidden">
+      <h2 data-smoke>YOUR ROOM CODE</h2>
+      <div id="room-code" class="room-code" data-smoke>----</div>
+      <div class="row">
+        <button id="btn-copy" class="small secondary" data-smoke>COPY CODE</button>
+      </div>
+      <div id="host-players" class="status" data-smoke>Waiting for friends...</div>
+      <label class="field">VR movement</label>
+      <div class="choice" id="loco-choice-host">
+        <button class="small secondary loco-roomscale" data-smoke>ROOMSCALE</button>
+        <button class="small secondary on loco-stationary" data-smoke>STATIONARY</button>
+      </div>
+      <button id="btn-start-host" data-smoke>START GAME</button>
+      <button id="btn-back-host" class="secondary small">BACK</button>
+      <div id="host-status" class="status"></div>
+    </div>
+
+    <div id="panel-joining" class="panel hidden">
+      <h2 data-smoke>JOIN A ROOM</h2>
+      <input id="join-code" type="text" maxlength="4" placeholder="CODE" autocomplete="off" data-smoke>
+      <button id="btn-join-go" data-smoke>JOIN</button>
+      <button id="btn-back-join" class="secondary small">BACK</button>
+      <div id="join-status" class="status" data-smoke></div>
+    </div>
+
+    <div id="panel-connected" class="panel hidden">
+      <h2 data-smoke>CONNECTED</h2>
+      <div id="connected-room" class="status" data-smoke>Room ----</div>
+      <label class="field">VR movement</label>
+      <div class="choice" id="loco-choice-client">
+        <button class="small secondary loco-roomscale" data-smoke>ROOMSCALE</button>
+        <button class="small secondary on loco-stationary" data-smoke>STATIONARY</button>
+      </div>
+      <button id="btn-start-client" data-smoke>START GAME</button>
+      <button id="btn-leave" class="secondary small">LEAVE</button>
+    </div>
+
+    <button id="btn-vr" class="hidden" data-smoke>ENTER VR</button>
+  </div>
+
+  <!-- Overlays layer: z 300 -->
+  <div class="layer-overlays">
+    <div id="panel-shop" class="panel hidden">
+      <h2 data-smoke>ELEVATOR SHOP</h2>
+      <div class="status" data-smoke>Going up. Spend your scrap.</div>
+      <button class="secondary" data-smoke>SHOTGUN - 500</button>
+      <button class="secondary" data-smoke>AMMO CRATE - 150</button>
+      <button class="secondary" data-smoke>HEALTH PACK - 200</button>
+      <button data-smoke>NEXT FLOOR</button>
+    </div>
+    <div id="panel-gameover" class="panel hidden">
+      <h2 data-smoke>THE HIGH RISE FELL</h2>
+      <div class="status" data-smoke>You survived 4 nights. 87 zombies down.</div>
+      <button data-smoke>TRY AGAIN</button>
+      <button class="secondary" data-smoke>BACK TO LOBBY</button>
+    </div>
+    <div id="panel-error" class="panel hidden">
+      <h2>CONNECTION LOST</h2>
+      <div id="error-text" class="status error"></div>
+      <button id="btn-error-lobby">BACK TO LOBBY</button>
+    </div>
+  </div>
+
+  <!-- Debug layer: z 900 -->
+  <div class="layer-debug">
+    <div id="version">v0.0.0</div>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
