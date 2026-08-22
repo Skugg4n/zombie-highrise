@@ -561,7 +561,9 @@ export class HostSim {
       const scrap = TUNING.economy.scrapPerKill[z.type] + (isMelee ? TUNING.economy.meleeKillBonus : 0);
       const killer = byId ? this.players.get(byId) : null;
       if (killer) killer.inv.s += scrap;
-      this.events.push({ e: 'zdie', id: z.id, type: z.type, p: z.pos.toArray(), scrap, by: byId });
+      const die = { e: 'zdie', id: z.id, type: z.type, p: z.pos.toArray(), scrap, by: byId };
+      if (z.blast) die.v = z.blast;
+      this.events.push(die);
       this.zombies.delete(z.id);
       this._maybeDrop(z);
     } else {
@@ -750,6 +752,7 @@ export class HostSim {
         z.biteT += dt;
         if (z.biteT >= stats.biteInterval) {
           z.biteT = 0;
+          this.events.push({ e: 'bite', id: z.id });   // visible lunge
           this.damagePlayer(z.targetId, stats.biteDamage);
         }
       }
@@ -811,7 +814,13 @@ export class HostSim {
       const dist = z.pos.distanceTo(g.pos);
       if (dist > G.falloffRadius) continue;
       const dmg = G.damageCenter + (G.damageAtEdge - G.damageCenter) * (dist / G.falloffRadius);
+      // Blast impulse: corpses (and survivors) are thrown outward.
+      const push = new THREE.Vector3(z.pos.x - g.pos.x, 0, z.pos.z - g.pos.z).normalize()
+        .multiplyScalar(3.5 * (1 - dist / G.falloffRadius) + 1.0);
+      z.blast = [push.x, push.z];
+      z.pos.addScaledVector(push, 0.12);
       this.damageZombie(z, dmg, false, g.owner);
+      z.blast = null;
     }
     // Self damage for the thrower only (no friendly fire).
     const owner = this.players.get(g.owner);

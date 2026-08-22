@@ -7,10 +7,27 @@ Visual critic (photomode views, target 9+):
   V9 PASS. UI: hud 7, shop 6, lobby 7. Verdict: programmer art; top
   moves: real sun shadows + AO grounding, kill pure black, posed varied
   zombies.
-- Round 2 (v0.7.0): captured, scoring in progress.
+- Round 2 (v0.7.0 textures/sky/dressing): V1 3, V2 4, V3 4, V4 2, V5 3,
+  V6 4, V7 4, V8 4, V9 PASS-with-notes. Side-by-side: 1/5/7 better,
+  2 noise. Top moves: kill the T-pose, dress the hero building,
+  atmosphere + depth floor.
+- Round 3 (v0.7.1 high-rise/markers/luminance): V1 5, V2 5, V3 5, V4 5,
+  V5 4, V6 5, V7 5, V8 5, V9 PASS. Side-by-side: 1/4/6/7 better, 2/5
+  noise. Verdict: "structure fixed; gap is content density and material
+  finish". Top moves: midground kit, grounding/shadow pass, hero-asset
+  materials (pistol, zombie accents, one brick family).
+- Round 4 (v0.7.2): captured, scoring in progress.
 
 Feel critic (feel clips, target 9+):
-- Round 1 (v0.7.0): captured, scoring in progress.
+- Round 1 (v0.7.0): clips 2,3,3,2,1,2. Muzzle flash detached (casings at
+  camera origin bug, fixed), no explosion visible (spawned behind the
+  elevator; clip scenarios moved), no pain feedback (vignette added).
+- Round 2 (v0.7.1): clips 4,4.5,3.5,3,2,5. Fixed: targets, hit markers,
+  corpses, vignette. Still dead: muzzle flash/tracers invisible (they
+  spawned ON the camera axis, hidden behind the crosshair - found via a
+  probe screenshot and moved to the true muzzle offset), shotgun no-sell
+  (stun added), grenade dud (cluster now walks INTO the blast).
+- Round 3 (v0.7.2): captured, scoring in progress.
 
 ## Phase 2 adversarial code review - 2026-08-22 (v0.6.2)
 

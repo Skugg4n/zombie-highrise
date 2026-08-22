@@ -79,13 +79,22 @@ if (QUALITY === 'DESKTOP') {
   sun.shadow.camera.far = 150;
 }
 // Headlamp-style flashlight (auto-on in dark levels, F toggles on desktop).
-const flashlight = new THREE.SpotLight(0xd8e8ff, 0, 24, 0.5, 0.55, 1.1);
+const flashlight = new THREE.SpotLight(0xd8e8ff, 0, 26, 0.62, 0.7, 1.0);
 const flashlightTarget = new THREE.Object3D();
 flashlightTarget.position.set(0, 0, -6);
 camera.add(flashlight, flashlightTarget);
 flashlight.position.set(0, 0.05, 0.05);
 flashlight.target = flashlightTarget;
 let flashlightOn = false;
+// Visible beam cone (cheap volumetric hint).
+const beamGeo = new THREE.ConeGeometry(2.1, 7, 12, 1, true);
+beamGeo.rotateX(-Math.PI / 2);
+beamGeo.translate(0, 0, -3.5);
+const beamMesh = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({
+  color: 0xcfe2ff, transparent: true, opacity: 0.0, depthWrite: false, side: THREE.DoubleSide,
+}));
+beamMesh.renderOrder = 2;
+camera.add(beamMesh);
 
 // Sky dome, sun glow sprite and dust motes (art-direction details).
 const sky = makeSkyDome();
@@ -140,7 +149,7 @@ function updateDayNight(force = false) {
   sun.color.setHex(nightT > 0.5 ? 0xa8c0e8 : 0xffe8c0);   // moonlight is cool
   hemi.intensity = L.hemiDay * (1 - nightT * 0.72);
   // Windows in the skyline only glow after dark.
-  MATS.facade.emissiveIntensity = 0.02 + nightT * 0.6;
+  MATS.facade.emissiveIntensity = nightT * 0.9;
   sunGlow.material.opacity = 1 - nightT * 0.55;   // the moon still glows
   sunGlow.position.copy(sun.position).normalize().multiplyScalar(290);
 }
@@ -259,6 +268,7 @@ function updateZombieVisuals(rows, dt) {
     v.x = x; v.y = y; v.z = z;
     if (v.flashT > 0) v.flashT -= dt;
     if (v.staggerT > 0) v.staggerT -= dt;
+    if (v.lungeT > 0) v.lungeT -= dt;
   }
   for (const id of zombieStates.keys()) {
     if (!keep.has(id)) zombieStates.delete(id);
@@ -268,7 +278,8 @@ function updateZombieVisuals(rows, dt) {
   for (const v of zombieStates.values()) {
     entries.push({
       x: v.x, y: v.y, z: v.z, rotY: v.rotY, type: v.type, animT: v.animT,
-      stagger: Math.max(0, v.staggerT / 0.18), flash: v.flashT, fall: 0, sink: 0,
+      stagger: Math.max(0, v.staggerT / 0.35), flash: v.flashT, fall: 0, sink: 0,
+      lunge: Math.max(0, (v.lungeT || 0) / 0.35),
       scale: v.scale,
     });
   }
@@ -281,9 +292,15 @@ function updateZombieVisuals(rows, dt) {
     d.t -= dt;
     if (d.t <= 0) { dyingStates.splice(i, 1); continue; }
     const elapsed = CORPSE_T - d.t;
+    // Blast-thrown corpses skid outward while toppling.
+    if (d.vx || d.vz) {
+      const decel = Math.max(0, 1 - elapsed * 1.6);
+      d.x += d.vx * decel * dt;
+      d.z += d.vz * decel * dt;
+    }
     entries.push({
       x: d.x, y: d.y, z: d.z, rotY: d.rotY, type: d.type, animT: d.animT,
-      stagger: 0, flash: 0, scale: d.scale,
+      stagger: 0, flash: 0, scale: d.scale, roll: d.roll || 0,
       fall: Math.min(1, elapsed / 0.4),
       sink: elapsed > CORPSE_T - 1 ? (elapsed - (CORPSE_T - 1)) * 1.6 : 0,
     });
@@ -384,15 +401,15 @@ const flashSpriteTex = (() => {
   return new THREE.CanvasTexture(c);
 })();
 const muzzleSprites = [];
-function spawnMuzzleSprite(pos) {
+function spawnMuzzleSprite(pos, big = 1) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
     map: flashSpriteTex, transparent: true, depthWrite: false,
     rotation: Math.random() * Math.PI,   // normal blending: reads on ANY background
   }));
   s.position.copy(pos);
-  s.scale.setScalar(0.42 + Math.random() * 0.14);
+  s.scale.setScalar((0.4 + Math.random() * 0.2) * big);
   scene.add(s);
-  muzzleSprites.push({ s, t: 0.14 });
+  muzzleSprites.push({ s, t: 0.2 });
 }
 
 // Tracers: brief additive streaks so every shot visibly goes somewhere.
@@ -446,19 +463,36 @@ function spawnBloodPuff(x, y, z) {
   bloodPuffs.push({ s, t: 0.28 });
 }
 
+// Blood floor decals: a kill leaves a stain for a while.
+const bloodDecals = [];
+function spawnBloodDecal(x, y, z) {
+  if (bloodDecals.length > 10) {
+    const old = bloodDecals.shift();
+    scene.remove(old.m);
+    old.m.material.dispose();
+  }
+  const m = new THREE.Mesh(
+    new THREE.CircleGeometry(0.5 + Math.random() * 0.3, 10),
+    new THREE.MeshBasicMaterial({ color: 0x4a0e08, transparent: true, opacity: 0.55, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  m.rotation.z = Math.random() * Math.PI;
+  m.position.set(x, y + 0.025, z);
+  scene.add(m);
+  bloodDecals.push({ m, t: 9 });
+}
+
 // Machete swing trail: a fading arc ribbon so the swing exists on screen.
 const trailGeo = new THREE.RingGeometry(0.55, 1.0, 12, 1, -0.4, 2.1);
 let swingTrail = null;
 function spawnSwingTrail() {
   if (swingTrail) { camera.remove(swingTrail.m); swingTrail.m.material.dispose(); }
   const m = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({
-    color: 0xe8e2d2, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending, depthWrite: false,
+    color: 0xf2ede0, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
   }));
   m.position.set(0.05, -0.05, -0.9);
   m.rotation.set(0.15, 0.35, -0.6);
   camera.add(m);
-  swingTrail = { m, t: 0.28 };
+  swingTrail = { m, t: 0.42 };
 }
 
 function updateShotVfx(dt) {
@@ -473,9 +507,19 @@ function updateShotVfx(dt) {
       bloodPuffs.splice(i, 1);
     }
   }
+  for (let i = bloodDecals.length - 1; i >= 0; i--) {
+    const bd = bloodDecals[i];
+    bd.t -= dt;
+    if (bd.t < 2) bd.m.material.opacity = 0.55 * (bd.t / 2);
+    if (bd.t <= 0) {
+      scene.remove(bd.m);
+      bd.m.material.dispose();
+      bloodDecals.splice(i, 1);
+    }
+  }
   if (swingTrail) {
     swingTrail.t -= dt;
-    swingTrail.m.material.opacity = 0.55 * Math.max(0, swingTrail.t / 0.28);
+    swingTrail.m.material.opacity = 0.7 * Math.max(0, swingTrail.t / 0.42);
     swingTrail.m.rotation.z -= dt * 6;
     if (swingTrail.t <= 0) {
       camera.remove(swingTrail.m);
@@ -507,10 +551,20 @@ function updateCasings(dt) {
   for (let i = casings.length - 1; i >= 0; i--) {
     const c = casings[i];
     c.t -= dt;
-    c.vel.y -= 16 * dt;
-    c.mesh.position.addScaledVector(c.vel, dt);
-    c.mesh.rotation.x += c.spin * dt;
-    c.mesh.rotation.z += c.spin * 0.7 * dt;
+    if (!c.rest) {
+      c.vel.y -= 16 * dt;
+      c.mesh.position.addScaledVector(c.vel, dt);
+      c.mesh.rotation.x += c.spin * dt;
+      c.mesh.rotation.z += c.spin * 0.7 * dt;
+      const floor = level.heightAt(c.mesh.position.x, c.mesh.position.z);
+      if (c.mesh.position.y <= floor + 0.02) {
+        // Brass stays on the ground for a beat instead of vanishing.
+        c.rest = true;
+        c.mesh.position.y = floor + 0.015;
+        c.mesh.rotation.x = Math.PI / 2;
+        c.t = Math.max(c.t, 3.5);
+      }
+    }
     if (c.t <= 0) { scene.remove(c.mesh); casings.splice(i, 1); }
   }
 }
@@ -739,8 +793,7 @@ function spawnExplosion(p) {
   const shell = new THREE.Mesh(
     new THREE.SphereGeometry(1, 12, 8),
     new THREE.MeshBasicMaterial({
-      color: 0xffc070, transparent: true, opacity: 0.9,
-      blending: THREE.AdditiveBlending, depthWrite: false,
+      color: 0xffa838, transparent: true, opacity: 0.95, depthWrite: false,
     }));
   shell.position.copy(light.position);
   shell.scale.setScalar(0.4);
@@ -754,8 +807,19 @@ function spawnExplosion(p) {
     new THREE.MeshBasicMaterial({ color: 0x14100c, transparent: true, opacity: 0.55, depthWrite: false }));
   scorch.rotation.x = -Math.PI / 2;
   scorch.position.set(p[0], p[1] + 0.03, p[2]);
-  scene.add(light, shell, smoke, scorch);
-  explosions.push({ light, shell, smoke, scorch, t: 2.6, T: 2.6 });
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.8, 1.0, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffe0a8, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(p[0], p[1] + 0.15, p[2]);
+  scene.add(light, shell, smoke, scorch, ring);
+  explosions.push({ light, shell, smoke, scorch, ring, t: 2.6, T: 2.6 });
+  // One-frame white screen flash (flat modes).
+  if (!(vrInput && vrInput.active)) {
+    const el = $('boom-flash');
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 90);
+  }
 }
 
 function updateExplosions(dt) {
@@ -773,9 +837,13 @@ function updateExplosions(dt) {
     ex.smoke.position.y += dt * 0.8;
     ex.smoke.material.opacity = 0.55 * Math.max(0, ex.t / ex.T);
     ex.scorch.material.opacity = 0.55 * Math.min(1, ex.t / 1.2);
+    const ringK = Math.max(0, 1 - age / 0.5);
+    ex.ring.scale.setScalar(1 + (1 - ringK) * 9);
+    ex.ring.material.opacity = 0.8 * ringK;
+    ex.ring.visible = ringK > 0;
     if (ex.t <= 0) {
-      scene.remove(ex.light, ex.shell, ex.smoke, ex.scorch);
-      for (const m of [ex.shell, ex.smoke, ex.scorch]) {
+      scene.remove(ex.light, ex.shell, ex.smoke, ex.scorch, ex.ring);
+      for (const m of [ex.shell, ex.smoke, ex.scorch, ex.ring]) {
         m.geometry.dispose(); m.material.dispose();
       }
       explosions.splice(i, 1);
@@ -951,7 +1019,7 @@ function makeArsenal() {
         flash.position.copy(mp);
         viewmodelKick = 0.06;
         audio.play(w || 'pistol');
-        spawnMuzzleSprite(mp);
+        spawnMuzzleSprite(mp, { shotgun: 1.7, ak: 1.25 }[w] || 1);
         const aimPoint = o.clone().addScaledVector(d, 30);
         spawnTracer(mp, aimPoint.sub(mp).normalize());
         // Recoil (flat modes): a per-weapon upward kick, most of which
@@ -963,11 +1031,13 @@ function makeArsenal() {
           recoilRecover += kick * 0.7;
           if (TUNING.weapons[w] && TUNING.weapons[w].auto) {
             rig.yaw += (Math.random() - 0.5) * 0.006;
+            addShake(0.004);
           }
+          if (w === 'shotgun') addShake(0.014);
         }
         spawnCasing(o, d);
       },
-      swing: () => { viewmodelSwingT = 0.22; spawnSwingTrail(); audio.play('machete'); },
+      swing: () => { viewmodelSwingT = 0.34; spawnSwingTrail(); audio.play('machete'); },
       throw: () => audio.play('throw'),
       reload: () => audio.play('reload'),
       dry: () => audio.play('dryfire'),
@@ -1344,8 +1414,8 @@ function handleEvents(evs) {
       case 'zhit': {
         const v = zombieStates.get(ev.id);
         if (v) {
-          v.flashT = 0.12;
-          v.staggerT = 0.18;   // hit reaction: brief flinch
+          v.flashT = 0.3;
+          v.staggerT = 0.35;   // hit reaction long enough to survive a sampled frame
           audio.play('zhit', v);
           spawnBloodPuff(v.x, v.y, v.z);
         }
@@ -1355,12 +1425,17 @@ function handleEvents(evs) {
       case 'zdie': {
         recentlyDeadZ.set(ev.id, performance.now() + 600);
         if (ev.by === (role === 'client' ? net?.myId : 'H')) showHitmarker(true);
-        if (Array.isArray(ev.p)) spawnBloodPuff(ev.p[0], ev.p[1], ev.p[2]);
+        if (Array.isArray(ev.p)) { spawnBloodPuff(ev.p[0], ev.p[1], ev.p[2]); spawnBloodDecal(ev.p[0], ev.p[1], ev.p[2]); }
         if (Array.isArray(ev.p)) audio.play('zdie', { x: ev.p[0], y: ev.p[1], z: ev.p[2] });
         const v = zombieStates.get(ev.id);
         if (v) {
           zombieStates.delete(ev.id);
-          dyingStates.push({ ...v, t: 6.0 });
+          dyingStates.push({
+            ...v, t: 6.0,
+            roll: (Math.random() - 0.5) * 1.3,
+            vx: Array.isArray(ev.v) ? ev.v[0] : 0,
+            vz: Array.isArray(ev.v) ? ev.v[1] : 0,
+          });
         }
         break;
       }
@@ -1412,6 +1487,11 @@ function handleEvents(evs) {
           showToast(label, 1800);
           audio.play('pickup');
         }
+        break;
+      }
+      case 'bite': {
+        const v = zombieStates.get(ev.id);
+        if (v) v.lungeT = 0.35;
         break;
       }
       case 'phit': {
@@ -1678,7 +1758,7 @@ function presentPhase(ph) {
           $('panel-gameover').classList.remove('hidden');
           $('hud').classList.add('hidden');
         }
-      }, 1200);
+      }, 2000);
       break;
     default:
       break;
@@ -1769,7 +1849,7 @@ renderer.setAnimationLoop(() => {
     // Machete swing: a fast diagonal arc with follow-through.
     if (viewmodelSwingT > 0) {
       viewmodelSwingT = Math.max(0, viewmodelSwingT - dt);
-      const p = 1 - viewmodelSwingT / 0.22;         // 0 -> 1 over the swing
+      const p = 1 - viewmodelSwingT / 0.34;         // 0 -> 1 over the swing
       const arc = Math.sin(p * Math.PI);            // out and back
       viewmodel.rotation.set(-0.9 * arc, 0.5 * arc, -1.1 * arc);
       viewmodel.position.x = 0.28 - 0.22 * arc;
@@ -1919,6 +1999,7 @@ renderer.setAnimationLoop(() => {
 
   // Flashlight follows its toggle.
   flashlight.intensity += ((flashlightOn ? 15 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
+  beamMesh.material.opacity = (flashlight.intensity / 15) * (level.lighting.dark ? 0.055 : 0);
 
   updateMapMarkers();
 
@@ -2032,6 +2113,7 @@ const clipApi = {
   fire() { actions.fire(); },
   hold(sec) { clipHoldUntil = clipT + sec; },
   throwGrenade() { actions.grenade(); },
+  pitchDown(d) { rig.pitch = -Math.abs(d); },
   setHp(n) {
     const p = sim.players.get('H');
     p.hp = n; myHp = n; hud.setHealth(n);

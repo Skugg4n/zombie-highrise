@@ -54,7 +54,7 @@ export const MATS = {
   get metalDoor() { return this._md || (this._md = matT(metalTexture('door', 0x42454b, { repeat: 2 }), 0.6, 0.4)); },
   get dirt() { return this._di || (this._di = matT(noiseTexture('dirt', 0x4e4436, [0x3e3628, 0x5e5244, 0x2f2a1f], { repeat: 4, density: 1800, alpha: 0.25 }), 1.0)); },
   get planksOld() { return this._po || (this._po = matT(plankTexture('oldplanks', 0x6e5a40, 0x463a26, { planks: 6, repeat: 2 }), 1.0)); },
-  get facade() { return this._fa || (this._fa = new THREE.MeshStandardMaterial({ map: facadeTexture('tower', 0x5c554c), roughness: 0.9, emissive: 0xffb050, emissiveIntensity: 0.06, emissiveMap: facadeTexture('tower', 0x5c554c) })); },
+  get facade() { return this._fa || (this._fa = new THREE.MeshStandardMaterial({ map: facadeTexture('tower', 0x5c554c), roughness: 0.9, emissive: 0xffffff, emissiveIntensity: 0.0, emissiveMap: facadeTexture('tower', 0x5c554c, { emissiveOnly: true }) })); },
 };
 
 // The game's namesake: a tall high-rise silhouette with a lit window grid
@@ -89,7 +89,8 @@ function scaleBoxUVs(geo, w, h, d) {
   const uv = geo.attributes.uv;
   const faceDims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
   for (let f = 0; f < 6; f++) {
-    const [uw, vh] = faceDims[f];
+    // Clamp thin faces: a 0.08 m edge would sample a 1-pixel smear.
+    const uw = Math.max(faceDims[f][0], 0.5), vh = Math.max(faceDims[f][1], 0.5);
     for (let v = 0; v < 4; v++) {
       const i = f * 4 + v;
       uv.setXY(i, uv.getX(i) * uw * 0.5, uv.getY(i) * vh * 0.5);
@@ -357,6 +358,37 @@ function buildGround(level, rng, quality) {
 
   buildWasteland(g, rng, {});
 
+  // Midground kit (the critic's three-depth-layers demand): a fence line
+  // along the road, debris clusters and scrub tufts between the base and
+  // the horizon so no sightline crosses empty sand.
+  {
+    const postMat = mat(0x4f4336, 1.0);
+    for (let i = -6; i <= 6; i++) {
+      const px = road.position.x + (road.position.x > 0 ? 4 : -4);
+      box(g, 0.12, 1.1, 0.12, postMat, px, 0.55, i * 9 + rng.range(-1, 1));
+    }
+    const scrubMat = mat(0x7a7d4a, 1.0);
+    for (let i = 0; i < 26; i++) {
+      const ang = rng.range(0, Math.PI * 2);
+      const dist = rng.range(half + 4, half + 30);
+      const sx = Math.cos(ang) * dist, sz = Math.sin(ang) * dist;
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(rng.range(0.25, 0.5), rng.range(0.3, 0.6), 5), scrubMat);
+      tuft.position.set(sx, 0.15, sz);
+      tuft.rotation.y = rng.range(0, 3);
+      g.add(tuft);
+    }
+    for (let i = 0; i < 4; i++) {
+      const ang = rng.range(0, Math.PI * 2);
+      const dist = rng.range(half + 6, half + 22);
+      const cx = Math.cos(ang) * dist, cz = Math.sin(ang) * dist;
+      for (let j = 0; j < 3; j++) {
+        box(g, rng.range(0.4, 1.2), rng.range(0.2, 0.5), rng.range(0.4, 1.0),
+          rng.chance(0.5) ? MATS.crate : mat(0x8a8578),
+          cx + rng.range(-1.2, 1.2), 0.2, cz + rng.range(-1.2, 1.2), rng.range(0, 3));
+      }
+    }
+  }
+
   // THE high-rise looms right behind the elevator: the base is its ground
   // floor, and the tower explains where the elevator goes.
   buildHighRise(g, 0, -half - 10);
@@ -569,7 +601,7 @@ function buildUpper(level, rng, quality) {
     const pool = new THREE.Mesh(new THREE.PlaneGeometry(winW * 1.2, 2.6),
       new THREE.MeshBasicMaterial({ color: 0xffe8b8, transparent: true, opacity: 0.16, depthWrite: false }));
     pool.rotation.x = -Math.PI / 2;
-    pool.position.set(fx, 0.015, half - 1.6);
+    pool.position.set(fx - 1.1, 0.015, half - 1.6);   // skewed with the sun
     g.add(pool);
     fx += winW + pierW;
   }

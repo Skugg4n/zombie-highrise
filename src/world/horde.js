@@ -83,8 +83,14 @@ export class HordeRenderer {
       const z = entries[i];
       const look = LOOKS[z.type] || LOOKS.walker;
       const s = Math.sin(z.animT);
-      // Base: position + yaw (+ death topple around X).
-      this._e.set(-(Math.PI / 2) * (z.fall || 0) ** 2, z.rotY, 0, 'YXZ');
+      // Base: position + yaw (+ death topple around X, with per-corpse
+      // roll so bodies do not fall in identical clone poses; + bite lunge
+      // pitching the whole body at its victim).
+      const fall2 = (z.fall || 0) ** 2;
+      this._e.set(
+        -(Math.PI / 2) * fall2 + (z.lunge || 0) * 0.45,
+        z.rotY,
+        (z.roll || 0) * fall2, 'YXZ');
       this._q.setFromEuler(this._e);
       this._base.compose(
         this._v.set(z.x, z.y - (z.sink || 0), z.z),

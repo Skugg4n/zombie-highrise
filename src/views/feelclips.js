@@ -72,7 +72,9 @@ export const FEEL_CLIPS = {
         a.spawnAt('walker', 11.0, 3.2);
       }],
       [0.8, (a) => a.aim()],
+      [1.15, (a) => a.pitchDown(0.5)],   // lob SHORT: land among them as they close
       [1.2, (a) => a.throwGrenade()],
+      [2.0, (a) => a.aim()],
       [4.8, (a) => a.aim()],
     ],
   },

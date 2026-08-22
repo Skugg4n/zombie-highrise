@@ -144,6 +144,13 @@
   #hud-scrap { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 18px); font-size: 12px; color: var(--accent); }
   #hud-nv { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 52px); font-size: 12px; }
 
+  /* One-frame white flash on nearby explosions */
+  #boom-flash {
+    position: absolute; inset: 0; pointer-events: none;
+    background: #fff8e8; opacity: 0; transition: opacity 0.25s ease-out;
+  }
+  #boom-flash.show { opacity: 0.65; transition: opacity 0.02s; }
+
   /* Damage vignette: red pulse on hits, heartbeat throb when low */
   #dmg-vignette {
     position: absolute; inset: 0; pointer-events: none; opacity: 0;
@@ -281,6 +288,7 @@
         <button id="btn-map-drone" class="small">DRONE - 40</button>
         <button id="btn-map-close" class="small">CLOSE MAP</button>
       </div>
+      <div id="boom-flash"></div>
       <div id="dmg-vignette"></div>
       <div id="map-grid" class="hidden"></div>
       <div id="nv-overlay" class="hidden"></div>

@@ -139,28 +139,34 @@ export function sandbagTexture(key, base, { size = 256, repeat = 2 } = {}) {
 
 // Building facade: dark concrete with a window grid, a few windows lit
 // warm (the hero high-rise and the skyline towers).
-export function facadeTexture(key, base, { size = 256, cols = 6, rows = 10, litChance = 0.14, repeat = 1 } = {}) {
-  const k = 'f:' + key;
+export function facadeTexture(key, base, { size = 256, cols = 6, rows = 10, litChance = 0.14, repeat = 1, emissiveOnly = false } = {}) {
+  const k = 'f:' + key + (emissiveOnly ? ':e' : '');
   if (cache.has(k)) return cache.get(k);
   const rng = makeRng(hashKey(k));
   const [c, ctx] = makeCanvas(size);
-  ctx.fillStyle = hex(base);
+  ctx.fillStyle = emissiveOnly ? '#000000' : hex(base);
   ctx.fillRect(0, 0, size, size);
   // Floor bands
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  for (let r = 0; r <= rows; r++) ctx.fillRect(0, (r * size / rows) - 1, size, 2);
+  if (!emissiveOnly) {
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    for (let r = 0; r <= rows; r++) ctx.fillRect(0, (r * size / rows) - 1, size, 2);
+  }
   const cw = size / cols, rh = size / rows;
   for (let r = 0; r < rows; r++) {
     for (let col = 0; col < cols; col++) {
       const x = col * cw + cw * 0.22, y = r * rh + rh * 0.2;
       const w = cw * 0.56, h = rh * 0.58;
-      if (rng.chance(litChance)) {
+      const lit = rng.chance(litChance);
+      const broken = !lit && rng.chance(0.12);
+      if (emissiveOnly) {
+        // Emissive layer: only the lit windows, on black. The base map
+        // keeps ALL windows dark so daylight shows no glow.
+        if (!lit) continue;
         ctx.fillStyle = rng.chance(0.5) ? '#e8b45c' : '#c89a48';
-      } else if (rng.chance(0.12)) {
-        ctx.fillStyle = '#0a0a0c';         // broken/boarded window
-      } else {
-        ctx.fillStyle = shift(0x232a33, rng.range(-8, 8) | 0);
+        ctx.fillRect(x, y, w, h);
+        continue;
       }
+      ctx.fillStyle = broken ? '#0a0a0c' : shift(0x232a33, rng.range(-8, 8) | 0);
       ctx.fillRect(x, y, w, h);
       ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       ctx.lineWidth = 1.5;

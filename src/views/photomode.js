@@ -49,10 +49,18 @@ export const PHOTO_ZOMBIES = {
   2: [],   // placed dynamically in main.js: in front of the mode-2 camera
   3: [],
   4: [['walker', -6, 6, 0, 0, 1.0], ['runner', 5, -7, 0, 0, 2.0]],
-  5: [['walker', -8, 7, -4, -5, 0.5], ['runner', -10, 10, -4, -5, 2.4],
-      ['walker', -14, 13, -4, -5, 1.7], ['walker', -17, 11, -4, -5, 3.1],
-      ['brute', -19, 16, -4, -5, 0.2], ['walker', -23, 18, -4, -5, 1.1],
-      ['walker', -26, 14, -4, -5, 2.0], ['runner', -21, 21, -4, -5, 0.9]],
+  5: (() => {
+    // A real horde: 24 zombies in a loose wedge shambling toward the base.
+    const out = [];
+    for (let i = 0; i < 24; i++) {
+      const row = Math.floor(i / 4), col = i % 4;
+      const x = -7 - row * 2.6 - ((col * 37 + row * 13) % 10) / 4;
+      const z = 6 + row * 1.9 + col * 2.2 - ((col * 17 + row * 7) % 8) / 3;
+      const type = i % 9 === 4 ? 'brute' : i % 5 === 2 ? 'runner' : 'walker';
+      out.push([type, x, z, -4, -5, (i * 0.7) % 6]);
+    }
+    return out;
+  })(),
   6: [['runner', 2.5, 4.5, 0, 2, 1.4]],
   7: [['walker', -2, -4, 3, -4, 0.9]],
   8: [['walker', -6, -4, 1, 5, 1.5], ['runner', -8, -7, 1, 5, 0.4]],
