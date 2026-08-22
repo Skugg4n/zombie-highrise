@@ -1,5 +1,21 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.5.0 - 2026-08-22 17:25
+
+Phase 1 Pass D: mines, the tactical map and pings. Phase 1 core loop is
+now feature-complete. Why: last Phase 1 projectplan items.
+
+- Mines: buy in the shop (50 scrap, carry 3), hand-place during the day
+  (T key, MINE flow on touch via the map, left grip squeeze in VR), 1 s
+  arming, proximity trigger, 2.5 m blast that leaves a brute at 3 hp.
+- Tactical map view (M key / MAP button, flat platforms): orthographic
+  top-down live view with PING (free squad marker, 5 s) and MINE mode
+  (remote placement for 65 scrap, the tactician premium).
+- Ping markers render in-world for everyone (bouncing cone + ring).
+- Shop is now modal (HUD hides during the ride; the overlap checker
+  caught the collision on phone screens).
+- HUD shows carried mines (G/P/M).
+
 ## v0.4.0 - 2026-08-22 16:40
 
 Phase 1 Pass C: the elevator IS the shop. Why: projectplan elevator item.

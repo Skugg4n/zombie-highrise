@@ -24,9 +24,11 @@ export class HostSim {
     this.zombies = new Map();
     this.grenades = new Map();
     this.items = new Map();
+    this.mines = new Map();
     this.nextZid = 1;
     this.nextGid = 1;
     this.nextIid = 1;
+    this.nextMid = 1;
     this.events = [];
     this.kills = 0;
     this.wave = {
@@ -41,6 +43,7 @@ export class HostSim {
     this.zombies.clear();
     this.grenades.clear();
     this.items.clear();
+    this.mines.clear();
     let i = 0;
     for (const p of this.players.values()) {
       p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
@@ -58,7 +61,7 @@ export class HostSim {
       inv: {
         w: ['pistol', 'machete'], active: 'pistol',
         a: { pistol: [TUNING.weapons.pistol.magazine, -1] },   // -1 = infinite reserve
-        g: 1, k: 0, s: TUNING.economy.startingScrap,
+        g: 1, k: 0, m: 0, s: TUNING.economy.startingScrap,
       },
     });
     this.events.push({ e: 'join', id, name: name || id });
@@ -100,6 +103,10 @@ export class HostSim {
         if (m.item === 'pack') this._actPack(id, p);
         break;
       case 'buy': this._actBuy(id, p, m.item); break;
+      case 'placeMine': this._actPlaceMine(id, p, m); break;
+      case 'ping':
+        if (Array.isArray(m.p)) this.events.push({ e: 'ping', p: m.p, by: id });
+        break;
       case 'ready':
         if (this.wave.phase === 'ride') {
           p.ready = true;
@@ -111,6 +118,26 @@ export class HostSim {
       default:
         break;
     }
+  }
+
+  // Mines: hand-placed from inventory during prep (day/countdown), or
+  // remote-placed from the tactical map any time for a scrap premium.
+  _actPlaceMine(id, p, m) {
+    if (!Array.isArray(m.p)) return;
+    const pos = new THREE.Vector3().fromArray(m.p);
+    pos.y = this.level.heightAt(pos.x, pos.z);
+    if (m.via === 'map') {
+      const cost = TUNING.economy.minePlacementFromMap;
+      if (p.inv.s < cost) return;
+      p.inv.s -= cost;
+    } else {
+      const prep = this.wave.phase === 'day' || this.wave.phase === 'countdown';
+      if (!prep || (p.inv.m || 0) <= 0) return;
+      p.inv.m--;
+    }
+    const mid = this.nextMid++;
+    this.mines.set(mid, { id: mid, pos, armT: 1.0 });
+    this.events.push({ e: 'mined', id: mid, by: id });
   }
 
   _actBuy(id, p, item) {
@@ -148,6 +175,10 @@ export class HostSim {
       case 'grenadePack':
         if (inv.g >= 5) return;
         inv.g = Math.min(5, inv.g + 2);
+        break;
+      case 'mine':
+        if ((inv.m || 0) >= 3) return;
+        inv.m = (inv.m || 0) + 1;
         break;
       default:
         return;
@@ -504,6 +535,7 @@ export class HostSim {
 
     if (wave.phase === 'night' || wave.phase === 'elevator') this._stepZombies(dt);
     this._stepGrenades(dt);
+    this._stepMines(dt);
     this._stepPickups();
 
     // Proximity revives.
@@ -617,6 +649,23 @@ export class HostSim {
     }
   }
 
+  _stepMines(dt) {
+    const M = TUNING.economy.mine;
+    for (const mine of [...this.mines.values()]) {
+      if (mine.armT > 0) { mine.armT -= dt; continue; }
+      let tripped = false;
+      for (const z of this.zombies.values()) {
+        if (z.pos.distanceToSquared(mine.pos) < M.triggerRadius * M.triggerRadius) { tripped = true; break; }
+      }
+      if (!tripped) continue;
+      this.mines.delete(mine.id);
+      this.events.push({ e: 'boom', p: mine.pos.toArray() });
+      for (const z of [...this.zombies.values()]) {
+        if (z.pos.distanceTo(mine.pos) <= M.blastRadius) this.damageZombie(z, M.damage, false, null);
+      }
+    }
+  }
+
   _stepPickups() {
     for (const item of [...this.items.values()]) {
       for (const [pid, p] of this.players) {
@@ -678,10 +727,14 @@ export class HostSim {
       is.push([item.id, ITEM_KINDS.indexOf(item.kind),
         +item.pos.x.toFixed(2), +item.pos.y.toFixed(2), +item.pos.z.toFixed(2)]);
     }
+    const ms = [];
+    for (const mine of this.mines.values()) {
+      ms.push([mine.id, +mine.pos.x.toFixed(2), +mine.pos.y.toFixed(2), +mine.pos.z.toFixed(2)]);
+    }
     const ev = this.events; this.events = [];
     const w = this.wave;
     return {
-      t: 'snap', ts, players, zs, gs, is,
+      t: 'snap', ts, players, zs, gs, is, ms,
       wave: { ph: w.phase, n: w.night, lv: w.level, t: Math.max(0, Math.ceil(w.t)), left: w.left },
       ev,
     };

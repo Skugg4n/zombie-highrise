@@ -119,6 +119,17 @@
   #hud-room { left: max(14px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); font-size: 12px; opacity: 0.8; }
   #hud-scrap { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 18px); font-size: 12px; color: var(--accent); }
 
+  /* Tactical map toolbar (HUD layer) */
+  #map-ui {
+    position: absolute; left: 50%; top: calc(max(10px, env(safe-area-inset-top)) + 44px);
+    transform: translateX(-50%); display: flex; gap: 8px; pointer-events: auto;
+  }
+  #map-ui button {
+    background: rgba(23,20,15,0.8); color: var(--text);
+    border: 1px solid rgba(240,232,216,0.35);
+  }
+  #map-ui button.on { background: var(--accent2); color: var(--dark); border-color: transparent; }
+
   /* Big centre countdown / phase announcements (HUD layer) */
   #countdown {
     position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%);
@@ -201,6 +212,11 @@
   <div class="layer-hud">
     <div id="hud" class="hidden">
       <div id="crosshair"></div>
+      <div id="map-ui" class="hidden">
+        <button id="btn-map-ping" class="small on">PING</button>
+        <button id="btn-map-mine" class="small">MINE - 65</button>
+        <button id="btn-map-close" class="small">CLOSE MAP</button>
+      </div>
       <div id="countdown" class="hidden"></div>
       <div id="downed-note" class="hidden">DOWNED - a teammate close to you revives you</div>
       <div id="hud-room" class="hud-box" data-smoke>ROOM ----</div>
@@ -219,6 +235,7 @@
           <button id="btn-reload">RELOAD</button>
           <button id="btn-grenade">NADE</button>
           <button id="btn-pack">PACK</button>
+          <button id="btn-map">MAP</button>
         </div>
       </div>
     </div>
@@ -292,6 +309,7 @@
       <button class="secondary shop-item" data-item="ammoRefillSmg" data-smoke>SMG AMMO +120 - 90</button>
       <button class="secondary shop-item" data-item="healthPack" data-smoke>HEALTH PACK - 75</button>
       <button class="secondary shop-item" data-item="grenadePack" data-smoke>2 GRENADES - 60</button>
+      <button class="secondary shop-item" data-item="mine" data-smoke>MINE - 50</button>
       <button id="btn-shop-ready" data-smoke>READY - NEXT FLOOR</button>
     </div>
     <div id="panel-gameover" class="panel hidden">

@@ -24,7 +24,7 @@ export class Hud {
       const res = info.reserve < 0 ? '∞' : info.reserve;
       $('hud-ammo').textContent = `${info.mag} / ${res}`;
     }
-    $('hud-items').textContent = `G ${info.grenades}   P ${info.packs}`;
+    $('hud-items').textContent = `G ${info.grenades}  P ${info.packs}  M ${info.mines || 0}`;
   }
   setScrap(n) { $('hud-scrap').textContent = 'SCRAP ' + n; }
   setWave(text) { $('hud-wave').textContent = text; }

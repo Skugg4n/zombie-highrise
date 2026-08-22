@@ -37,6 +37,7 @@ export class TouchInput {
     bind('btn-reload', () => ctx.actions.reload());
     bind('btn-grenade', () => ctx.actions.grenade());
     bind('btn-pack', () => ctx.actions.pack());
+    bind('btn-map', () => ctx.actions.map());
 
     stickZone.addEventListener('touchstart', (e) => {
       e.preventDefault();

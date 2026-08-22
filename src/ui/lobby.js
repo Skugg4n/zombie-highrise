@@ -159,7 +159,7 @@ export class LobbyUI {
     $('hud-health').textContent = 'HP 80';
     $('hud-ammo').textContent = '4 / 8';
     $('hud-weapon').textContent = 'PISTOL';
-    $('hud-items').textContent = 'G 1   P 1';
+    $('hud-items').textContent = 'G 1  P 1  M 1';
     $('hud-scrap').textContent = 'SCRAP 135';
     $('hud-wave').textContent = 'NIGHT 2 - 6 left';
     $('join-code').value = 'XK';
@@ -172,7 +172,7 @@ export class LobbyUI {
       case 'hosting': $('panel-hosting').classList.remove('hidden'); this.state = 'hosting'; break;
       case 'joining': $('panel-joining').classList.remove('hidden'); this.state = 'joining'; break;
       case 'hud': $('hud').classList.remove('hidden'); this.state = 'playing'; break;
-      case 'shop': $('hud').classList.remove('hidden'); $('panel-shop').classList.remove('hidden'); this.state = 'playing'; break;
+      case 'shop': $('panel-shop').classList.remove('hidden'); this.state = 'playing'; break;
       case 'gameover': $('panel-gameover').classList.remove('hidden'); this.state = 'playing'; break;
       case 'connected': $('panel-connected').classList.remove('hidden'); this.state = 'connected'; break;
       default: $('panel-menu').classList.remove('hidden'); this.state = 'menu';

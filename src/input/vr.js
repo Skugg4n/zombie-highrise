@@ -44,10 +44,18 @@ export class VRInput {
       controller.addEventListener('selectend', () => {
         if (this.firingController === controller) this.fireHeld = false;
       });
-      controller.addEventListener('squeezestart', () => ctx.actions.reload());
       ctx.rig.group.add(controller);
 
       const grip = renderer.xr.getControllerGrip(i);
+      // Right squeeze reloads; left squeeze drops a mine at the hand.
+      controller.addEventListener('squeezestart', () => {
+        if (this.hands.left === grip) {
+          const pos = grip.getWorldPosition(new THREE.Vector3());
+          ctx.actions.mineAt(pos);
+        } else {
+          ctx.actions.reload();
+        }
+      });
       const weaponHolder = new THREE.Group();
       weaponHolder.add(makeWeaponMesh('pistol'));
       grip.add(weaponHolder);

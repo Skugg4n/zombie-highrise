@@ -23,6 +23,7 @@ export class KeyboardInput {
       else if (e.code === 'KeyH') act.pack();
       else if (e.code === 'KeyF') act.flashlight();
       else if (e.code === 'KeyM') act.map();
+      else if (e.code === 'KeyT') act.mine();
       else if (SLOT_KEYS[e.code]) act.switchTo(SLOT_KEYS[e.code]);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -31,6 +32,7 @@ export class KeyboardInput {
     ctx.dom.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       if (!ctx.isPlaying()) return;
+      if (ctx.isMapActive && ctx.isMapActive()) return;   // map owns clicks
       if (document.pointerLockElement !== ctx.dom) {
         ctx.dom.requestPointerLock();
         return;

@@ -315,6 +315,67 @@ function updateGrenadeVisuals(rows) {
   }
 }
 
+const mineVisuals = new Map();     // id -> {group, dot}
+function makeMineMesh() {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.2, 0.05, 10),
+    new THREE.MeshStandardMaterial({ color: 0x2e3230, roughness: 0.6, metalness: 0.4 }));
+  disc.position.y = 0.03;
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.03, 6, 5),
+    new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2010, emissiveIntensity: 1 }));
+  dot.position.y = 0.07;
+  g.add(disc, dot);
+  g.userData.dot = dot;
+  return g;
+}
+function updateMineVisuals(rows) {
+  const keep = new Set();
+  const blink = (Math.sin(performance.now() / 180) + 1) * 0.5;
+  for (const [id, x, y, z] of rows) {
+    keep.add(id);
+    let g = mineVisuals.get(id);
+    if (!g) { g = makeMineMesh(); mineVisuals.set(id, g); scene.add(g); }
+    g.position.set(x, y, z);
+    g.userData.dot.material.emissiveIntensity = 0.3 + blink * 1.2;
+  }
+  for (const [id, g] of mineVisuals) {
+    if (!keep.has(id)) { scene.remove(g); mineVisuals.delete(id); }
+  }
+}
+
+const pings = [];                  // [{group, t}]
+function spawnPing(p) {
+  const g = new THREE.Group();
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.22, 0.5, 6),
+    new THREE.MeshBasicMaterial({ color: 0xe0a33c }));
+  cone.rotation.x = Math.PI;
+  cone.position.y = 1.6;
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.35, 0.5, 20),
+    new THREE.MeshBasicMaterial({ color: 0xe0a33c, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.03;
+  g.add(cone, ring);
+  g.position.fromArray(p);
+  scene.add(g);
+  pings.push({ group: g, t: 5 });
+}
+function updatePings(dt) {
+  for (let i = pings.length - 1; i >= 0; i--) {
+    const ping = pings[i];
+    ping.t -= dt;
+    ping.group.children[0].position.y = 1.6 + Math.sin(performance.now() / 250) * 0.15;
+    ping.group.children[0].rotation.y += dt * 2;
+    if (ping.t <= 0) {
+      scene.remove(ping.group);
+      pings.splice(i, 1);
+    }
+  }
+}
+
 function spawnExplosion(p) {
   const light = new THREE.PointLight(0xffa040, 26, 14, 1.5);
   light.position.set(p[0], p[1] + 0.4, p[2]);
@@ -348,6 +409,10 @@ function clearTransientVisuals() {
   itemVisuals.clear();
   for (const m of grenadeVisuals.values()) scene.remove(m);
   grenadeVisuals.clear();
+  for (const g of mineVisuals.values()) scene.remove(g);
+  mineVisuals.clear();
+  for (const ping of pings) scene.remove(ping.group);
+  pings.length = 0;
 }
 
 // ---- UI -----------------------------------------------------------------
@@ -388,11 +453,13 @@ function openShop() {
   shopOpen = true;
   $('btn-shop-ready').textContent = 'READY - NEXT FLOOR';
   $('panel-shop').classList.remove('hidden');
+  $('hud').classList.add('hidden');   // the shop is modal; HUD returns after
   refreshShop();
 }
 function closeShop() {
   shopOpen = false;
   $('panel-shop').classList.add('hidden');
+  if (lobby.state === 'playing') $('hud').classList.remove('hidden');
 }
 function refreshShop() {
   if (!shopOpen) return;
@@ -501,7 +568,7 @@ function refreshWeaponHud() {
 
 // Shared action set for every input layer (all gated on canAct).
 const actions = {
-  fire: () => { if (canAct()) { const r = aimRay(); if (r) arsenal.fire(r.origin, r.dir); } },
+  fire: () => { if (canAct() && !mapActive) { const r = aimRay(); if (r) arsenal.fire(r.origin, r.dir); } },
   fireFrom: (o, d) => { if (canAct()) arsenal.fire(o, d); },
   reload: () => { if (canAct()) arsenal.reload(); },
   cycle: () => { if (canAct()) arsenal.cycle(); },
@@ -513,9 +580,83 @@ const actions = {
   },
   grenadeFrom: (o, d) => { if (canAct()) arsenal.throwGrenade(o, d); },
   pack: () => { if (canAct()) arsenal.usePack(); },
+  // Hand-place a mine just in front of the player (T key), or exactly at a
+  // VR hand (left squeeze).
+  mine: () => {
+    if (!canAct()) return;
+    const pos = rig.group.position.clone();
+    pos.x += -Math.sin(rig.yaw) * 1.2;
+    pos.z += -Math.cos(rig.yaw) * 1.2;
+    arsenal.placeMine(pos);
+  },
+  mineAt: (pos) => { if (canAct()) arsenal.placeMine(pos); },
   flashlight: () => { flashlightOn = !flashlightOn; },
-  map: () => {},   // tactical map lands in Pass D
+  map: () => toggleMap(),
 };
+
+// ---- Tactical map view --------------------------------------------------
+// Orthographic top-down view of the live scene. PING marks a spot for the
+// squad; MINE remote-places a mine for scrap (the tactician premium).
+const mapCam = new THREE.OrthographicCamera(-10, 10, 10, -10, 1, 150);
+mapCam.position.set(0, 60, 0);
+mapCam.up.set(0, 0, -1);
+mapCam.lookAt(0, 0, 0);
+let mapActive = false;
+let mapMode = 'ping';
+
+function setMapMode(mode) {
+  mapMode = mode;
+  $('btn-map-ping').classList.toggle('on', mode === 'ping');
+  $('btn-map-mine').classList.toggle('on', mode === 'mine');
+}
+$('btn-map-ping').addEventListener('click', () => setMapMode('ping'));
+$('btn-map-mine').addEventListener('click', () => setMapMode('mine'));
+$('btn-map-close').addEventListener('click', () => toggleMap(false));
+
+function toggleMap(force) {
+  if (vrInput && vrInput.active) return;   // no 2D map inside the headset
+  const next = force !== undefined ? force : !mapActive;
+  if (next === mapActive) return;
+  mapActive = next;
+  $('map-ui').classList.toggle('hidden', !mapActive);
+  if (mapActive) {
+    setMapMode('ping');
+    if (document.pointerLockElement) document.exitPointerLock();
+    const ext = CONFIG.PLAY_AREA * 0.8 + 10;
+    const aspect = innerWidth / innerHeight;
+    if (aspect >= 1) {
+      mapCam.top = ext; mapCam.bottom = -ext;
+      mapCam.left = -ext * aspect; mapCam.right = ext * aspect;
+    } else {
+      mapCam.left = -ext; mapCam.right = ext;
+      mapCam.top = ext / aspect; mapCam.bottom = -ext / aspect;
+    }
+    mapCam.updateProjectionMatrix();
+  }
+}
+
+const mapRaycaster = new THREE.Raycaster();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!mapActive || !isPlaying()) return;
+  const ndc = new THREE.Vector2(
+    (e.clientX / innerWidth) * 2 - 1,
+    -(e.clientY / innerHeight) * 2 + 1);
+  mapRaycaster.setFromCamera(ndc, mapCam);
+  const o = mapRaycaster.ray.origin, d = mapRaycaster.ray.direction;
+  if (Math.abs(d.y) < 1e-6) return;
+  const t = (level.floorY - o.y) / d.y;
+  if (t < 0) return;
+  const p = o.clone().addScaledVector(d, t);
+  if (mapMode === 'ping') {
+    dispatchAction({ t: 'ping', p: p.toArray() });
+  } else if (mapMode === 'mine') {
+    if (scrap < TUNING.economy.minePlacementFromMap) {
+      showToast('Not enough scrap (' + TUNING.economy.minePlacementFromMap + ' needed)', 2000);
+      return;
+    }
+    dispatchAction({ t: 'placeMine', p: p.toArray(), via: 'map' });
+  }
+});
 
 // Tear down any previous session completely before starting a new one.
 function resetSession() {
@@ -528,6 +669,7 @@ function resetSession() {
   refreshWeaponHud();
   lastSnapAt = 0; lastWave = null;
   closeShop();
+  toggleMap(false);
   clearTransientVisuals();
   hideToast();
   $('panel-gameover').classList.add('hidden');
@@ -743,6 +885,14 @@ function handleEvents(evs) {
         $('panel-gameover').classList.remove('hidden');
         break;
       }
+      case 'ping':
+        spawnPing(ev.p);
+        break;
+      case 'mined': {
+        const me = role === 'client' ? net?.myId : 'H';
+        if (ev.by === me) showToast('Mine placed (arms in 1s)', 1500);
+        break;
+      }
       case 'bought': {
         const me = role === 'client' ? net?.myId : 'H';
         if (ev.id === me) showToast('Purchased: ' + ev.item, 1500);
@@ -769,6 +919,7 @@ const inputCtx = {
   dom: renderer.domElement,
   actions,
   isPlaying: canAct,
+  isMapActive: () => mapActive,
   getLocoMode: () => lobby.locoMode,
   onSessionChange: (active) => {
     if (active) {
@@ -944,6 +1095,11 @@ renderer.setAnimationLoop(() => {
         grows.push([g.id, g.pos.x, g.pos.y, g.pos.z]);
       }
       updateGrenadeVisuals(grows);
+      const mrows = [];
+      for (const m of sim.mines.values()) {
+        mrows.push([m.id, m.pos.x, m.pos.y, m.pos.z]);
+      }
+      updateMineVisuals(mrows);
       const keep = new Set();
       for (const [id, p] of sim.players) {
         if (id === 'H') continue;
@@ -975,6 +1131,7 @@ renderer.setAnimationLoop(() => {
       if (latest) {
         updateItemVisuals(latest.is || [], dt);
         updateGrenadeVisuals(latest.gs || []);
+        updateMineVisuals(latest.ms || []);
       }
       // Stale-connection feedback (LESSONS.md).
       const stale = lastSnapAt > 0 && performance.now() - lastSnapAt > 4000;
@@ -1000,11 +1157,12 @@ renderer.setAnimationLoop(() => {
   // Flashlight follows its toggle.
   flashlight.intensity += ((flashlightOn ? 9 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
 
-  // Muzzle flash decay + explosion VFX.
+  // Muzzle flash decay + explosion + ping VFX.
   if (flash.intensity > 0) flash.intensity = Math.max(0, flash.intensity - dt * 80);
   updateExplosions(dt);
+  updatePings(dt);
 
-  renderer.render(scene, camera);
+  renderer.render(scene, mapActive && !(vrInput && vrInput.active) ? mapCam : camera);
 });
 
 // ---- Test and debug API -------------------------------------------------

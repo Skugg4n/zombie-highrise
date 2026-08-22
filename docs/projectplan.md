@@ -36,8 +36,8 @@ expensive.
       ammo, loot and proper reloading (VR grip squeeze, R key, touch button)
 - [x] Machete melee (ammo saver, satisfying in VR)
 - [x] Health packs (use on self or teammate) and frag grenades
-- [ ] Traps and mines, placeable
-- [ ] Tactical map view (mobile can flip): ping, place traps
+- [x] Traps and mines, placeable
+- [x] Tactical map view (mobile can flip): ping, place traps
 - [x] Countdown, game over, score screen
 
 ## Phase 2 - Roles and depth

@@ -21,6 +21,7 @@ export class Arsenal {
     };
     this.grenades = 1;
     this.packs = 0;
+    this.mines = 0;
     this.cooldown = 0;
     this.reloading = false;
     this.reloadT = 0;
@@ -35,6 +36,7 @@ export class Arsenal {
     this.owned = inv.w.slice();
     this.grenades = inv.g;
     this.packs = inv.k;
+    this.mines = inv.m || 0;
     for (const [w, pair] of Object.entries(inv.a)) {
       const mine = this.ammo[w] || (this.ammo[w] = { mag: 0, reserve: 0 });
       // While a local reload is in flight the local mag view is ahead of
@@ -116,6 +118,14 @@ export class Arsenal {
     this.onHudChange();
   }
 
+  // Hand-placed mine at a world position (prep phases only, host enforces).
+  placeMine(pos) {
+    if (this.mines <= 0) return;
+    this.mines--;
+    this.dispatch({ t: 'placeMine', p: pos.toArray(), via: 'hand' });
+    this.onHudChange();
+  }
+
   // ---- Frame -----------------------------------------------------------
   // fireHeld: auto weapons keep firing while the trigger/button is held.
   update(dt, fireHeld, getAimRay) {
@@ -145,13 +155,13 @@ export class Arsenal {
   hudInfo() {
     const w = this.active;
     if (!this.isGun(w)) {
-      return { name: 'MACHETE', mag: null, reserve: null, reloading: false, grenades: this.grenades, packs: this.packs };
+      return { name: 'MACHETE', mag: null, reserve: null, reloading: false, grenades: this.grenades, packs: this.packs, mines: this.mines };
     }
     const a = this.ammo[w] || { mag: 0, reserve: 0 };
     return {
       name: this.def(w).name, mag: a.mag,
       reserve: a.reserve === Infinity ? -1 : a.reserve,
-      reloading: this.reloading, grenades: this.grenades, packs: this.packs,
+      reloading: this.reloading, grenades: this.grenades, packs: this.packs, mines: this.mines,
     };
   }
 }
