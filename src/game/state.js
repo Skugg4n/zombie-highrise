@@ -85,7 +85,9 @@ export class HostSim {
   // ---- Player actions (from clients AND from the host's own input) -----
   applyAction(id, m) {
     const p = this.players.get(id);
-    if (!p || p.down) return;
+    if (!p) return;
+    // Downed players cannot fight, but they may shop and ready up.
+    if (p.down && m.t !== 'buy' && m.t !== 'ready') return;
     switch (m.t) {
       case 'shoot': this._actShoot(id, p, m); break;
       case 'melee': this._actMelee(id, p, m); break;
@@ -97,9 +99,61 @@ export class HostSim {
       case 'use':
         if (m.item === 'pack') this._actPack(id, p);
         break;
+      case 'buy': this._actBuy(id, p, m.item); break;
+      case 'ready':
+        if (this.wave.phase === 'ride') {
+          p.ready = true;
+          let allReady = true;
+          for (const q of this.players.values()) if (!q.ready) allReady = false;
+          if (allReady) this.wave.t = 0;
+        }
+        break;
       default:
         break;
     }
+  }
+
+  _actBuy(id, p, item) {
+    if (this.wave.phase !== 'ride') return;
+    const price = TUNING.economy.shopPrices[item];
+    if (!price || p.inv.s < price) return;
+    const inv = p.inv;
+    switch (item) {
+      case 'shotgun':
+        if (inv.w.includes('shotgun')) return;
+        inv.w.push('shotgun');
+        inv.a.shotgun = [TUNING.weapons.shotgun.magazine, 25];
+        break;
+      case 'smg':
+        if (inv.w.includes('smg')) return;
+        inv.w.push('smg');
+        inv.a.smg = [TUNING.weapons.smg.magazine, 120];
+        break;
+      case 'ammoRefillShotgun': {
+        const a = inv.a.shotgun;
+        if (!a || a[1] >= TUNING.weapons.shotgun.reserveMax) return;
+        a[1] = Math.min(TUNING.weapons.shotgun.reserveMax, a[1] + 25);
+        break;
+      }
+      case 'ammoRefillSmg': {
+        const a = inv.a.smg;
+        if (!a || a[1] >= TUNING.weapons.smg.reserveMax) return;
+        a[1] = Math.min(TUNING.weapons.smg.reserveMax, a[1] + 120);
+        break;
+      }
+      case 'healthPack':
+        if (inv.k >= 2) return;
+        inv.k++;
+        break;
+      case 'grenadePack':
+        if (inv.g >= 5) return;
+        inv.g = Math.min(5, inv.g + 2);
+        break;
+      default:
+        return;
+    }
+    inv.s -= price;
+    this.events.push({ e: 'bought', id, item });
   }
 
   _actShoot(id, p, m) {
@@ -277,11 +331,20 @@ export class HostSim {
   _enterRide() {
     this.wave.phase = 'ride';
     this.wave.t = 20;
+    for (const p of this.players.values()) p.ready = false;
     this.events.push({ e: 'ride' });
   }
 
   _arrive() {
     this.wave.level++;
+    // A fresh floor revives anyone still down (they rode the elevator).
+    for (const [id, p] of this.players) {
+      if (p.down) {
+        p.down = false; p.reviveT = 0;
+        p.hp = TUNING.player.revivedAtHp;
+        this.events.push({ e: 'revive', id, hp: p.hp });
+      }
+    }
     this.events.push({ e: 'level', index: this.wave.level });
     this._enterDay();
   }

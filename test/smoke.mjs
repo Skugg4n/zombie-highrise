@@ -171,6 +171,35 @@ if (code) {
   } catch (e) {
     note(false, 'playing/wave/weapon check failed: ' + e.message);
   }
+
+  // Full floor transition: clear the night, board the elevator, ride the
+  // shop, arrive on floor 2 on BOTH peers.
+  try {
+    // Two nights per floor: clear night 1, run and clear night 2.
+    await host.evaluate(() => window.__zhr.debugClearNight());
+    await host.waitForFunction(() => window.__zhr.wave()?.ph === 'day', null, { timeout: 8000 });
+    await host.evaluate(() => window.__zhr.forceNight());
+    await host.waitForFunction(() => window.__zhr.wave()?.ph === 'night', null, { timeout: 8000 });
+    await host.waitForTimeout(300);   // let a spawn tick pass
+    await host.evaluate(() => window.__zhr.debugClearNight());
+    await host.waitForFunction(() => window.__zhr.wave()?.ph === 'elevator', null, { timeout: 8000 });
+    note(true, 'two nights cleared, elevator phase reached');
+    const zone = await host.evaluate(() => window.__zhr.elevatorZone());
+    await host.evaluate((z) => window.__zhr.debugTeleport(z.x, z.z), zone);
+    await client.evaluate((z) => window.__zhr.debugTeleport(z.x, z.z), zone);
+    await host.waitForFunction(() => window.__zhr.wave()?.ph === 'ride', null, { timeout: 8000 });
+    note(true, 'squad boarded, ride (shop) phase reached');
+    await host.waitForFunction(() => window.__zhr.shopOpen(), null, { timeout: 5000 });
+    await client.waitForFunction(() => window.__zhr.shopOpen(), null, { timeout: 5000 });
+    note(true, 'shop opens on both peers');
+    await host.click('#btn-shop-ready');
+    await client.click('#btn-shop-ready');
+    await host.waitForFunction(() => window.__zhr.levelIndex() === 2 && window.__zhr.wave()?.ph === 'day', null, { timeout: 25000 });
+    await client.waitForFunction(() => window.__zhr.levelIndex() === 2, null, { timeout: 10000 });
+    note(true, 'both peers arrived on floor 2 (basement)');
+  } catch (e) {
+    note(false, 'elevator/shop flow failed: ' + e.message);
+  }
 }
 
 await host.screenshot({ path: join(ARTIFACTS, 'live-host.png') });

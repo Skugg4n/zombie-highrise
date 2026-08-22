@@ -3,7 +3,7 @@
 // (deterministic critic captures), ?uistate=<name> (UI gallery with fake
 // data), ?autohost=1 / ?autojoin=CODE (smoke test hooks), ?seed=N.
 import * as THREE from 'three';
-import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY } from './config.js';
+import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY, PLAY_SIZES, setPlayArea } from './config.js';
 import { buildLevel, disposeLevel } from './world/levelgen.js';
 import { resolveCircle } from './game/collision.js';
 import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS } from './world/actors.js';
@@ -115,6 +115,7 @@ let doorT = 0;   // elevator doors 0 closed .. 1 open (visual)
 function loadLevel(idx) {
   disposeLevel(scene, level);
   clearZombieVisuals();
+  clearTransientVisuals();
   levelIndex = idx;
   level = buildLevel(scene, QUALITY, runSeed, idx);
   applyLevelLighting(level);
@@ -123,6 +124,13 @@ function loadLevel(idx) {
   const spawn = level.playerSpawns[0];
   rig.group.position.copy(spawn);
   rig.group.rotation.y = rig.yaw = 0;
+  // VR re-center: put the HEAD on the spawn point, not the play-space
+  // origin, so the world quietly re-centers around the player's physical
+  // position (the elevator trick from the vision doc).
+  if (vrInput && vrInput.active) {
+    rig.group.position.x -= camera.position.x;
+    rig.group.position.z -= camera.position.z;
+  }
   if (sim) sim.setLevel(level);
 }
 
@@ -365,6 +373,51 @@ $('btn-go-lobby').addEventListener('click', () => {
   leaveToMenu();
 });
 
+// ---- Elevator shop ------------------------------------------------------
+let shopOpen = false;
+let lastRideT = -1;
+for (const btn of document.querySelectorAll('.shop-item')) {
+  btn.addEventListener('click', () => dispatchAction({ t: 'buy', item: btn.dataset.item }));
+}
+$('btn-shop-ready').addEventListener('click', () => {
+  $('btn-shop-ready').textContent = 'WAITING FOR THE SQUAD...';
+  dispatchAction({ t: 'ready' });
+});
+
+function openShop() {
+  shopOpen = true;
+  $('btn-shop-ready').textContent = 'READY - NEXT FLOOR';
+  $('panel-shop').classList.remove('hidden');
+  refreshShop();
+}
+function closeShop() {
+  shopOpen = false;
+  $('panel-shop').classList.add('hidden');
+}
+function refreshShop() {
+  if (!shopOpen) return;
+  $('shop-status').textContent = `SCRAP ${scrap} - doors close in ${lastWave ? lastWave.t : 20}s`;
+  const P = TUNING.economy.shopPrices;
+  const labels = {
+    shotgun: 'SHOTGUN', smg: 'SMG',
+    ammoRefillShotgun: 'SHELLS +25', ammoRefillSmg: 'SMG AMMO +120',
+    healthPack: 'HEALTH PACK', grenadePack: '2 GRENADES',
+  };
+  for (const btn of document.querySelectorAll('.shop-item')) {
+    const item = btn.dataset.item;
+    let label = `${labels[item]} - ${P[item]}`;
+    let blocked = scrap < P[item];
+    if (item === 'shotgun' && arsenal.owned.includes('shotgun')) { label = 'SHOTGUN - OWNED'; blocked = true; }
+    if (item === 'smg' && arsenal.owned.includes('smg')) { label = 'SMG - OWNED'; blocked = true; }
+    if (item === 'ammoRefillShotgun' && !arsenal.owned.includes('shotgun')) blocked = true;
+    if (item === 'ammoRefillSmg' && !arsenal.owned.includes('smg')) blocked = true;
+    if (item === 'healthPack' && arsenal.packs >= 2) { label = 'HEALTH PACK - FULL'; blocked = true; }
+    if (item === 'grenadePack' && arsenal.grenades >= 5) { label = '2 GRENADES - FULL'; blocked = true; }
+    btn.textContent = label;
+    btn.disabled = blocked;
+  }
+}
+
 // ---- Game session state -------------------------------------------------
 let role = null;             // null | 'solo' | 'host' | 'client'
 let net = null;
@@ -437,6 +490,7 @@ let arsenal = makeArsenal();
 function refreshWeaponHud() {
   hud.setWeapon(arsenal.hudInfo());
   hud.setScrap(scrap);
+  refreshShop();
   if (arsenal.active !== lastActiveWeapon) {
     lastActiveWeapon = arsenal.active;
     viewmodel.clear();
@@ -473,6 +527,7 @@ function resetSession() {
   lastActiveWeapon = null;
   refreshWeaponHud();
   lastSnapAt = 0; lastWave = null;
+  closeShop();
   clearTransientVisuals();
   hideToast();
   $('panel-gameover').classList.add('hidden');
@@ -510,7 +565,7 @@ function startHosting() {
     else sim.applyAction(id, m);
   };
   net.onError = onNetError;
-  net.getWelcomeExtras = () => ({ seed: runSeed, level: levelIndex });
+  net.getWelcomeExtras = () => ({ seed: runSeed, level: levelIndex, area: CONFIG.PLAY_AREA });
   net.host();
 }
 
@@ -529,8 +584,10 @@ function startJoining(code) {
   net.onWelcome = (w) => {
     lobby.showConnected(w.code);
     hud.setRoom(w.code);
-    if (typeof w.seed === 'number' && w.seed !== runSeed) {
-      runSeed = w.seed;
+    const areaChanged = typeof w.area === 'number' && w.area !== CONFIG.PLAY_AREA;
+    if (areaChanged) setPlayArea(w.area);
+    if ((typeof w.seed === 'number' && w.seed !== runSeed) || areaChanged) {
+      if (typeof w.seed === 'number') runSeed = w.seed;
       loadLevel(w.level || 1);
     }
   };
@@ -555,6 +612,16 @@ function startJoining(code) {
 }
 
 function startPlaying() {
+  // The host's play-size choice takes effect when the game starts; every
+  // client hears about it through a level event in the next snapshot.
+  if (sim) {
+    const desired = PLAY_SIZES[lobby.playSize] || CONFIG.PLAY_AREA;
+    if (desired !== CONFIG.PLAY_AREA) {
+      setPlayArea(desired);
+      loadLevel(1);
+      sim.events.push({ e: 'level', index: 1, area: desired });
+    }
+  }
   lobby.setState('playing');
   hud.setHealth(myHp);
   refreshWeaponHud();
@@ -641,6 +708,7 @@ function handleEvents(evs) {
       case 'day':
         nightTarget = 0;
         $('panel-gameover').classList.add('hidden');
+        closeShop();
         showCenterText('DAY', 1.6);
         break;
       case 'countdown':
@@ -656,17 +724,29 @@ function handleEvents(evs) {
         break;
       case 'ride':
         showCenterText('GOING UP', 1.4);
+        openShop();
         break;
-      case 'level':
-        loadLevel(ev.index);
+      case 'level': {
+        const areaChanged = typeof ev.area === 'number' && ev.area !== CONFIG.PLAY_AREA;
+        if (areaChanged) setPlayArea(ev.area);
+        if (ev.index !== levelIndex || areaChanged) loadLevel(ev.index);
+        closeShop();
         break;
+      }
       case 'gameover': {
         const s = ev.stats || {};
         $('go-stats').textContent =
           `You survived ${s.nights || 0} night${s.nights === 1 ? '' : 's'} and reached level ${s.level || 1}. ` +
           `${s.kills || 0} zombies down.`;
         $('btn-go-retry').style.display = role === 'client' ? 'none' : '';
+        closeShop();
         $('panel-gameover').classList.remove('hidden');
+        break;
+      }
+      case 'bought': {
+        const me = role === 'client' ? net?.myId : 'H';
+        if (ev.id === me) showToast('Purchased: ' + ev.item, 1500);
+        refreshShop();
         break;
       }
       case 'join': if (role === 'host') refreshHostPlayers(); break;
@@ -773,7 +853,10 @@ function updateWaveHud(w) {
       break;
     case 'night': hud.setWave(`NIGHT ${w.n} - ${w.left} left`); break;
     case 'elevator': hud.setWave('CLEARED - board the elevator'); break;
-    case 'ride': hud.setWave('GOING UP - floor ' + (w.lv + 1)); break;
+    case 'ride':
+      hud.setWave('GOING UP - floor ' + (w.lv + 1));
+      if (shopOpen && w.t !== lastRideT) { lastRideT = w.t; refreshShop(); }
+      break;
     case 'gameover': hud.setWave('GAME OVER'); break;
     default: hud.setWave('');
   }
@@ -951,7 +1034,15 @@ window.__zhr = {
     return out;
   },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
+  debugTeleport: (x, z) => { rig.group.position.x = x; rig.group.position.z = z; },
   forceNight: () => { if (sim) sim.forceNight(); },
+  debugClearNight: () => {
+    if (!sim) return;
+    sim.wave.queue = [];
+    sim.zombies.clear();
+  },
+  elevatorZone: () => (level.elevatorZone ? { x: level.elevatorZone.x, z: level.elevatorZone.z } : null),
+  shopOpen: () => shopOpen,
   debugShootZombie: () => {
     const first = zombieVisuals.values().next().value;
     if (!first) return false;

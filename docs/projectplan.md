@@ -27,10 +27,10 @@ expensive.
 ## Phase 1 - The core loop
 
 - [x] Wave system with escalating difficulty, day/night cycle
-- [ ] Level generator: basement / ground level / upper floor types, layouts
+- [x] Level generator: basement / ground level / upper floor types, layouts
       fitting the chosen play area (SMALL/MEDIUM/LARGE), ground level about
       every 3rd level with open sightlines OUT of the base
-- [ ] The elevator: end level, upgrade shop, next level, re-center world
+- [x] The elevator: end level, upgrade shop, next level, re-center world
 - [x] 3 enemy types with distinct behavior and readable silhouettes
 - [x] Weapon roster v1: pistol, shotgun, SMG, each with distinct feel,
       ammo, loot and proper reloading (VR grip squeeze, R key, touch button)

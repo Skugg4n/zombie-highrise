@@ -134,41 +134,47 @@ function buildGround(level, rng, quality) {
   floor.receiveShadow = quality === 'DESKTOP';
 
   // Sandbag perimeter with a gap per side (entries). Sandbags are LOW:
-  // they block walking but not bullets.
+  // they block walking but not bullets. Everything scales with the chosen
+  // play-area footprint (SMALL layouts skip clutter entirely).
   const wallMat = mat(PALETTE.sandbag);
   const H = 1.0, T = 0.6;
-  const segLen = (A - 3) / 2;
+  const gap = Math.min(3, Math.max(1.2, A / 5));
+  const segLen = (A - gap) / 2;
   for (const [side, rot] of [[[0, -half], 0], [[0, half], 0], [[-half, 0], Math.PI / 2], [[half, 0], Math.PI / 2]]) {
     const [dx, dz] = side;
-    for (const sign of [-1, 1]) {
-      const off = sign * (1.5 + segLen / 2);
-      const x = rot === 0 ? dx + off : dx;
-      const z = rot === 0 ? dz : dz + off;
-      const seg = box(g, segLen, H, T, wallMat, x, H / 2, z, rot);
-      seg.castShadow = seg.receiveShadow = quality === 'DESKTOP';
-      level.colliders.push(rot === 0
-        ? { x, z, hx: segLen / 2, hz: T / 2, tall: false }
-        : { x, z, hx: T / 2, hz: segLen / 2, tall: false });
+    if (segLen > 0.4) {
+      for (const sign of [-1, 1]) {
+        const off = sign * (gap / 2 + segLen / 2);
+        const x = rot === 0 ? dx + off : dx;
+        const z = rot === 0 ? dz : dz + off;
+        const seg = box(g, segLen, H, T, wallMat, x, H / 2, z, rot);
+        seg.castShadow = seg.receiveShadow = quality === 'DESKTOP';
+        level.colliders.push(rot === 0
+          ? { x, z, hx: segLen / 2, hz: T / 2, tall: false }
+          : { x, z, hx: T / 2, hz: segLen / 2, tall: false });
+      }
     }
     level.entries.push(new THREE.Vector3(dx, 0.1, dz));
   }
 
-  // Crates and barrels inside
-  const crateMat = mat(PALETTE.wood);
-  const barrelMat = mat(PALETTE.rust, 0.7, 0.2);
-  for (let i = 0; i < 5; i++) {
-    const s = rng.range(0.6, 1.1);
-    const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
-    if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;  // keep centre open
-    box(g, s, s, s, crateMat, x, s / 2 + 0.1, z, rng.range(0, 1));
-    level.colliders.push({ x, z, hx: s / 2, hz: s / 2, tall: false });
-  }
-  for (let i = 0; i < 3; i++) {
-    const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.9, 8), barrelMat);
-    b.position.set(x, 0.55, z);
-    g.add(b);
-    level.colliders.push({ x, z, hx: 0.35, hz: 0.35, tall: false });
+  // Crates and barrels inside (only when the footprint has room)
+  if (A >= 8) {
+    const crateMat = mat(PALETTE.wood);
+    const barrelMat = mat(PALETTE.rust, 0.7, 0.2);
+    for (let i = 0; i < Math.round(A / 3); i++) {
+      const s = rng.range(0.6, 1.1);
+      const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
+      if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;  // keep centre open
+      box(g, s, s, s, crateMat, x, s / 2 + 0.1, z, rng.range(0, 1));
+      level.colliders.push({ x, z, hx: s / 2, hz: s / 2, tall: false });
+    }
+    for (let i = 0; i < 3; i++) {
+      const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.9, 8), barrelMat);
+      b.position.set(x, 0.55, z);
+      g.add(b);
+      level.colliders.push({ x, z, hx: 0.35, hz: 0.35, tall: false });
+    }
   }
 
   buildWasteland(g, rng, {});
@@ -179,11 +185,12 @@ function buildGround(level, rng, quality) {
   g.add(level.elevator.group);
   level.elevatorZone = { x: 0, z: -half - 1.2, hx: 1.2, hz: 1.0 };
 
-  // Spawns
+  // Spawns (fractions of the footprint so every play size works)
+  const q = half * 0.3;
   level.playerSpawns = [
-    new THREE.Vector3(0, 0.1, 2), new THREE.Vector3(2, 0.1, -1),
-    new THREE.Vector3(-2, 0.1, -1), new THREE.Vector3(0, 0.1, -3),
-    new THREE.Vector3(2.5, 0.1, 2.5),
+    new THREE.Vector3(0, 0.1, q), new THREE.Vector3(q, 0.1, -q * 0.5),
+    new THREE.Vector3(-q, 0.1, -q * 0.5), new THREE.Vector3(0, 0.1, -q),
+    new THREE.Vector3(q, 0.1, q),
   ];
   // Far spawns: the horde walks in from the wasteland (visible at range).
   for (let i = 0; i < 8; i++) {
@@ -267,12 +274,14 @@ function buildBasement(level, rng) {
       level.colliders.push({ x, z, hx: 0.3, hz: 0.3, tall: true });
     }
   }
-  const shelfMat = mat(PALETTE.wood, 1.0);
-  for (let i = 0; i < 4; i++) {
-    const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
-    if (Math.abs(x) < 2.5 && Math.abs(z) < 2.5) continue;
-    box(g, 1.6, 1.8, 0.5, shelfMat, x, 0.9, z, rng.pick([0, Math.PI / 2]));
-    level.colliders.push({ x, z, hx: 0.8, hz: 0.8, tall: false });
+  if (A >= 10) {
+    const shelfMat = mat(PALETTE.wood, 1.0);
+    for (let i = 0; i < 4; i++) {
+      const x = rng.range(-half + 2, half - 2), z = rng.range(-half + 2, half - 2);
+      if (Math.abs(x) < 2.5 && Math.abs(z) < 2.5) continue;
+      box(g, 1.6, 1.8, 0.5, shelfMat, x, 0.9, z, rng.pick([0, Math.PI / 2]));
+      level.colliders.push({ x, z, hx: 0.8, hz: 0.8, tall: false });
+    }
   }
 
   // Sparse hanging work lamps (the flashlight does the real work)
@@ -291,10 +300,11 @@ function buildBasement(level, rng) {
   g.add(level.elevator.group);
   level.elevatorZone = { x: half - 2.2, z: -half + 1.4, hx: 1.2, hz: 1.0 };
 
+  const qb = half * 0.28;
   level.playerSpawns = [
-    new THREE.Vector3(0, 0, 2), new THREE.Vector3(1.5, 0, -1),
-    new THREE.Vector3(-1.5, 0, -1), new THREE.Vector3(0, 0, -2.5),
-    new THREE.Vector3(2, 0, 2),
+    new THREE.Vector3(0, 0, qb), new THREE.Vector3(qb, 0, -qb * 0.5),
+    new THREE.Vector3(-qb, 0, -qb * 0.5), new THREE.Vector3(0, 0, -qb),
+    new THREE.Vector3(qb, 0, qb),
   ];
 }
 
@@ -328,8 +338,8 @@ function buildUpper(level, rng, quality) {
 
   // South side: window wall with sills (shoot out, low collider) + balcony
   const sillH = 1.0;
-  const winW = 1.8;
-  const nWin = 3;
+  const winW = Math.min(1.8, A / 3);
+  const nWin = Math.max(1, Math.min(3, Math.floor(A / 4)));
   const gapTotal = A - nWin * winW;
   const pierW = gapTotal / (nWin + 1);
   let cx = -half + pierW / 2;
@@ -380,13 +390,15 @@ function buildUpper(level, rng, quality) {
     }
   }
 
-  // Interior clutter: desks, filing cabinets
-  const deskMat = mat(PALETTE.wood, 0.9);
-  for (let i = 0; i < 4; i++) {
-    const x = rng.range(-half + 2, half - 3), z = rng.range(-half + 2, half - 3);
-    if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;
-    box(g, 1.4, 0.75, 0.7, deskMat, x, 0.375, z, rng.pick([0, Math.PI / 2]));
-    level.colliders.push({ x, z, hx: 0.7, hz: 0.7, tall: false });
+  // Interior clutter: desks, filing cabinets (skipped in tight footprints)
+  if (A >= 9) {
+    const deskMat = mat(PALETTE.wood, 0.9);
+    for (let i = 0; i < 4; i++) {
+      const x = rng.range(-half + 2, half - 3), z = rng.range(-half + 2, half - 3);
+      if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;
+      box(g, 1.4, 0.75, 0.7, deskMat, x, 0.375, z, rng.pick([0, Math.PI / 2]));
+      level.colliders.push({ x, z, hx: 0.7, hz: 0.7, tall: false });
+    }
   }
 
   // The world below: street, opposing buildings, wasteland horizon
@@ -411,10 +423,11 @@ function buildUpper(level, rng, quality) {
   g.add(level.elevator.group);
   level.elevatorZone = { x: half - 1.6, z: half / 2, hx: 1.1, hz: 1.2 };
 
+  const qu = half * 0.3;
   level.playerSpawns = [
-    new THREE.Vector3(0, 0, 2), new THREE.Vector3(2, 0, 0),
-    new THREE.Vector3(-2, 0, 0), new THREE.Vector3(0, 0, -2),
-    new THREE.Vector3(-2.5, 0, 2.5),
+    new THREE.Vector3(0, 0, qu), new THREE.Vector3(qu, 0, 0),
+    new THREE.Vector3(-qu, 0, 0), new THREE.Vector3(0, 0, -qu),
+    new THREE.Vector3(-qu, 0, qu),
   ];
   // Street-level spawns for the "sniping down" fantasy: some zombies
   // appear on the street and are pure target practice through windows,

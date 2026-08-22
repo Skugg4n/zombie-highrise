@@ -242,6 +242,12 @@
         <button id="btn-copy" class="small secondary" data-smoke>COPY CODE</button>
       </div>
       <div id="host-players" class="status" data-smoke>Waiting for friends...</div>
+      <label class="field">Play area (roomscale VR space)</label>
+      <div class="choice" id="size-choice">
+        <button class="small secondary size-small" data-smoke>SMALL</button>
+        <button class="small secondary size-medium" data-smoke>MEDIUM</button>
+        <button class="small secondary on size-large" data-smoke>LARGE</button>
+      </div>
       <label class="field">VR movement</label>
       <div class="choice" id="loco-choice-host">
         <button class="small secondary loco-roomscale" data-smoke>ROOMSCALE</button>
@@ -279,11 +285,14 @@
   <div class="layer-overlays">
     <div id="panel-shop" class="panel hidden">
       <h2 data-smoke>ELEVATOR SHOP</h2>
-      <div class="status" data-smoke>Going up. Spend your scrap.</div>
-      <button class="secondary" data-smoke>SHOTGUN - 500</button>
-      <button class="secondary" data-smoke>AMMO CRATE - 150</button>
-      <button class="secondary" data-smoke>HEALTH PACK - 200</button>
-      <button data-smoke>NEXT FLOOR</button>
+      <div id="shop-status" class="status" data-smoke>SCRAP 25 - doors close in 20s</div>
+      <button class="secondary shop-item" data-item="shotgun" data-smoke>SHOTGUN - 250</button>
+      <button class="secondary shop-item" data-item="smg" data-smoke>SMG - 400</button>
+      <button class="secondary shop-item" data-item="ammoRefillShotgun" data-smoke>SHELLS +25 - 75</button>
+      <button class="secondary shop-item" data-item="ammoRefillSmg" data-smoke>SMG AMMO +120 - 90</button>
+      <button class="secondary shop-item" data-item="healthPack" data-smoke>HEALTH PACK - 75</button>
+      <button class="secondary shop-item" data-item="grenadePack" data-smoke>2 GRENADES - 60</button>
+      <button id="btn-shop-ready" data-smoke>READY - NEXT FLOOR</button>
     </div>
     <div id="panel-gameover" class="panel hidden">
       <h2 data-smoke>THE HIGH RISE FELL</h2>

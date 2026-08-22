@@ -1,6 +1,6 @@
 // Central configuration and constants. Version is bumped on every change
 // and shown in the UI corner (see ui/hud.js -> #version).
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 export const CONFIG = {
   // Networking
@@ -34,9 +34,19 @@ export const CONFIG = {
   SNAP_TURN_DEG: 45,
   VR_MOVE_SPEED: 3.0,
 
-  // World footprint (Phase 0: one MEDIUM ground-level layout)
-  PLAY_AREA: 16,          // metres, square interior of the base
+  // World footprint: square interior of the playable area, set from the
+  // lobby's play-size choice (roomscale VR walks this physically). The
+  // spec's 2x2 / 5x5 / 10x14 map to squares of 3 / 6 / 12 m playable
+  // (a hard 2 m square is unplayably tight for level layouts; noted in
+  // OPEN-QUESTIONS.md).
+  PLAY_AREA: 12,
 };
+
+export const PLAY_SIZES = { SMALL: 3, MEDIUM: 6, LARGE: 12 };
+
+export function setPlayArea(metres) {
+  CONFIG.PLAY_AREA = metres;
+}
 
 // URL parameters, parsed once.
 export const PARAMS = new URLSearchParams(location.search);

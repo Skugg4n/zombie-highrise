@@ -1,5 +1,22 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.4.0 - 2026-08-22 16:40
+
+Phase 1 Pass C: the elevator IS the shop. Why: projectplan elevator item.
+
+- Elevator shop during the ride: shotgun, SMG, ammo refills, health packs,
+  grenade pairs, priced from the tuning sheet; purchases validated by the
+  host against each player's scrap; READY skips the timer when the whole
+  squad readies up; downed players can still shop.
+- Arriving on a new floor revives anyone still down (they rode along).
+- Play-area size choice in the hosting panel (SMALL 3 m / MEDIUM 6 m /
+  LARGE 12 m squares); the host's choice reaches every client, all level
+  layouts adapt (clutter thins out, windows and walls rescale).
+- VR re-centering on every floor arrival: the world rebuilds around the
+  player's physical head position (the elevator trick).
+- Smoke test now drives the full loop: two nights cleared, squad boards,
+  shop on both peers, both arrive on floor 2.
+
 ## v0.3.0 - 2026-08-22 15:55
 
 Phase 1 Pass B: the arsenal. Why: projectplan weapon roster v1 + gear.

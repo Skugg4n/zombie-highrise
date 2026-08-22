@@ -18,6 +18,17 @@ export class LobbyUI {
     this.h = handlers;   // { onHost, onJoin(code), onSolo, onStart, onLeave }
     this.state = 'boot';
     this.locoMode = 'stationary';
+    this.playSize = 'LARGE';
+
+    const sizeGroup = $('size-choice');
+    for (const size of ['small', 'medium', 'large']) {
+      sizeGroup.querySelector('.size-' + size).addEventListener('click', () => {
+        this.playSize = size.toUpperCase();
+        for (const s of ['small', 'medium', 'large']) {
+          sizeGroup.querySelector('.size-' + s).classList.toggle('on', s === size);
+        }
+      });
+    }
 
     $('btn-host').addEventListener('click', () => this.h.onHost());
     $('btn-join').addEventListener('click', () => this.setState('joining'));
