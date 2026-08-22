@@ -1678,6 +1678,11 @@ function handleEvents(evs) {
         if (areaChanged) setPlayArea(ev.area);
         if (ev.index !== levelIndex || areaChanged) loadLevel(ev.index);
         closeShop();
+        // Each floor announces its identity so 7 never feels like 2.
+        if (ev.name) {
+          showCenterText(ev.name, 2.4);
+          if (ev.note) showToast(ev.note, 5000);
+        }
         break;
       }
       case 'finale':
@@ -2354,7 +2359,14 @@ window.__zhr = {
   elevatorZone: () => (level.elevatorZone ? { x: level.elevatorZone.x, z: level.elevatorZone.z } : null),
   shopOpen: () => shopOpen,
   debugShootZombie: () => {
-    const first = zombieStates.values().next().value;
+    // Nearest zombie, not "first in the map" (the old behaviour made the
+    // pressure probe shoot at distant targets while being eaten).
+    const o0 = camera.getWorldPosition(new THREE.Vector3());
+    let first = null, bd = Infinity;
+    for (const v of zombieStates.values()) {
+      const d = (v.x - o0.x) ** 2 + (v.z - o0.z) ** 2;
+      if (d < bd) { bd = d; first = v; }
+    }
     if (!first) return false;
     const c = new THREE.Vector3(first.x, first.y + 1.1, first.z);
     const o = camera.getWorldPosition(new THREE.Vector3());
@@ -2363,6 +2375,16 @@ window.__zhr = {
     return true;
   },
   items: () => [...itemVisuals.keys()],
+  debugGrant: (w) => {
+    if (!sim) return;
+    const p = sim.players.get('H');
+    if (!p.inv.w.includes(w)) {
+      p.inv.w.push(w);
+      p.inv.a[w] = [TUNING.weapons[w].magazine, 999];
+    }
+    arsenal.syncFromHost(p.inv);
+    arsenal.switchTo(w);
+  },
   barrels: () => {
     const out = [];
     for (const [id, g] of barrelVisuals) out.push({ id, pos: g.position.toArray() });

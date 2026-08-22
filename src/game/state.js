@@ -471,7 +471,12 @@ export class HostSim {
     // Night modifier roll (fog/frenzy/blackout/swarm/loot) from night 3.
     const M = TUNING.modifiers;
     this.mod = null;
-    if (night >= M.fromNight && Math.random() > M.chanceNone) {
+    // A floor's scripted hook modifier wins: that is what gives the floor
+    // its identity. Otherwise roll one.
+    const hook = TUNING.floorHooks[this.wave.level];
+    if (hook && hook.mod) {
+      this.mod = hook.mod;
+    } else if (night >= M.fromNight && Math.random() > M.chanceNone) {
       this.mod = M.list[Math.floor(Math.random() * M.list.length)];
     }
     // Surge nights: every 3rd night peaks hard, the following day breathes.
@@ -619,7 +624,11 @@ export class HostSim {
         this.events.push({ e: 'revive', id, hp: p.hp });
       }
     }
-    this.events.push({ e: 'level', index: this.wave.level });
+    const hook = TUNING.floorHooks[this.wave.level];
+    this.events.push({
+      e: 'level', index: this.wave.level,
+      name: hook ? hook.name : null, note: hook ? hook.note : null,
+    });
     this._enterDay(false);
   }
 

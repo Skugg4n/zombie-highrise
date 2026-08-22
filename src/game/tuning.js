@@ -10,14 +10,14 @@ export const TUNING = {
   // get LONGER, not laggier. Solo pistol-only pressure: night 1 ~1.0
   // (winnable kiting), night 4 ~1.9, night 6 ~2.2 = shop matters.
   waves: {
-    budgetPoints: (night) => Math.round(8 * Math.pow(1.25, night - 1)),
-    threatCost: { walker: 1, runner: 1.5, brute: 4 },
+    budgetPoints: (night) => Math.round(9 * Math.pow(1.30, night - 1)),
+    threatCost: { walker: 1, runner: 1.5, brute: 4, spitter: 2, crawler: 1.5, screamer: 3 },
     mixWeights: (night) => {
-      const runner = Math.min(0.34, Math.max(0, 0.12 * (night - 1)));   // from night 2
-      const brute = Math.min(0.20, Math.max(0, 0.07 * (night - 3)));    // from night 4
-      const spitter = Math.min(0.14, Math.max(0, 0.05 * (night - 4)));  // from night 5
-      const crawler = Math.min(0.14, Math.max(0, 0.05 * (night - 5)));  // from night 6
-      const screamer = Math.min(0.08, Math.max(0, 0.04 * (night - 6))); // from night 7
+      const runner = Math.min(0.38, Math.max(0, 0.18 * (night - 1)));   // from night 2
+      const brute = Math.min(0.22, Math.max(0, 0.10 * (night - 2)));    // from night 3
+      const spitter = Math.min(0.16, Math.max(0, 0.07 * (night - 3)));  // from night 4
+      const crawler = Math.min(0.16, Math.max(0, 0.07 * (night - 4)));  // from night 5
+      const screamer = Math.min(0.10, Math.max(0, 0.05 * (night - 5))); // from night 6
       const walker = 1 - runner - brute - spitter - crawler - screamer;
       return { walker, runner, brute, spitter, crawler, screamer };
     },
@@ -25,8 +25,26 @@ export const TUNING = {
     // is longer and richer (see state.js).
     surgeEvery: 3,
     surgeBudgetMult: 1.35,
-    maxAlive: 20,           // Quest 2 hard cap, all player counts
+    maxAlive: 24,           // Quest 2 cap; instanced horde has headroom
     levelTypeModifier: { ground: 1.15, basement: 0.90, upper: 1.00, trench: 0.95, wagon: 0.85, boss: 1.0 },
+  },
+
+  // FLOOR HOOKS (playtest: "give each floor a distinct hook so floor 7
+  // does not feel like floor 2"). One sentence of identity per floor,
+  // announced on arrival, plus the mechanical twist that backs it up.
+  floorHooks: {
+    1: { name: 'THE YARD', note: 'Three gates. Hold the compound.' },
+    2: { name: 'BOILER LEVEL', note: 'Tight corridors. They come up the stairwell.', mod: 'blackout' },
+    3: { name: 'OFFICES', note: 'They climb the facade and ride the shaft.' },
+    4: { name: 'THE YARD AGAIN', note: 'Same ground, worse odds.', mod: 'fog' },
+    5: { name: 'THE TRENCH', note: 'Nowhere to run. Use the firing steps.' },
+    6: { name: 'THE WAGON', note: 'Rolling. They board from both ends.' },
+    7: { name: 'UPPER YARD', note: 'Spitters hold the high ground.', mod: 'frenzy' },
+    8: { name: 'FLOODED BOILERS', note: 'Crawlers under the pipes.', mod: 'swarm' },
+    9: { name: 'BROKEN OFFICES', note: 'Screamers call the building down.' },
+    10: { name: 'LAST YARD', note: 'Everything at once.', mod: 'loot' },
+    11: { name: 'DEEP TRENCH', note: 'The long walk to the lift.', mod: 'blackout' },
+    12: { name: "THE BUTCHER'S ROOF", note: 'Kill it and you go home.' },
   },
 
   // Night modifiers: rolled per night, announced at the countdown. They
@@ -49,9 +67,9 @@ export const TUNING = {
   // Aggro: nearest STANDING player, re-evaluate every 2 s; never attack
   // downed players (L4D rule).
   enemies: {
-    walker: { hp: 3, speed: 1.3, biteDamage: 10, biteInterval: 1.0, scrap: 10, radius: 0.55 },
-    runner: { hp: 2, speed: 3.4, biteDamage: 6, biteInterval: 0.7, scrap: 15, radius: 0.45 },
-    brute: { hp: 15, speed: 0.85, biteDamage: 25, biteInterval: 1.5, scrap: 40, radius: 0.75 },
+    walker: { hp: 3, speed: 1.4, biteDamage: 14, biteInterval: 0.9, scrap: 10, radius: 0.55 },
+    runner: { hp: 2, speed: 3.6, biteDamage: 9, biteInterval: 0.65, scrap: 15, radius: 0.45 },
+    brute: { hp: 18, speed: 0.95, biteDamage: 30, biteInterval: 1.4, scrap: 40, radius: 0.75 },
     // Phase 3.5 depth roster. Each changes HOW you play, not just numbers:
     // spitter forces repositioning, crawler punishes tunnel vision under
     // sightlines, screamer is a priority-target puzzle, butcher is the
@@ -143,11 +161,11 @@ export const TUNING = {
       speedMult: 0.8,             // sun-drunk and slow
       maxAlive: 6,
     },
-    spawnInterval: (night) => Math.max(0.9, 2.8 - 0.2 * night),
+    spawnInterval: (night) => Math.max(0.6, 2.3 - 0.16 * night),
     burst: {
-      startNight: 3,
-      everyNthSpawn: 8,
-      size: (night) => Math.min(5, 2 + Math.floor(night / 3)),
+      startNight: 2,
+      everyNthSpawn: 5,
+      size: (night) => Math.min(7, 2 + Math.floor(night / 2)),
     },
     spawnDistanceFromPlayer: { min: 12, max: 22 },
     nightsPerLevel: 2,
