@@ -4,7 +4,35 @@ Live build: https://skugg4n.github.io/zombie-highrise/
 Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw".
 
-## v0.8.2 - the run now has an ENDING (start here)
+## v0.9.3 - Ola's playtest fixes (START HERE)
+
+Everything below came from your last session. Please check these first.
+
+- [ ] LEVELS ARE BIG NOW on every platform, including desktop and
+      including SMALL play area. Corridors, rooms, cover, ramps up to
+      platforms, multiple routes. Nothing should feel like a shoebox.
+- [ ] The dashed amber square on the floor is your roomscale zone. In VR
+      roomscale you are re-centred onto it each floor; the level extends
+      far beyond it and you shoot out into it.
+- [ ] The first zombie arrives within a couple of seconds of START, and
+      zombies keep trickling in DURING THE DAY. You should never be
+      standing around with nothing to do.
+- [ ] Mines are cheap now (18) and you start with 2. Press T during the
+      day to lay one.
+- [ ] Look at where enemies come from: a stairwell, an open elevator
+      shaft, wall breaches, climbers over the balcony, gates, trench
+      tunnel mouths. Tell me if any enemy still appears from nowhere.
+- [ ] RIGHT CLICK aims down sights (Shift also works). With DUAL PISTOLS
+      left and right mouse fire the left and right gun so they alternate.
+- [ ] Shoot a zombie in the head: 2.5x damage, amber HEADSHOT callout.
+- [ ] Every weapon now has a reload animation.
+- [ ] Walk up to the elevator: the doors should open as you approach and
+      stay open. Tell me if they ever shut in your face.
+- [ ] Difficulty: night 1 should be manageable, night 5 sweaty, night 9
+      desperate. Each floor announces its own name and twist on arrival.
+      Tell me where it is still too easy.
+
+## v0.8.2 - the run now has an ENDING
 
 A full run is 12 floors. Floor 12 is the Butcher's arena; beating him
 triggers the roof extraction and the victory screen. That is the win

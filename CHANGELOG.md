@@ -1,5 +1,64 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.9.3 - 2026-08-23 - Ola's playtest pass
+
+Everything here comes from real playtest feedback, which outranks every
+critic agent. Fixed in the order given: root causes first.
+
+ROOT CAUSE 1 - the play area was driving the whole world (v0.9.0)
+- Levels are now a fixed generous 34 m on every platform. The physical
+  play area ONLY decides where the roomscale zone is painted, and
+  roomscale VR re-centres onto that patch. Shoot far, walk near.
+- No more square rooms. New src/world/kit.js builds every level from
+  walls, chest-high cover, ramped platforms, railings and corridors:
+  the ground compound has three gates, inner buildings and a watchtower;
+  the basement is a boiler maze with a spine corridor and a maintenance
+  deck; the upper floor is offices around a corridor ring with a
+  mezzanine and a balcony; the trench has four lanes, connectors and
+  firing steps; the wagon is three cars joined by gangways; the boss
+  arena has a gantry ring and cover pillars.
+
+ROOT CAUSE 2 - the day phase was dead time (v0.9.1)
+- First zombie now arrives 1.6 s after START (was ~50 s).
+- Daylight raids trickle in all day through the same visible entrances,
+  so the game is no longer night-only and finally matches the "zombies
+  in daylight" art direction.
+- Day 45s->22s (first day 8s), countdown 5s->3s, plus an anti-dead-air
+  guard that pulls the next beat forward when nothing is happening.
+  Measured: 0 of 60 sampled seconds with nothing to fight.
+- Prep made meaningful: mines 50->18 scrap, map placement 65->26, and
+  players start with 2.
+
+ROOT CAUSE 3 - upper floors had no fiction (v0.9.0)
+- Enemies never appear from thin air. Every entry has a VISIBLE source:
+  a stairwell head with steps going down out of sight, an open elevator
+  shaft with bent doors and a dangling cable, wall breaches with rubble
+  spill, facade climbs with bent railing and a hanging cable, gates and
+  trench tunnel mouths.
+
+COMBAT FEEL (v0.9.2)
+- Right click aims down sights (tighter spread, narrower FOV, slower
+  turn); Shift is the ADS modifier so dual pistols can still aim.
+- Dual pistols alternate: left button fires the left gun, right the
+  right, each with its own cooldown, kick and muzzle side.
+- Headshots: real head spheres per enemy type, 2.5x damage, amber
+  HEADSHOT callout, distinct sound, blood at head height.
+- Reload animation on EVERY weapon.
+- Elevator doors open whenever a player is near the cab, in any phase.
+- Open edges that only let you walk OUT are sealed with player-only
+  barriers the horde still walks through.
+
+DIFFICULTY AND TENSION (v0.9.3)
+- Steeper ramp, tighter cadence, harder bites, alive cap 20->24, depth
+  roster arriving earlier.
+- Every floor announces its own identity and carries a scripted twist.
+- Measured with a kiting bot: night 1 survivable at full HP, night 5
+  kills it in 68 s, night 9 in 54 s at the cap.
+
+Also: interiors lit so they read, tactical map sees past ceilings and
+suspends fog. Perf holds at 44 draw calls / 5.1k triangles with 24
+zombies.
+
 ## v0.8.2 - 2026-08-23 (run wrap-up)
 
 Budget-driven landing: critic loops stopped, ending shipped. Why: the
