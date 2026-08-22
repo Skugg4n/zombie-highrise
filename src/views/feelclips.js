@@ -16,7 +16,7 @@ export const FEEL_CLIPS = {
   1: {
     duration: 5.5,
     actions: [
-      [0.1, (a) => a.spawnAt('walker', 0, -8)],
+      [0.1, (a) => a.spawnAt('walker', 8, 1.5)],
       [0.7, (a) => a.aim()],
       [1.0, (a) => { a.aim(); a.fire(); }],
       [1.7, (a) => { a.aim(); a.fire(); }],
@@ -29,10 +29,10 @@ export const FEEL_CLIPS = {
     actions: [
       [0.1, (a) => {
         a.grant('smg');
-        a.spawnAt('walker', -2.5, -8);
-        a.spawnAt('walker', -0.8, -9.5);
-        a.spawnAt('walker', 1.0, -8.5);
-        a.spawnAt('walker', 2.6, -7.5);
+        a.spawnAt('walker', 7.5, -1.2);
+        a.spawnAt('walker', 9.0, 0.4);
+        a.spawnAt('walker', 8.2, 2.4);
+        a.spawnAt('walker', 7.0, 4.0);
       }],
       [0.8, (a) => a.aim()],
       [1.0, (a) => { a.aim(); a.hold(3.2); }],
@@ -47,7 +47,7 @@ export const FEEL_CLIPS = {
   3: {
     duration: 6,
     actions: [
-      [0.1, (a) => { a.grant('shotgun'); a.spawnAt('brute', 0, -2.6); }],
+      [0.1, (a) => { a.grant('shotgun'); a.spawnAt('brute', 3.0, 1.8); }],
       [0.8, (a) => a.aim()],
       [1.1, (a) => { a.aim(); a.fire(); }],
       [2.3, (a) => { a.aim(); a.fire(); }],
@@ -58,7 +58,7 @@ export const FEEL_CLIPS = {
   4: {
     duration: 4.5,
     actions: [
-      [0.1, (a) => { a.equip('machete'); a.spawnAt('walker', 0, -1.5) }],
+      [0.1, (a) => { a.equip('machete'); a.spawnAt('walker', 1.8, 1.8) }],
       [0.8, (a) => a.aim()],
       [1.1, (a) => { a.aim(); a.fire(); }],
       [2.2, (a) => { a.aim(); a.fire(); }],
@@ -68,9 +68,9 @@ export const FEEL_CLIPS = {
     duration: 6.5,
     actions: [
       [0.1, (a) => {
-        a.spawnAt('walker', -1, -8);
-        a.spawnAt('walker', 0.6, -8.8);
-        a.spawnAt('walker', 0, -7.2);
+        a.spawnAt('walker', 7.2, 1.0);
+        a.spawnAt('walker', 8.6, 2.0);
+        a.spawnAt('walker', 7.8, 3.0);
       }],
       [0.8, (a) => a.aim()],
       [1.2, (a) => a.throwGrenade()],
@@ -82,8 +82,8 @@ export const FEEL_CLIPS = {
     actions: [
       [0.1, (a) => {
         a.setHp(25);
-        a.spawnAt('runner', -1.2, -1.6);
-        a.spawnAt('runner', 1.2, -1.8);
+        a.spawnAt('runner', 1.4, 3.2);
+        a.spawnAt('runner', -1.2, 3.4);
       }],
       [0.6, (a) => a.aim()],
     ],

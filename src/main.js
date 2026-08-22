@@ -79,7 +79,7 @@ if (QUALITY === 'DESKTOP') {
   sun.shadow.camera.far = 150;
 }
 // Headlamp-style flashlight (auto-on in dark levels, F toggles on desktop).
-const flashlight = new THREE.SpotLight(0xd8e8ff, 0, 22, 0.42, 0.45, 1.2);
+const flashlight = new THREE.SpotLight(0xd8e8ff, 0, 24, 0.5, 0.55, 1.1);
 const flashlightTarget = new THREE.Object3D();
 flashlightTarget.position.set(0, 0, -6);
 camera.add(flashlight, flashlightTarget);
@@ -100,7 +100,7 @@ scene.add(dust.points);
 let nightT = 0, nightTarget = 0;
 const colDaySky = new THREE.Color(), colNightSky = new THREE.Color(0x101a2e);
 const colDayHaze = new THREE.Color(), colNightHaze = new THREE.Color(0x18223a);
-const colNightGround = new THREE.Color(0x0c111e);
+const colNightGround = new THREE.Color(0x151d30);
 const colTmp = new THREE.Color(), colTmp2 = new THREE.Color();
 const colDayGround = new THREE.Color();
 
@@ -114,7 +114,7 @@ function applyLevelLighting(level) {
   flashlightOn = L.dark;
   sky.dome.visible = true;
   sunGlow.visible = !L.dark;
-  dust.points.visible = !L.dark;
+  dust.points.visible = true;   // dust motes read in dark beams too
   updateDayNight(true);
 }
 
@@ -123,9 +123,9 @@ function updateDayNight(force = false) {
   if (L.dark) {   // basements/trenches: the sky barely matters
     sun.intensity = 0;
     hemi.intensity = L.hemiDay;
-    sky.uniforms.uTop.value.setHex(0x05070c);
-    sky.uniforms.uHorizon.value.setHex(0x0a0e18);
-    sky.uniforms.uGround.value.setHex(0x05060a);
+    sky.uniforms.uTop.value.setHex(0x0c1424);
+    sky.uniforms.uHorizon.value.setHex(0x142036);
+    sky.uniforms.uGround.value.setHex(0x0b1020);
     return;
   }
   const speed = force ? 1 : 0.02;
@@ -174,6 +174,7 @@ function loadLevel(idx) {
     rig.group.position.z -= camera.position.z;
   }
   if (sim) sim.setLevel(level);
+  rebuildEntryArrows();
 }
 
 // ---- Player rig ---------------------------------------------------------
@@ -269,16 +270,20 @@ function updateZombieVisuals(rows, dt) {
       scale: v.scale,
     });
   }
+  // Corpses persist several seconds (a kill deserves a lasting trophy),
+  // then sink away. Oldest are dropped when the pool would overflow.
+  const CORPSE_T = 6.0;
+  while (dyingStates.length > 14) dyingStates.shift();
   for (let i = dyingStates.length - 1; i >= 0; i--) {
     const d = dyingStates[i];
     d.t -= dt;
     if (d.t <= 0) { dyingStates.splice(i, 1); continue; }
-    const elapsed = 1.1 - d.t;
+    const elapsed = CORPSE_T - d.t;
     entries.push({
       x: d.x, y: d.y, z: d.z, rotY: d.rotY, type: d.type, animT: d.animT,
       stagger: 0, flash: 0, scale: d.scale,
-      fall: Math.min(1, elapsed / 0.35),
-      sink: elapsed > 0.7 ? (elapsed - 0.7) * 0.9 : 0,
+      fall: Math.min(1, elapsed / 0.4),
+      sink: elapsed > CORPSE_T - 1 ? (elapsed - (CORPSE_T - 1)) * 1.6 : 0,
     });
   }
   horde.update(entries);
@@ -332,8 +337,10 @@ function updateAvatar(id, p) {
 const flash = new THREE.PointLight(0xffc890, 0, 9);
 scene.add(flash);
 
-// Ejected shell casings: a small pooled particle effect.
-const casingGeo = new THREE.BoxGeometry(0.02, 0.02, 0.05);
+// Ejected shell casings: a small pooled particle effect. Spawned at the
+// weapon's MUZZLE offset, never at the camera (a casing at the camera
+// origin flashes across the whole view as a giant quad; feel-critic find).
+const casingGeo = new THREE.BoxGeometry(0.018, 0.018, 0.042);
 const casingMat = new THREE.MeshBasicMaterial({ color: 0xc8a848 });
 const casings = [];
 const upV = new THREE.Vector3(0, 1, 0);
@@ -343,12 +350,85 @@ function spawnCasing(origin, dir) {
     scene.remove(old.mesh);
   }
   const mesh = new THREE.Mesh(casingGeo, casingMat);
-  mesh.position.copy(origin).addScaledVector(dir, 0.15);
   const right = new THREE.Vector3().crossVectors(dir, upV).normalize();
-  const vel = right.multiplyScalar(1.2 + Math.random())
-    .add(new THREE.Vector3(0, 1.8 + Math.random(), 0));
+  mesh.position.copy(origin).addScaledVector(dir, 0.45)
+    .addScaledVector(right, 0.12).addScaledVector(upV, -0.08);
+  const vel = right.multiplyScalar(0.9 + Math.random() * 0.6)
+    .add(new THREE.Vector3(0, 1.4 + Math.random() * 0.6, 0));
   scene.add(mesh);
   casings.push({ mesh, vel, t: 0.9, spin: (Math.random() - 0.5) * 20 });
+}
+
+// Muzzle flash sprite: a bright star at the muzzle for ~2 frames, paired
+// with the point light so firing visibly lights the surroundings.
+const flashSpriteTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255,255,230,1)');
+  g.addColorStop(0.3, 'rgba(255,214,130,0.9)');
+  g.addColorStop(1, 'rgba(255,180,80,0)');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 64, 64);
+  x.strokeStyle = 'rgba(255,240,200,0.9)';
+  x.lineWidth = 3;
+  for (const a of [0, Math.PI / 2, Math.PI / 4, -Math.PI / 4]) {
+    x.beginPath();
+    x.moveTo(32 - Math.cos(a) * 30, 32 - Math.sin(a) * 30);
+    x.lineTo(32 + Math.cos(a) * 30, 32 + Math.sin(a) * 30);
+    x.stroke();
+  }
+  return new THREE.CanvasTexture(c);
+})();
+const muzzleSprites = [];
+function spawnMuzzleSprite(origin, dir) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: flashSpriteTex, transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, rotation: Math.random() * Math.PI,
+  }));
+  s.position.copy(origin).addScaledVector(dir, 0.55);
+  s.scale.setScalar(0.3 + Math.random() * 0.12);
+  scene.add(s);
+  muzzleSprites.push({ s, t: 0.055 });
+}
+
+// Tracers: brief additive streaks so every shot visibly goes somewhere.
+const tracerGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 4);
+tracerGeo.rotateX(Math.PI / 2);   // align length with -Z lookAt axis
+const tracers = [];
+function spawnTracer(origin, dir) {
+  const m = new THREE.Mesh(tracerGeo, new THREE.MeshBasicMaterial({
+    color: 0xffd9a0, transparent: true, opacity: 0.8,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  const len = 22;
+  m.position.copy(origin).addScaledVector(dir, 0.8 + len / 2);
+  m.scale.z = len;
+  m.lookAt(m.position.clone().add(dir));
+  scene.add(m);
+  tracers.push({ m, t: 0.08 });
+}
+function updateShotVfx(dt) {
+  for (let i = muzzleSprites.length - 1; i >= 0; i--) {
+    const f = muzzleSprites[i];
+    f.t -= dt;
+    if (f.t <= 0) {
+      scene.remove(f.s);
+      f.s.material.dispose();
+      muzzleSprites.splice(i, 1);
+    }
+  }
+  for (let i = tracers.length - 1; i >= 0; i--) {
+    const tr = tracers[i];
+    tr.t -= dt;
+    tr.m.material.opacity = 0.8 * Math.max(0, tr.t / 0.08);
+    if (tr.t <= 0) {
+      scene.remove(tr.m);
+      tr.m.material.dispose();
+      tracers.splice(i, 1);
+    }
+  }
 }
 function updateCasings(dt) {
   for (let i = casings.length - 1; i >= 0; i--) {
@@ -407,6 +487,7 @@ function updateGrenadeVisuals(rows) {
     if (!m) {
       m = makeWeaponMesh('grenade');
       m.scale.setScalar(1.4);
+      m.userData.kind = kind || 0;
       m.traverse((o) => {
         if (o.isMesh && o.material.color) o.material.color.setHex(GRENADE_TINTS[kind || 0] || GRENADE_TINTS[0]);
       });
@@ -414,6 +495,10 @@ function updateGrenadeVisuals(rows) {
       scene.add(m);
     }
     m.position.set(x, y, z);
+    // Frags blink faster and faster while cooking (fuse tension).
+    if (m.userData.kind === 0) {
+      m.scale.setScalar(1.4 + (Math.sin(performance.now() / 70) > 0.3 ? 0.25 : 0));
+    }
   }
   for (const [id, m] of grenadeVisuals) {
     if (!keep.has(id)) { removeAndDispose(m); grenadeVisuals.delete(id); }
@@ -575,28 +660,51 @@ function updatePings(dt) {
 }
 
 function spawnExplosion(p) {
-  const light = new THREE.PointLight(0xffa040, 26, 14, 1.5);
-  light.position.set(p[0], p[1] + 0.4, p[2]);
+  const light = new THREE.PointLight(0xffa040, 42, 18, 1.4);
+  light.position.set(p[0], p[1] + 0.5, p[2]);
+  // Fireball, lingering smoke column, and a scorch decal on the ground.
   const shell = new THREE.Mesh(
     new THREE.SphereGeometry(1, 12, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.7 }));
+    new THREE.MeshBasicMaterial({
+      color: 0xffc070, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
   shell.position.copy(light.position);
-  shell.scale.setScalar(0.3);
-  scene.add(light, shell);
-  explosions.push({ light, shell, t: 0.45 });
+  shell.scale.setScalar(0.4);
+  const smoke = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 10, 7),
+    new THREE.MeshBasicMaterial({ color: 0x2c2620, transparent: true, opacity: 0.55, depthWrite: false }));
+  smoke.position.set(p[0], p[1] + 1.2, p[2]);
+  smoke.scale.setScalar(0.5);
+  const scorch = new THREE.Mesh(
+    new THREE.CircleGeometry(1.8, 16),
+    new THREE.MeshBasicMaterial({ color: 0x14100c, transparent: true, opacity: 0.55, depthWrite: false }));
+  scorch.rotation.x = -Math.PI / 2;
+  scorch.position.set(p[0], p[1] + 0.03, p[2]);
+  scene.add(light, shell, smoke, scorch);
+  explosions.push({ light, shell, smoke, scorch, t: 2.6, T: 2.6 });
 }
 
 function updateExplosions(dt) {
   for (let i = explosions.length - 1; i >= 0; i--) {
     const ex = explosions[i];
     ex.t -= dt;
-    const k = Math.max(0, ex.t / 0.45);
-    ex.light.intensity = 26 * k;
-    ex.shell.scale.setScalar(0.3 + (1 - k) * 2.4);
-    ex.shell.material.opacity = 0.7 * k;
+    const age = ex.T - ex.t;
+    const flashK = Math.max(0, 1 - age / 0.45);   // fireball: first 0.45 s
+    ex.light.intensity = 42 * flashK;
+    ex.shell.scale.setScalar(0.4 + (1 - flashK) * 3.0);
+    ex.shell.material.opacity = 0.9 * flashK;
+    ex.shell.visible = flashK > 0;
+    // Smoke rises and thins over the full lifetime.
+    ex.smoke.scale.setScalar(0.5 + age * 1.1);
+    ex.smoke.position.y += dt * 0.8;
+    ex.smoke.material.opacity = 0.55 * Math.max(0, ex.t / ex.T);
+    ex.scorch.material.opacity = 0.55 * Math.min(1, ex.t / 1.2);
     if (ex.t <= 0) {
-      scene.remove(ex.light, ex.shell);
-      ex.shell.geometry.dispose(); ex.shell.material.dispose();
+      scene.remove(ex.light, ex.shell, ex.smoke, ex.scorch);
+      for (const m of [ex.shell, ex.smoke, ex.scorch]) {
+        m.geometry.dispose(); m.material.dispose();
+      }
       explosions.splice(i, 1);
     }
   }
@@ -741,6 +849,7 @@ const viewmodel = new THREE.Group();
 viewmodel.position.set(0.28, -0.24, -0.5);
 camera.add(viewmodel);
 let viewmodelKick = 0;
+let viewmodelSwingT = 0;   // machete swing arc timer
 let lastActiveWeapon = null;
 let recoilRecover = 0;   // accumulated recoil that eases back down
 
@@ -758,20 +867,26 @@ function makeArsenal() {
     onHudChange: refreshWeaponHud,
     effects: {
       muzzle: (o, d, w) => {
-        flash.intensity = 10;
-        flash.position.copy(o).addScaledVector(d, 0.3);
+        flash.intensity = 11;
+        flash.position.copy(o).addScaledVector(d, 0.55);
         viewmodelKick = 0.06;
         audio.play(w || 'pistol');
+        spawnMuzzleSprite(o, d);
+        spawnTracer(o, d);
         // Recoil (flat modes): a per-weapon upward kick, most of which
-        // eases back down over the next frames (recovery).
+        // eases back down over the next frames (recovery). Auto weapons
+        // also wander sideways slightly under sustained fire.
         if (!(vrInput && vrInput.active)) {
-          const kick = { pistol: 0.012, akimbo: 0.010, shotgun: 0.034, smg: 0.006, ak: 0.013 }[w] || 0.012;
+          const kick = { pistol: 0.012, akimbo: 0.010, shotgun: 0.034, smg: 0.007, ak: 0.014 }[w] || 0.012;
           rig.pitch += kick;
           recoilRecover += kick * 0.7;
+          if (TUNING.weapons[w] && TUNING.weapons[w].auto) {
+            rig.yaw += (Math.random() - 0.5) * 0.006;
+          }
         }
         spawnCasing(o, d);
       },
-      swing: () => { viewmodelKick = 0.1; audio.play('machete'); },
+      swing: () => { viewmodelSwingT = 0.22; audio.play('machete'); },
       throw: () => audio.play('throw'),
       reload: () => audio.play('reload'),
       dry: () => audio.play('dryfire'),
@@ -899,6 +1014,68 @@ function toggleMap(force) {
     }
     mapCam.updateProjectionMatrix();
   }
+}
+
+// In-world tactical markers (visible only in map view): green player
+// cones, red zombie blips, orange entry arrows for horde approach lanes.
+const mapMarkers = new THREE.Group();
+mapMarkers.visible = false;
+scene.add(mapMarkers);
+const markerPlayerGeo = new THREE.ConeGeometry(0.6, 1.2, 4);
+const markerPlayerMat = new THREE.MeshBasicMaterial({ color: 0x7fb069 });
+const markerSelfMat = new THREE.MeshBasicMaterial({ color: 0xe0a33c });
+const zombieBlips = new THREE.InstancedMesh(
+  new THREE.CircleGeometry(0.42, 8).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xd83020 }), 40);
+zombieBlips.frustumCulled = false;
+mapMarkers.add(zombieBlips);
+const playerMarkerPool = [];
+for (let i = 0; i < 5; i++) {
+  const m = new THREE.Mesh(markerPlayerGeo, markerPlayerMat);
+  m.rotation.x = Math.PI;
+  m.visible = false;
+  mapMarkers.add(m);
+  playerMarkerPool.push(m);
+}
+const entryArrows = new THREE.Group();
+mapMarkers.add(entryArrows);
+function rebuildEntryArrows() {
+  entryArrows.clear();
+  const arrowGeo = new THREE.ConeGeometry(0.7, 1.8, 3).rotateX(Math.PI / 2);
+  for (const e of level.entries) {
+    const a = new THREE.Mesh(arrowGeo,
+      new THREE.MeshBasicMaterial({ color: 0xe0722c, transparent: true, opacity: 0.85 }));
+    a.position.set(e.x, 12, e.z);
+    a.lookAt(0, 12, 0);   // points toward the base centre
+    entryArrows.add(a);
+  }
+}
+rebuildEntryArrows();   // for the boot level; loadLevel refreshes later
+const markerM = new THREE.Matrix4();
+function updateMapMarkers() {
+  mapMarkers.visible = mapActive || PHOTOMODE === 4;
+  if (!mapMarkers.visible) return;
+  // Self + remote players
+  let pi = 0;
+  const put = (x, z, self) => {
+    if (pi >= playerMarkerPool.length) return;
+    const m = playerMarkerPool[pi++];
+    m.visible = true;
+    m.material = self ? markerSelfMat : markerPlayerMat;
+    m.position.set(x, 13, z);
+  };
+  put(rig.group.position.x, rig.group.position.z, true);
+  for (const a of avatars.values()) put(a.position.x, a.position.z, false);
+  for (; pi < playerMarkerPool.length; pi++) playerMarkerPool[pi].visible = false;
+  // Zombies
+  let zi = 0;
+  for (const v of zombieStates.values()) {
+    if (zi >= 40) break;
+    markerM.makeTranslation(v.x, 12, v.z);
+    zombieBlips.setMatrixAt(zi++, markerM);
+  }
+  zombieBlips.count = zi;
+  zombieBlips.instanceMatrix.needsUpdate = true;
 }
 
 const mapRaycaster = new THREE.Raycaster();
@@ -1072,7 +1249,11 @@ function onNetError(text, fatal) {
 
 function setDowned(down) {
   myDown = down;
+  // Solo runs have no teammates; never promise a revive that cannot come.
+  $('downed-note').textContent = role === 'solo'
+    ? 'DOWNED' : 'DOWNED - a teammate close to you revives you';
   $('downed-note').classList.toggle('hidden', !down);
+  updateLowHpVignette();
 }
 
 // ---- Events from the sim / snapshots ------------------------------------
@@ -1096,18 +1277,24 @@ function handleEvents(evs) {
         const v = zombieStates.get(ev.id);
         if (v) {
           zombieStates.delete(ev.id);
-          dyingStates.push({ ...v, t: 1.1 });
+          dyingStates.push({ ...v, t: 6.0 });
         }
         break;
       }
       case 'shot': {
-        // Other players' muzzle flashes (own shots flash locally already).
+        // Other players' muzzle flashes and tracers.
         const me = role === 'client' ? net?.myId : 'H';
         if (ev.id !== me && Array.isArray(ev.o)) {
           flash.intensity = Math.max(flash.intensity, 7);
           flash.position.fromArray(ev.o);
           audio.play(ev.w === 'machete' ? 'machete' : (ev.w || 'pistol'),
             { x: ev.o[0], y: ev.o[1], z: ev.o[2] });
+          if (Array.isArray(ev.d) && ev.w !== 'machete') {
+            const o = new THREE.Vector3().fromArray(ev.o);
+            const d = new THREE.Vector3().fromArray(ev.d);
+            spawnMuzzleSprite(o, d);
+            spawnTracer(o, d);
+          }
         }
         break;
       }
@@ -1145,8 +1332,15 @@ function handleEvents(evs) {
       }
       case 'phit': {
         const me = role === 'client' ? net?.myId : 'H';
-        if (ev.id === me) audio.play('hurt');
+        if (ev.id === me) {
+          audio.play('hurt');
+          // Pain reaches the whole screen, not just a HUD corner: red
+          // vignette pulse + a small shove (flat modes only).
+          pulseDamageVignette();
+          if (!(vrInput && vrInput.active)) addShake(0.018);
+        }
         if (role !== 'client' && ev.id === 'H') { myHp = ev.hp; hud.setHealth(myHp); }
+        updateLowHpVignette();
         break;
       }
       case 'down':
@@ -1221,6 +1415,18 @@ function handleEvents(evs) {
       case 'join': if (role === 'host') refreshHostPlayers(); break;
     }
   }
+}
+
+// Damage vignette: red edge pulse per hit; persistent heartbeat when low.
+let vignettePulseTimer = 0;
+function pulseDamageVignette() {
+  const el = $('dmg-vignette');
+  el.classList.add('pulse');
+  clearTimeout(vignettePulseTimer);
+  vignettePulseTimer = setTimeout(() => el.classList.remove('pulse'), 140);
+}
+function updateLowHpVignette() {
+  $('dmg-vignette').classList.toggle('lowhp', isPlaying() && !myDown && myHp > 0 && myHp <= 25);
 }
 
 // Hit marker: white ticks on a confirmed hit, red on a kill.
@@ -1349,6 +1555,7 @@ if (PHOTOMODE) {
 // playing). Idempotent, so a client joining mid-game lands correctly in
 // night lighting, an open shop, or the gameover screen.
 let presentedPhase = null;
+let gameoverTimer = 0;
 function presentPhase(ph) {
   presentedPhase = ph;
   switch (ph) {
@@ -1378,7 +1585,12 @@ function presentPhase(ph) {
     case 'gameover':
       toggleMap(false);
       closeShop();
-      $('panel-gameover').classList.remove('hidden');
+      // A dying beat before the modal: the camera sinks first, THEN the
+      // screen admits it (feel-critic: no hard cut from bite to menu).
+      clearTimeout(gameoverTimer);
+      gameoverTimer = setTimeout(() => {
+        if (presentedPhase === 'gameover') $('panel-gameover').classList.remove('hidden');
+      }, 1200);
       break;
     default:
       break;
@@ -1465,6 +1677,19 @@ renderer.setAnimationLoop(() => {
       viewmodelKick = Math.max(0, viewmodelKick - dt * 0.4);
     }
     viewmodel.position.z = -0.5 + viewmodelKick;
+    // Machete swing: a fast diagonal arc with follow-through.
+    if (viewmodelSwingT > 0) {
+      viewmodelSwingT = Math.max(0, viewmodelSwingT - dt);
+      const p = 1 - viewmodelSwingT / 0.22;         // 0 -> 1 over the swing
+      const arc = Math.sin(p * Math.PI);            // out and back
+      viewmodel.rotation.set(-0.9 * arc, 0.5 * arc, -1.1 * arc);
+      viewmodel.position.x = 0.28 - 0.22 * arc;
+      viewmodel.position.y = -0.24 + 0.08 * arc;
+    } else if (viewmodel.rotation.x !== 0) {
+      viewmodel.rotation.set(0, 0, 0);
+      viewmodel.position.x = 0.28;
+      viewmodel.position.y = -0.24;
+    }
 
     // Simulation / replication.
     if (sim) {
@@ -1604,7 +1829,9 @@ renderer.setAnimationLoop(() => {
   }
 
   // Flashlight follows its toggle.
-  flashlight.intensity += ((flashlightOn ? 9 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
+  flashlight.intensity += ((flashlightOn ? 15 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
+
+  updateMapMarkers();
 
   // Muzzle flash decay + explosion + ping VFX.
   if (flash.intensity > 0) flash.intensity = Math.max(0, flash.intensity - dt * 80);
@@ -1612,6 +1839,7 @@ renderer.setAnimationLoop(() => {
   updatePings(dt);
   updateEffectVisuals(dt);
   updateCasings(dt);
+  updateShotVfx(dt);
 
   renderer.render(scene, mapActive && !(vrInput && vrInput.active) ? mapCam : camera);
 });
@@ -1738,5 +1966,7 @@ else if (clipDef) {
   sim.wave.queue = ['walker'];
   sim.wave.spawnT = Infinity;
   sim.wave.night = 1;
+  centerT = 0;
+  $('countdown').classList.add('hidden');
 }
 window.__zhr.clipDone = () => clipDone;

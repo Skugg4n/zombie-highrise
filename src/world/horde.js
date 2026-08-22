@@ -96,7 +96,7 @@ export class HordeRenderer {
       this._part(P.legR, i, look,
         0.11 * look.sx, 0.75, 0, -s * 0.45, 0.16 * look.sx, 0.75, 0.16, 0, -0.375, 0);
       // Arms: pivot at shoulder, stretched forward with sway + stagger.
-      const armRx = -0.12 - look.lean * 0.6 + (z.stagger || 0) * 0.5;
+      const armRx = -0.52 - look.lean * 0.45 + (z.stagger || 0) * 0.5;
       this._part(P.armL, i, look,
         -0.28 * look.sx, 1.22, 0.05, armRx + s * 0.1, 0.11, 0.11, look.armLen, 0, 0, look.armLen / 2);
       this._part(P.armR, i, look,

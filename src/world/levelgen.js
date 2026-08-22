@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeRng } from '../util/rng.js';
-import { noiseTexture, plankTexture, metalTexture, sandbagTexture } from './textures.js';
+import { noiseTexture, plankTexture, metalTexture, sandbagTexture, facadeTexture } from './textures.js';
 import { mergeStaticMeshes } from './merge.js';
 
 export const PALETTE = {
@@ -54,7 +54,32 @@ const MATS = {
   get metalDoor() { return this._md || (this._md = matT(metalTexture('door', 0x42454b), 0.6, 0.4)); },
   get dirt() { return this._di || (this._di = matT(noiseTexture('dirt', 0x4e4436, [0x3e3628, 0x5e5244, 0x2f2a1f], { repeat: 4, density: 1800, alpha: 0.25 }), 1.0)); },
   get planksOld() { return this._po || (this._po = matT(plankTexture('oldplanks', 0x6e5a40, 0x463a26, { planks: 6, repeat: 2 }), 1.0)); },
+  get facade() { return this._fa || (this._fa = new THREE.MeshStandardMaterial({ map: facadeTexture('tower', 0x5c554c), roughness: 0.9, emissive: 0xffb050, emissiveIntensity: 0.06, emissiveMap: facadeTexture('tower', 0x5c554c) })); },
 };
+
+// The game's namesake: a tall high-rise silhouette with a lit window grid
+// and a broken roofline. The whole run happens inside this building; it
+// anchors every exterior shot.
+function buildHighRise(group, x, z, { w = 15, h = 48, d = 13 } = {}) {
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), MATS.facade);
+  // The facade texture tiles per ~4.8 m floor via UV scaling.
+  scaleBoxUVs(tower.geometry, w / 5, h / 24, d / 5);
+  tower.position.set(x, h / 2, z);
+  group.add(tower);
+  // Broken roofline: offset slabs + a water tank + antenna
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w * 0.5, 2.6, d * 0.7),
+    new THREE.MeshStandardMaterial({ color: 0x4c463e, roughness: 0.95 }));
+  slab.position.set(x - w * 0.18, h + 1.3, z);
+  group.add(slab);
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 3, 8),
+    new THREE.MeshStandardMaterial({ color: 0x6a5644, roughness: 0.8 }));
+  tank.position.set(x + w * 0.24, h + 1.5, z + d * 0.15);
+  group.add(tank);
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 7, 4),
+    new THREE.MeshStandardMaterial({ color: 0x333333 }));
+  antenna.position.set(x + w * 0.1, h + 3.5, z - d * 0.2);
+  group.add(antenna);
+}
 
 // Boxes scale their UVs by physical size so a tiling texture has ONE
 // world-space scale everywhere (mismatched tiling across differently
@@ -332,6 +357,10 @@ function buildGround(level, rng, quality) {
 
   buildWasteland(g, rng, {});
 
+  // THE high-rise looms right behind the elevator: the base is its ground
+  // floor, and the tower explains where the elevator goes.
+  buildHighRise(g, 0, -half - 10);
+
   // Elevator just beyond the north gap, doors facing into the base. The
   // BOARDING ZONE sits inside the footprint (roomscale players can only
   // physically reach the playable area): standing in front of the open
@@ -601,10 +630,27 @@ function buildUpper(level, rng, quality) {
   const street = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(PALETTE.road, 1.0));
   street.rotation.x = -Math.PI / 2; street.position.y = streetY;
   g.add(street);
+  // A guaranteed skyline framed by the windows: two facade towers dead
+  // ahead plus randomized filler blocks. Lamp posts line the street.
+  {
+    const t1 = new THREE.Mesh(new THREE.BoxGeometry(10, 22, 9), MATS.facade);
+    scaleBoxUVs(t1.geometry, 2, 11, 2);
+    t1.position.set(-6, streetY + 11, half + 24);
+    g.add(t1);
+    const t2 = new THREE.Mesh(new THREE.BoxGeometry(12, 30, 10), MATS.facade);
+    scaleBoxUVs(t2.geometry, 2.4, 15, 2);
+    t2.position.set(9, streetY + 15, half + 34);
+    g.add(t2);
+    for (const lx of [-8, 0, 8]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 5, 5), mat(0x3a3a3a));
+      pole.position.set(lx, streetY + 2.5, half + 8);
+      g.add(pole);
+    }
+  }
   const facadeMat = mat(0x8f8578);
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 4; i++) {
     const w = rng.range(8, 16), h = rng.range(6, STOREY + 6), d = rng.range(8, 14);
-    const x = rng.range(-60, 60);
+    const x = rng.pick([-1, 1]) * rng.range(20, 60);
     const z = half + rng.range(18, 60);
     box(g, w, h, d, facadeMat, x, streetY + h / 2, z, 0);
   }

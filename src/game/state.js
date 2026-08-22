@@ -266,7 +266,7 @@ export class HostSim {
     const a = p.inv.a[m.w];
     if (!a || a[0] <= 0) return;
     a[0]--;
-    this.events.push({ e: 'shot', id, w: m.w, o: m.o });
+    this.events.push({ e: 'shot', id, w: m.w, o: m.o, d: m.d });
     const dir = new THREE.Vector3().fromArray(m.d).normalize();
     const spread = THREE.MathUtils.degToRad(def.spreadDeg || 0);
     // Shotgun pellets shove their target (feel: weight and consequence).

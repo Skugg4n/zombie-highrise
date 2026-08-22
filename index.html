@@ -104,6 +104,7 @@
   #crosshair {
     position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: 14px; height: 14px; opacity: 0.9;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.9));
   }
   #crosshair::before, #crosshair::after {
     content: ""; position: absolute; background: #fff;
@@ -142,6 +143,21 @@
   #hud-room { left: max(14px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); font-size: 12px; opacity: 0.8; }
   #hud-scrap { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 18px); font-size: 12px; color: var(--accent); }
   #hud-nv { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 52px); font-size: 12px; }
+
+  /* Damage vignette: red pulse on hits, heartbeat throb when low */
+  #dmg-vignette {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 45%, rgba(180,20,10,0.55) 100%);
+    transition: opacity 0.35s ease-out;
+  }
+  #dmg-vignette.pulse { opacity: 1; transition: opacity 0.05s; }
+  #dmg-vignette.lowhp { animation: heartbeat 1.1s ease-in-out infinite; }
+  @keyframes heartbeat {
+    0%, 100% { opacity: 0.25; }
+    12% { opacity: 0.55; }
+    24% { opacity: 0.3; }
+    36% { opacity: 0.5; }
+  }
 
   /* Tactical map: grid + vignette overlay */
   #map-grid {
@@ -265,6 +281,7 @@
         <button id="btn-map-drone" class="small">DRONE - 40</button>
         <button id="btn-map-close" class="small">CLOSE MAP</button>
       </div>
+      <div id="dmg-vignette"></div>
       <div id="map-grid" class="hidden"></div>
       <div id="nv-overlay" class="hidden"></div>
       <div id="countdown" class="hidden"></div>

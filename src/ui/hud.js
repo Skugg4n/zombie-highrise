@@ -30,7 +30,7 @@ export class Hud {
       ammoEl.style.color = info.mag === 0 ? 'var(--danger)'
         : info.magMax && info.mag <= info.magMax * 0.25 ? 'var(--accent)' : '';
     }
-    $('hud-items').textContent = `${(info.throwSel || 'frag').toUpperCase()} x${info.throwCount ?? info.grenades}  P ${info.packs}  M ${info.mines || 0}`;
+    $('hud-items').textContent = `${(info.throwSel || 'frag').toUpperCase()} x${info.throwCount ?? info.grenades}  PACK ${info.packs}  MINE ${info.mines || 0}`;
   }
   setScrap(n) { $('hud-scrap').textContent = 'SCRAP ' + n; }
   // Night vision battery readout; hidden until the device is owned.
