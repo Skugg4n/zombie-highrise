@@ -1968,7 +1968,7 @@ function updateWaveHud(w) {
   if (!w) { hud.setWave('NIGHT 1'); return; }
   switch (w.ph) {
     case 'lobby': hud.setWave(role === 'client' ? 'WAITING FOR HOST' : 'NIGHT 1'); break;
-    case 'day': hud.setWave(`FLOOR ${w.lv} - DAY - night in ${w.t}s`); break;
+    case 'day': hud.setWave(`FLOOR ${w.lv} - DAY - lay traps - night in ${w.t}s`); break;
     case 'countdown':
       hud.setWave(`NIGHT ${w.n + 1}`);
       showCenterText(String(w.t), 0.5);

@@ -102,7 +102,7 @@ export const TUNING = {
       ammoRefillShotgun: 75,       // +25 shells (caps at reserveMax)
       ammoRefillSmg: 90,           // +120 rounds
       healthPack: 75,
-      mine: 50,                    // hand-placed during the day
+      mine: 18,                    // cheap on purpose: traps are a tactic, not a luxury
       grenadePack: 60,             // 2 frags
       // v2 gear: AK lands at elevator 3-4 for a solo buyer, akimbo is the
       // cheap slot-1 upgrade, utility throwables stay impulse-priced.
@@ -114,7 +114,7 @@ export const TUNING = {
       nightVision: 500,            // permanent device, battery per night
     },
     droneDeploy: 40,               // tactical map: scout drone, one flight
-    minePlacementFromMap: 65,      // remote placement pays a convenience premium
+    minePlacementFromMap: 26,      // remote placement pays a small premium
     mine: { triggerRadius: 0.6, blastRadius: 2.5, damage: 12 },
     // Explosive barrels: level furniture, free damage if you aim well and
     // a liability if the horde reaches you while standing next to one.
@@ -126,8 +126,20 @@ export const TUNING = {
   // create grenade/mine moments. Nights land at 45-90 s. Day 45 s,
   // skippable when everyone readies up.
   pacing: {
-    dayPhaseDuration: 45,
-    nightIntroCountdown: 5,
+    // PLAYTEST FIX (Ola): the day used to be 45 s of nothing before the
+    // game started. Now the day is a SHORT working phase with a daylight
+    // trickle of zombies, and the first one lands almost immediately.
+    dayPhaseDuration: 22,
+    firstDayDuration: 8,          // the run starts fighting within seconds
+    nightIntroCountdown: 3,
+    // Daylight raid: fewer, slower, steady. The art direction is "zombies
+    // in daylight"; the game must not be night-only.
+    dayRaid: {
+      budgetFrac: 0.30,           // of the coming night's threat budget
+      interval: 3.2,              // seconds between daylight arrivals
+      speedMult: 0.8,             // sun-drunk and slow
+      maxAlive: 6,
+    },
     spawnInterval: (night) => Math.max(0.9, 2.8 - 0.2 * night),
     burst: {
       startNight: 3,
@@ -136,6 +148,9 @@ export const TUNING = {
     },
     spawnDistanceFromPlayer: { min: 12, max: 22 },
     nightsPerLevel: 2,
+    // No dead air: if nothing is alive and nothing is scheduled for this
+    // long, the director pushes the next beat forward.
+    maxIdleSeconds: 6,
     finaleDuration: 14,   // roof extraction beat before the victory screen
   },
 

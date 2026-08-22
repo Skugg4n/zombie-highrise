@@ -93,7 +93,7 @@ export class HostSim {
         w: ['pistol', 'machete'], active: 'pistol',
         a: { pistol: [TUNING.weapons.pistol.magazine, -1] },   // -1 = infinite reserve
         g: 1, gs: 0, gm: 0,      // throwables: frags, smokes, molotovs
-        k: 0, m: 0, nv: false,   // packs, mines, night vision device
+        k: 0, m: 2, nv: false,   // packs, mines (start with 2: traps are core), night vision
         s: TUNING.economy.startingScrap + bonus,
       },
     });
@@ -395,13 +395,29 @@ export class HostSim {
 
   _enterDay(spawnLoot = true) {
     this.wave.phase = 'day';
+    // PLAYTEST FIX: the day is no longer dead time. A daylight trickle
+    // arrives while you prep, and the very first day is short so the run
+    // starts fighting within seconds.
+    const D = TUNING.pacing.dayRaid;
+    const comingNight = this.wave.night + 1;
+    const dayBudget = TUNING.waves.budgetPoints(comingNight) * D.budgetFrac
+      * TUNING.coopScaling.budgetMultiplier(Math.max(1, this.players.size));
+    this.wave.dayQueue = [];
+    const dayCount = Math.max(2, Math.round(dayBudget));
+    for (let i = 0; i < dayCount; i++) {
+      this.wave.dayQueue.push(comingNight > 5 && i % 4 === 3 ? 'runner' : 'walker');
+    }
+    this.wave.daySpawnT = 1.2;   // the first one is already on its way
     this.dayBonus = this.postSurge;
     this.postSurge = false;
     // On the wagon the prep is short: you are already rolling. When called
     // from _arrive the local level object is still the OLD floor, so the
     // incoming floor's type comes from the level index instead.
     const type = spawnLoot ? this.level.type : levelTypeFor(this.wave.level);
-    this.wave.t = (type === 'wagon' ? 10 : TUNING.pacing.dayPhaseDuration) + (this.dayBonus ? 15 : 0);
+    const firstEver = this.wave.night === 0;
+    const base = firstEver ? TUNING.pacing.firstDayDuration
+      : type === 'wagon' ? 10 : TUNING.pacing.dayPhaseDuration;
+    this.wave.t = base + (this.dayBonus ? 10 : 0);
     this.events.push({ e: 'day', n: this.wave.night + 1 });
     // On floor arrival the loot must spawn AFTER setLevel wipes the item
     // list (setLevel spawns it via pendingDayLoot), never before.
@@ -612,7 +628,7 @@ export class HostSim {
   }
 
   // ---- Combat ----------------------------------------------------------
-  spawnZombie(type) {
+  spawnZombie(type, opts = {}) {
     const spawns = this.level.zombieSpawns.length ? this.level.zombieSpawns : this.level.entries;
     if (!spawns.length) return;
     const s = spawns[Math.floor(Math.random() * spawns.length)];
@@ -627,6 +643,7 @@ export class HostSim {
       pos: s.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.8)),
       hp: Math.max(1, Math.round(stats.hp * hpMult)), alive: true,
       biteT: 0, targetId: null, retargetT: 0, stuckT: 0,
+      daylight: !!opts.daylight,
     });
     this.events.push({ e: 'zspawn', id });
   }
@@ -795,14 +812,26 @@ export class HostSim {
   step(dt) {
     const wave = this.wave;
     switch (wave.phase) {
-      case 'day':
+      case 'day': {
         wave.t -= dt;
+        // Daylight raid: a slow steady trickle through the same visible
+        // entrances the night horde uses.
+        const D = TUNING.pacing.dayRaid;
+        if (wave.dayQueue && wave.dayQueue.length && this.zombies.size < D.maxAlive) {
+          wave.daySpawnT -= dt;
+          if (wave.daySpawnT <= 0) {
+            wave.daySpawnT = D.interval;
+            this.spawnZombie(wave.dayQueue.pop(), { daylight: true });
+          }
+        }
         if (wave.t <= 0) this._enterCountdown();
         break;
+      }
       case 'countdown':
         wave.t -= dt;
         if (wave.t <= 0) this._enterNight();
         break;
+
       case 'night': {
         const P = TUNING.pacing;
         const players = Math.max(1, this.players.size);
@@ -873,7 +902,23 @@ export class HostSim {
       }
     }
 
-    wave.left = wave.queue.length + this.zombies.size;
+    // NO DEAD AIR (playtest): if the player has nothing to fight and
+    // nothing scheduled, bring the next beat forward.
+    const nothingHappening = this.zombies.size === 0
+      && !(wave.dayQueue && wave.dayQueue.length)
+      && !wave.queue.length;
+    if (wave.phase === 'day' && nothingHappening) {
+      this.idleT = (this.idleT || 0) + dt;
+      if (this.idleT > TUNING.pacing.maxIdleSeconds && wave.t > 2.5) {
+        wave.t = 2.5;                     // skip straight to the countdown
+        this.events.push({ e: 'earlynight' });
+      }
+    } else {
+      this.idleT = 0;
+    }
+
+    wave.left = wave.queue.length + this.zombies.size
+      + ((wave.dayQueue && wave.dayQueue.length) || 0);
   }
 
   _stepZombies(dt) {
@@ -921,6 +966,7 @@ export class HostSim {
       const dist = z.pos.distanceTo(target.pos);
       // Crawlers lunge when close: a burst of speed under the sightlines.
       let speedMult = this._cloudSlowAt(z.pos);
+      if (z.daylight) speedMult *= TUNING.pacing.dayRaid.speedMult;
       if (z.type === 'crawler' && dist < stats.lungeRange) {
         speedMult *= stats.lungeSpeed / stats.speed;
       }
