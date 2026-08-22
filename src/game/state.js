@@ -11,6 +11,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
+import { levelTypeFor } from '../world/levelgen.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute'];
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
@@ -355,7 +356,15 @@ export class HostSim {
   restartLevel() {
     this.zombies.clear();
     this.grenades.clear();
-    this.wave.night -= this.wave.nightInLevel;
+    this.clouds.length = 0;
+    this.fires.length = 0;
+    this.drones.clear();
+    this.kills = 0;   // per-attempt stats; meta counts each attempt once
+    // Roll the night counter back to this level's first night. A death
+    // MID-night already incremented wave.night without nightInLevel, so
+    // count the in-progress night too (off-by-one found in review).
+    this.wave.night -= this.wave.nightInLevel + (this.wave.nightStarted ? 1 : 0);
+    this.wave.nightStarted = false;
     this.wave.nightInLevel = 0;
     let i = 0;
     for (const p of this.players.values()) {
@@ -368,8 +377,11 @@ export class HostSim {
 
   _enterDay(spawnLoot = true) {
     this.wave.phase = 'day';
-    // On the wagon the prep is short: you are already rolling.
-    this.wave.t = this.level.type === 'wagon' ? 10 : TUNING.pacing.dayPhaseDuration;
+    // On the wagon the prep is short: you are already rolling. When called
+    // from _arrive the local level object is still the OLD floor, so the
+    // incoming floor's type comes from the level index instead.
+    const type = spawnLoot ? this.level.type : levelTypeFor(this.wave.level);
+    this.wave.t = type === 'wagon' ? 10 : TUNING.pacing.dayPhaseDuration;
     this.events.push({ e: 'day', n: this.wave.night + 1 });
     // On floor arrival the loot must spawn AFTER setLevel wipes the item
     // list (setLevel spawns it via pendingDayLoot), never before.
@@ -383,12 +395,16 @@ export class HostSim {
     const pool = ['pack', 'grenade'];
     if (owned.has('shotgun')) pool.push('ammo_shotgun', 'ammo_shotgun');
     if (owned.has('smg')) pool.push('ammo_smg', 'ammo_smg');
+    // Drop loot near player spawn points: they are guaranteed walkable on
+    // every level type (the old footprint-square sampling put wagon loot
+    // on the ground beside the bed and trench loot inside dirt).
     const count = 2;
-    const half = CONFIG.PLAY_AREA / 2 - 2;
+    const spawns = this.level.playerSpawns;
     for (let i = 0; i < count; i++) {
       const kind = pool[Math.floor(Math.random() * pool.length)];
-      const pos = new THREE.Vector3(
-        (Math.random() * 2 - 1) * half, 0, (Math.random() * 2 - 1) * half);
+      const base = spawns[Math.floor(Math.random() * spawns.length)];
+      const pos = base.clone().add(new THREE.Vector3(
+        (Math.random() * 2 - 1) * 1.6, 0, (Math.random() * 2 - 1) * 1.6));
       resolveCircle(pos, 0.5, this.level.colliders);
       pos.y = this.level.heightAt(pos.x, pos.z);
       this.spawnItem(kind, pos);
@@ -409,6 +425,7 @@ export class HostSim {
   _enterNight() {
     const W = TUNING.waves;
     this.wave.night++;
+    this.wave.nightStarted = true;
     const night = this.wave.night;
     const players = Math.max(1, this.players.size);
     const budget = W.budgetPoints(night)
@@ -434,6 +451,7 @@ export class HostSim {
 
   _nightCleared() {
     this.wave.nightInLevel++;
+    this.wave.nightStarted = false;
     // The wagon is a single-night set piece and has no elevator: once the
     // night is beaten, the ride simply arrives.
     const npl = this.level.type === 'wagon' ? 1 : TUNING.pacing.nightsPerLevel;
@@ -731,8 +749,22 @@ export class HostSim {
 
   _stepGrenades(dt) {
     for (const g of [...this.grenades.values()]) {
+      const prevX = g.pos.x, prevZ = g.pos.z;
       g.vel.y -= 9.8 * dt;
       g.pos.addScaledVector(g.vel, dt);
+      // Walls stop grenades: bounce off tall colliders below their top
+      // (2.4 m) instead of tunneling through (review find).
+      let hitWall = false;
+      if (g.pos.y < 2.4) {
+        for (const c of this._tall()) {
+          if (Math.abs(g.pos.x - c.x) < c.hx + 0.1 && Math.abs(g.pos.z - c.z) < c.hz + 0.1) {
+            g.pos.x = prevX; g.pos.z = prevZ;
+            g.vel.x *= -0.3; g.vel.z *= -0.3;
+            hitWall = true;
+            break;
+          }
+        }
+      }
       const floor = this.level.heightAt(g.pos.x, g.pos.z) + 0.12;
       let hitGround = false;
       if (g.pos.y < floor) {
@@ -742,8 +774,8 @@ export class HostSim {
         hitGround = true;
       }
       g.fuse -= dt;
-      // Molotovs shatter on first ground contact; frags and smokes cook.
-      if ((g.kind === 'molotov' && hitGround) || g.fuse <= 0) {
+      // Molotovs shatter on first impact; frags and smokes cook off.
+      if ((g.kind === 'molotov' && (hitGround || hitWall)) || g.fuse <= 0) {
         this.grenades.delete(g.id);
         this._detonate(g);
       }
@@ -759,7 +791,7 @@ export class HostSim {
     }
     if (g.kind === 'molotov') {
       const M = TUNING.weapons.molotov;
-      this.fires.push({ pos: g.pos.clone(), t: M.burnDuration, tickT: 0 });
+      this.fires.push({ pos: g.pos.clone(), t: M.burnDuration, tickT: 0, owner: g.owner });
       this.events.push({ e: 'fire', p: g.pos.toArray(), d: M.burnDuration });
       return;
     }
@@ -795,7 +827,7 @@ export class HostSim {
       if (f.tickT >= 1) {
         f.tickT -= 1;
         for (const z of [...this.zombies.values()]) {
-          if (z.pos.distanceTo(f.pos) <= M.burnRadius) this.damageZombie(z, M.dps, false, null);
+          if (z.pos.distanceTo(f.pos) <= M.burnRadius) this.damageZombie(z, M.dps, false, f.owner || null);
         }
       }
       if (f.t <= 0) this.fires.splice(i, 1);

@@ -30,6 +30,7 @@ export class Arsenal {
     this.cooldown = 0;
     this.reloading = false;
     this.reloadT = 0;
+    this.reloadGraceT = 0;   // post-reload window before host mag sync resumes
   }
 
   def(w = this.active) { return TUNING.weapons[w]; }
@@ -51,7 +52,11 @@ export class Arsenal {
       // the host; otherwise take min(local, host) for the magazine: local
       // shots the host has not processed yet must not bounce the counter
       // back up, while host corrections still land.
-      if (!this.reloading || w !== this.active) {
+      // Skip the clamp during a reload AND for a short grace after it:
+      // in-flight snapshots carrying the host's pre-reload magazine must
+      // not zero a freshly reloaded weapon (review find).
+      const protectedNow = (this.reloading || this.reloadGraceT > 0) && w === this.active;
+      if (!protectedNow) {
         mine.mag = w === this.active ? Math.min(mine.mag, pair[0]) : pair[0];
         mine.reserve = pair[1] < 0 ? Infinity : pair[1];
       }
@@ -167,10 +172,12 @@ export class Arsenal {
   // fireHeld: auto weapons keep firing while the trigger/button is held.
   update(dt, fireHeld, getAimRay) {
     if (this.cooldown > 0) this.cooldown -= dt;
+    if (this.reloadGraceT > 0) this.reloadGraceT -= dt;
     if (this.reloading) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) {
         this.reloading = false;
+        this.reloadGraceT = 0.6;
         const def = this.def();
         const a = this.ammo[this.active];
         if (a) {

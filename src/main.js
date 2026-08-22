@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { CONFIG, VERSION, PARAMS, PHOTOMODE, UISTATE, FORCE_QUALITY, PLAY_SIZES, setPlayArea } from './config.js';
 import { buildLevel, disposeLevel } from './world/levelgen.js';
 import { resolveCircle } from './game/collision.js';
-import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS } from './world/actors.js';
+import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
@@ -46,6 +46,20 @@ document.getElementById('gl-root').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.05, 400);
+
+// Remove an object from the scene AND free its per-instance GPU buffers.
+// Shared materials (zombie skin/pants, pooled casings) are skipped.
+function removeAndDispose(obj) {
+  scene.remove(obj);
+  obj.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.geometry !== casingGeo) o.geometry.dispose();
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!SHARED_MATERIALS.has(m) && m !== casingMat) m.dispose();
+    }
+  });
+}
 
 // ---- Lighting rig (persistent; per-level parameters + day/night) --------
 const hemi = new THREE.HemisphereLight(0xcfe5ff, 0x8a7a5a, 0.9);
@@ -190,9 +204,9 @@ function ensureZombieVisual(id, type) {
 }
 
 function clearZombieVisuals() {
-  for (const v of zombieVisuals.values()) scene.remove(v.group);
+  for (const v of zombieVisuals.values()) removeAndDispose(v.group);
   zombieVisuals.clear();
-  for (const d of dyingZombies) scene.remove(d.group);
+  for (const d of dyingZombies) removeAndDispose(d.group);
   dyingZombies.length = 0;
   recentlyDeadZ.clear();
 }
@@ -228,7 +242,7 @@ function updateZombieVisuals(rows, dt) {
     }
   }
   for (const [id, v] of zombieVisuals) {
-    if (!keep.has(id)) { scene.remove(v.group); zombieVisuals.delete(id); }
+    if (!keep.has(id)) { removeAndDispose(v.group); zombieVisuals.delete(id); }
   }
   // Ragdoll-light death: the corpse topples backward, rests briefly, then
   // sinks into the ground.
@@ -240,7 +254,7 @@ function updateZombieVisuals(rows, dt) {
     const fall = Math.min(1, elapsed / 0.35);
     d.group.rotation.x = -Math.PI / 2 * (fall * fall);
     if (elapsed > 0.7) d.group.position.y -= dt * 0.9;   // sink away
-    if (d.t <= 0) { scene.remove(d.group); dyingZombies.splice(i, 1); }
+    if (d.t <= 0) { removeAndDispose(d.group); dyingZombies.splice(i, 1); }
   }
 }
 
@@ -268,7 +282,7 @@ function ensureAvatar(id) {
 }
 function pruneAvatars(keepIds) {
   for (const [id, a] of avatars) {
-    if (!keepIds.has(id)) { scene.remove(a); avatars.delete(id); }
+    if (!keepIds.has(id)) { removeAndDispose(a); avatars.delete(id); }
   }
 }
 function updateAvatar(id, p) {
@@ -352,7 +366,7 @@ function updateItemVisuals(rows, dt) {
     v.group.rotation.y += dt * 1.2;
   }
   for (const [id, v] of itemVisuals) {
-    if (!keep.has(id)) { scene.remove(v.group); itemVisuals.delete(id); }
+    if (!keep.has(id)) { removeAndDispose(v.group); itemVisuals.delete(id); }
   }
 }
 
@@ -374,7 +388,7 @@ function updateGrenadeVisuals(rows) {
     m.position.set(x, y, z);
   }
   for (const [id, m] of grenadeVisuals) {
-    if (!keep.has(id)) { scene.remove(m); grenadeVisuals.delete(id); }
+    if (!keep.has(id)) { removeAndDispose(m); grenadeVisuals.delete(id); }
   }
 }
 
@@ -441,7 +455,7 @@ function updateDroneVisuals(rows, dt) {
     g.userData.rotors.rotation.y += dt * 30;
   }
   for (const [id, g] of droneVisuals) {
-    if (!keep.has(id)) { scene.remove(g); droneVisuals.delete(id); }
+    if (!keep.has(id)) { removeAndDispose(g); droneVisuals.delete(id); }
   }
 }
 
@@ -465,7 +479,7 @@ function updateEffectVisuals(dt) {
       if (child.isMesh) child.scale.y = 0.8 + Math.sin(performance.now() / 90 + child.position.x * 7) * 0.3;
     }
     if (f.t <= 0) {
-      scene.remove(f.group);
+      removeAndDispose(f.group);
       fireVisuals.splice(i, 1);
     }
   }
@@ -497,7 +511,7 @@ function updateMineVisuals(rows) {
     g.userData.dot.material.emissiveIntensity = 0.3 + blink * 1.2;
   }
   for (const [id, g] of mineVisuals) {
-    if (!keep.has(id)) { scene.remove(g); mineVisuals.delete(id); }
+    if (!keep.has(id)) { removeAndDispose(g); mineVisuals.delete(id); }
   }
 }
 
@@ -526,7 +540,7 @@ function updatePings(dt) {
     ping.group.children[0].position.y = 1.6 + Math.sin(performance.now() / 250) * 0.15;
     ping.group.children[0].rotation.y += dt * 2;
     if (ping.t <= 0) {
-      scene.remove(ping.group);
+      removeAndDispose(ping.group);
       pings.splice(i, 1);
     }
   }
@@ -561,19 +575,19 @@ function updateExplosions(dt) {
 }
 
 function clearTransientVisuals() {
-  for (const v of itemVisuals.values()) scene.remove(v.group);
+  for (const v of itemVisuals.values()) removeAndDispose(v.group);
   itemVisuals.clear();
-  for (const m of grenadeVisuals.values()) scene.remove(m);
+  for (const m of grenadeVisuals.values()) removeAndDispose(m);
   grenadeVisuals.clear();
-  for (const g of mineVisuals.values()) scene.remove(g);
+  for (const g of mineVisuals.values()) removeAndDispose(g);
   mineVisuals.clear();
-  for (const ping of pings) scene.remove(ping.group);
+  for (const ping of pings) removeAndDispose(ping.group);
   pings.length = 0;
-  for (const s of smokeVisuals) scene.remove(s.mesh);
+  for (const s of smokeVisuals) removeAndDispose(s.mesh);
   smokeVisuals.length = 0;
-  for (const f of fireVisuals) scene.remove(f.group);
+  for (const f of fireVisuals) removeAndDispose(f.group);
   fireVisuals.length = 0;
-  for (const g of droneVisuals.values()) scene.remove(g);
+  for (const g of droneVisuals.values()) removeAndDispose(g);
   droneVisuals.clear();
 }
 
@@ -1416,8 +1430,9 @@ renderer.setAnimationLoop(() => {
       }
       updateItemVisuals(irows, dt);
       const grows = [];
+      const GK = ['frag', 'smoke', 'molotov'];
       for (const g of sim.grenades.values()) {
-        grows.push([g.id, g.pos.x, g.pos.y, g.pos.z]);
+        grows.push([g.id, g.pos.x, g.pos.y, g.pos.z, GK.indexOf(g.kind || 'frag')]);
       }
       updateGrenadeVisuals(grows);
       const mrows = [];

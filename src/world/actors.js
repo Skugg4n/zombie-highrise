@@ -47,6 +47,8 @@ const ZOMBIE_LOOKS = {
 // so the hit flash can pulse one zombie without lighting up the horde.
 const sharedSkin = new THREE.MeshStandardMaterial({ color: 0xb8bdb4, roughness: 0.95 });
 const sharedPants = new THREE.MeshStandardMaterial({ color: 0x4a4640, roughness: 0.95 });
+// Materials that must NEVER be disposed when a single actor is removed.
+export const SHARED_MATERIALS = new Set([sharedSkin, sharedPants]);
 
 export function makeZombieMesh(type = 'walker') {
   const look = ZOMBIE_LOOKS[type] || ZOMBIE_LOOKS.walker;

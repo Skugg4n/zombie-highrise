@@ -338,7 +338,15 @@ function buildUpper(level, rng, quality) {
   const half = A / 2;
   const STOREY = 12;                 // how high up we are
   level.floorY = 0;
-  level.heightAt = () => 0;
+  // Room and balcony are at 0; everything beyond the walls drops to the
+  // street (so grenades over the balcony fall and burn down there, and
+  // nothing floats at window height).
+  const inHalf = A / 2 + 0.6;
+  level.heightAt = (x, z) => {
+    if (Math.abs(x) <= inHalf && Math.abs(z) <= inHalf) return 0;
+    if (Math.abs(x) <= A * 0.3 && z > A / 2 && z < A / 2 + 2.5) return 0;   // balcony
+    return -STOREY;
+  };
   level.lighting = {
     daySky: PALETTE.daySky, dayHaze: PALETTE.dayHaze,
     fogNear: 70, fogFar: 300, sunDay: 2.0, hemiDay: 0.8, dark: false,
@@ -464,9 +472,58 @@ function buildUpper(level, rng, quality) {
 // ---- Trench (tight, night, flashlight) ----------------------------------
 // A serpentine dirt trench carved through a raised night field. Corridors
 // are the walkable cells; everything else is dirt wall (tall colliders).
-function buildTrench(level, rng) {
+// Compact variant for SMALL/MEDIUM play areas: one straight trench lane
+// that fits the physical footprint (the serpentine needs 8 m+).
+function buildTrenchSmall(level, rng) {
   const g = level.group;
-  const A = Math.max(CONFIG.PLAY_AREA, 8);   // a trench needs room to zigzag
+  const play = CONFIG.PLAY_AREA;
+  const half = play / 2 + 1;                 // walls just outside the footprint
+  level.floorY = 0;
+  level.heightAt = () => 0;
+  level.lighting = {
+    daySky: 0x141d30, dayHaze: 0x18223a,
+    fogNear: 6, fogFar: 55, sunDay: 0.0, hemiDay: 0.32, dark: true,
+  };
+  const dirtMat = mat(0x4e4436, 1.0);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + 2, half * 2 + 2), mat(0x3c352b, 1.0));
+  floor.rotation.x = -Math.PI / 2;
+  g.add(floor);
+  const field = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), mat(0x2c3226, 1.0));
+  field.rotation.x = -Math.PI / 2;
+  field.position.y = 2.3;
+  g.add(field);
+  // North and south dirt walls form the lane; east end open (entry),
+  // west end holds the elevator.
+  for (const z of [-half, half]) {
+    box(g, half * 2 + 2, 2.4, 1.6, dirtMat, 0, 1.2, z);
+    level.colliders.push({ x: 0, z, hx: half + 1, hz: 0.8, tall: true });
+  }
+  const flare = new THREE.PointLight(0xff7030, 1.6, 8);
+  flare.position.set(0, 0.3, 0);
+  g.add(flare);
+  box(g, 0.05, 0.25, 0.05, mat(0xff5020, 0.5), 0, 0.12, 0);
+
+  level.elevator = makeElevator();
+  level.elevator.group.position.set(-half - 1.2, 0, 0);
+  level.elevator.group.rotation.y = Math.PI / 2;   // doors face +X down the lane
+  g.add(level.elevator.group);
+  addElevatorColliders(level, -half - 1.2, 0);
+  level.elevatorZone = { x: -play / 2 + 0.9, z: 0, hx: 1.2, hz: 1.0 };
+
+  const entry = new THREE.Vector3(half + 0.5, 0, 0);
+  level.entries.push(entry);
+  level.zombieSpawns.push(entry.clone());
+  level.playerSpawns = [
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.8, 0, 0.5),
+    new THREE.Vector3(-0.8, 0, -0.5), new THREE.Vector3(0.5, 0, -0.5),
+    new THREE.Vector3(-0.5, 0, 0.5),
+  ];
+}
+
+function buildTrench(level, rng) {
+  if (CONFIG.PLAY_AREA < 8) { buildTrenchSmall(level, rng); return; }
+  const g = level.group;
+  const A = CONFIG.PLAY_AREA;                // serpentine fits the footprint
   const half = A / 2;
   level.floorY = 0;
   level.heightAt = () => 0;
@@ -499,12 +556,17 @@ function buildTrench(level, rng) {
   // alternating ends. Dirt blocks fill the gaps between lanes.
   const laneZ = [-A / 3, 0, A / 3];
   const laneHalfW = 1.15;
-  const conn = rng.chance(0.5) ? [1, -1] : [-1, 1];   // connector x-sides
+  // Lane0<->lane1 connector is ALWAYS on the east side: the elevator sits
+  // at lane 0's west end and its collider would seal a west connector
+  // (softlock found in review). Only the second connector varies.
+  const conn = [1, rng.chance(0.5) ? -1 : 1];
   // Between lane 0-1 and 1-2, place a dirt block covering everything
   // except the connector opening.
+  const connectorPoints = [];
   for (let i = 0; i < 2; i++) {
     const zMid = (laneZ[i] + laneZ[i + 1]) / 2;
     const gapX = conn[i] * (half - 1.6);
+    connectorPoints.push(new THREE.Vector3(gapX, 0, zMid));
     const blockD = (laneZ[i + 1] - laneZ[i]) - laneHalfW * 2;
     // Two blocks: from -half to gap-1.4, and gap+1.4 to half
     const leftW = (gapX - 1.4) - (-half);
@@ -550,6 +612,10 @@ function buildTrench(level, rng) {
     level.entries.push(entry);
     level.zombieSpawns.push(entry.clone());
   }
+  // Connector openings double as routing waypoints so zombies can walk
+  // the serpentine hop by hop (entries are used as goals when line of
+  // sight is blocked); they are NOT spawn points.
+  for (const c of connectorPoints) level.entries.push(c);
 
   const qt = half * 0.25;
   level.playerSpawns = [

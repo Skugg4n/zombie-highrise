@@ -1,5 +1,33 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.6.2 - 2026-08-22 21:15
+
+Fixes from the 26-agent adversarial review of Phase 2 (21 confirmed
+findings; scoreboard in QUALITY.md). Why: harden before the visual pass.
+
+- CRITICAL: in half of all trench seeds the elevator's collider sealed the
+  only lane connector, cutting the level in two; the first connector is
+  now always on the east side, away from the elevator.
+- Trench: connector openings now double as zombie routing waypoints (the
+  horde can walk the serpentine hop by hop); SMALL/MEDIUM play areas get a
+  compact straight-lane trench that actually fits the physical footprint.
+- Grenades now bounce off walls instead of tunneling through them, and a
+  molotov shatters on wall impact; molotov fire finally credits its
+  thrower with scrap (it was the only weapon that paid nobody).
+- Upper floor: everything beyond the walls now drops to street height, so
+  grenades over the balcony burn down on the street instead of mid-air.
+- Arrival day length is chosen from the INCOMING floor's type (the wagon
+  got a 45 s day and the floor after it 10 s, reversed).
+- Retry after a mid-night death no longer replays the level one night
+  harder (off-by-one in the night rollback); per-attempt kill stats stop
+  double-counting into the meta totals.
+- Day loot now drops near player spawns on every level type (it landed
+  beside the wagon and inside trench dirt).
+- Client reload desync fixed (a stale snapshot could zero a freshly
+  reloaded magazine and force a second reload); host now sees correct
+  smoke/molotov tints in flight; fire/ping/drone/zombie visuals free
+  their GPU buffers on removal (leak found in review).
+
 ## v0.6.1 - 2026-08-22 20:25
 
 Phase 3 pass 1: soundscape + combat feel. Why: projectplan Phase 3 items
