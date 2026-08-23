@@ -1,5 +1,52 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.12.0 - 2026-08-23 - VR hands, the lift plate, daylight waves
+
+**VR: three weapons for two hands.** Every controller grip got a full copy
+of the active weapon, and the flat-mode camera viewmodel stayed on inside
+the headset. So a player with dual pistols saw one in each hand plus a
+third hanging off the camera. Only akimbo arms both hands now; anything
+else is the dominant hand, the free hand gets a glove so it is still
+visibly a hand, and the camera viewmodel is hidden in VR.
+
+**VR: reload by pointing the gun at the floor.** The flat-mode reload
+animation is invisible in VR, so reloading had no readable trigger and no
+feedback. Point the barrel straight down and hold ~0.35 s. A charge light
+on the weapon fills while you hold, the gun cants over while the magazine
+is worked, and it goes green when the fresh mag is in. The right grip
+still reloads for anyone who prefers a button.
+
+**Zombies no longer stand inside each other.** Separation was steering
+only: a suggestion about where to walk, which loses to the pull toward
+the player under crowd pressure, so bodies interpenetrated. There is now
+a hard positional pass after movement that pushes overlapping pairs
+apart, weighted by mass, so a brute wades through walkers instead of
+being jostled by them. Worst overlap in a 20-body crowd funnelling into a
+breach: 14% of contact distance, which is shoulders pressing rather than
+bodies merging.
+
+**The elevator is a plate, not a cab.** Four walls, a ceiling and sliding
+doors that shut in your face, clipped through level geometry and boxed
+you in inside VR. It is now what the level design actually asks for: a
+metal plate you stand on with a control panel on a post beside it, open
+on every side. Boarding is standing on the plate, so you keep shooting
+while you board. Nothing to be shut out of and nothing to get stuck in.
+
+**The base wall is low enough to shoot over from the ground.** Wall
+1.15 -> 0.95 m, sandbags 0.95 -> 0.8 m. The snipe platform is now a
+choice about sightlines, not the only place you can fight from.
+
+**Waves happen in DAYLIGHT on the surface.** The whole art direction is
+zombies in daylight, and a holdout's tension is watching them cross 40 m
+of open ground. Surface levels no longer go dark for a wave; the sun just
+drops lower and warmer as waves climb, capped at late afternoon. Darkness
+is reserved for the underground traverse levels, which is the contrast
+the campaign rhythm is built on. The HUD says WAVE, not NIGHT, on levels
+that never get dark.
+
+**New check:** `debugCrowding()` reports the worst body overlap in the
+horde, wired into the holdout probe.
+
 ## v0.11.1 - 2026-08-23 - the two blockers from Ola's L1 playtest
 
 **"Level 1 is unbeatable, a zombie spawns and cannot make it to the base."**

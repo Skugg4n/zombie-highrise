@@ -1279,6 +1279,63 @@ export class HostSim {
         z.stuckT = 0;
       }
     }
+    this._separateBodies();
+  }
+
+  // Steering separation is a suggestion: it biases where an agent WANTS
+  // to go, and under crowd pressure it loses to the pull toward the
+  // player, so bodies end up standing inside each other. This is the
+  // hard pass that runs after everyone has moved and physically pushes
+  // overlapping pairs apart, the way solid bodies actually behave.
+  //
+  // Three relaxation iterations is enough for a crowd of this size, and
+  // it stays cheap: with maxAlive 24 that is about 830 pair tests a frame.
+  _separateBodies() {
+    const list = [];
+    for (const z of this.zombies.values()) {
+      if (z.alive && !(z.type === 'spitter' && z.spitT > 0)) list.push(z);
+    }
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        const ra = TUNING.enemies[a.type].radius;
+        for (let j = i + 1; j < list.length; j++) {
+          const b = list[j];
+          const rb = TUNING.enemies[b.type].radius;
+          // Bodies touch shoulder to shoulder rather than at their full
+          // steering radius, so a horde can still crowd a breach.
+          const min = (ra + rb) * 0.82;
+          let dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+          let d2 = dx * dx + dz * dz;
+          if (d2 >= min * min) continue;
+          if (d2 < 1e-8) {
+            // Exactly co-located (two spawns on the same point): nudge
+            // them apart deterministically by id so the host and every
+            // client resolve it the same way.
+            dx = ((a.id + b.id) % 2) ? 1 : 0;
+            dz = dx ? 0 : 1;
+            d2 = 1;
+          }
+          const d = Math.sqrt(d2);
+          // A heavier body gives less ground: a brute wading through
+          // walkers should push them aside, not be shoved by them.
+          const ma = TUNING.enemies[a.type].mass || 1;
+          const mb = TUNING.enemies[b.type].mass || 1;
+          const total = ma + mb;
+          const push = (min - d) / d;
+          const sa = (mb / total) * push, sb = (ma / total) * push;
+          a.pos.x -= dx * sa; a.pos.z -= dz * sa;
+          b.pos.x += dx * sb; b.pos.z += dz * sb;
+        }
+      }
+    }
+    // Being pushed must never shove anyone into geometry or off a ledge.
+    for (const z of list) {
+      const stats = TUNING.enemies[z.type];
+      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
+      const gy = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
+      z.pos.y = Number.isFinite(gy) ? gy : (this.level.baseY || 0);
+    }
   }
 
   // The level's navigation grid, built lazily and cached on the level.

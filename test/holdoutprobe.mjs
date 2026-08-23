@@ -101,6 +101,22 @@ const stranded = await page.evaluate(() => {
   return zs.map((z) => +Math.hypot(z.pos[0] - b[0], z.pos[2] - b[2]).toFixed(1))
     .filter((d) => d > 12).length + '/' + zs.length;
 });
+// Bodies must not stand inside each other, especially when the whole
+// horde funnels into one breach.
+let worstCrowd = 0, worstPairs = 0;
+for (let i = 0; i < 6; i++) {
+  const cr = await page.evaluate(() => window.__zhr.debugCrowding());
+  if (cr && cr.count > 4) {
+    worstCrowd = Math.max(worstCrowd, cr.worstOverlap);
+    worstPairs = Math.max(worstPairs, cr.overlapping);
+  }
+  await page.waitForTimeout(700);
+}
+console.log(`crowding: worst body overlap ${(worstCrowd * 100).toFixed(0)}% of contact distance, `
+  + `${worstPairs} overlapping pairs at once`);
+console.log(worstCrowd < 0.2 ? 'OK: zombies do not stand inside each other'
+  : 'FAIL: bodies are interpenetrating');
+
 console.log(`still more than 12 m from the base after ${samples.length * 2}s: ${stranded}`);
 console.log(`integrity ${(first.integrity * 100).toFixed(0)}% -> ${(last.integrity * 100).toFixed(0)}%`);
 console.log(`nearest zombie to base: ${first.nearest.toFixed(1)}m -> ${last.nearest.toFixed(1)}m`);

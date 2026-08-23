@@ -86,18 +86,20 @@ export const TUNING = {
   // (damage + interval) reads better than contact dps and syncs to anim.
   // Aggro: nearest STANDING player, re-evaluate every 2 s; never attack
   // downed players (L4D rule).
+  // `mass` decides who gives ground when two bodies overlap: a brute
+  // wades through a crowd of walkers rather than being jostled by them.
   enemies: {
-    walker: { hp: 3, speed: 1.4, biteDamage: 14, biteInterval: 0.9, scrap: 10, radius: 0.55 },
-    runner: { hp: 2, speed: 3.6, biteDamage: 9, biteInterval: 0.65, scrap: 15, radius: 0.45 },
-    brute: { hp: 18, speed: 0.95, biteDamage: 30, biteInterval: 1.4, scrap: 40, radius: 0.75 },
+    walker: { hp: 3, speed: 1.4, biteDamage: 14, biteInterval: 0.9, scrap: 10, radius: 0.55, mass: 1 },
+    runner: { hp: 2, speed: 3.6, biteDamage: 9, biteInterval: 0.65, scrap: 15, radius: 0.45, mass: 0.8 },
+    brute: { hp: 18, speed: 0.95, biteDamage: 30, biteInterval: 1.4, scrap: 40, radius: 0.75, mass: 4 },
     // Phase 3.5 depth roster. Each changes HOW you play, not just numbers:
     // spitter forces repositioning, crawler punishes tunnel vision under
     // sightlines, screamer is a priority-target puzzle, butcher is the
     // boss-floor peak.
-    spitter: { hp: 2, speed: 1.0, biteDamage: 8, biteInterval: 1.2, scrap: 25, radius: 0.5, spitRange: 12, spitKeep: 7, spitInterval: 3.0, spitDamage: 8 },
-    crawler: { hp: 2, speed: 2.6, lungeSpeed: 5.0, lungeRange: 4, biteDamage: 8, biteInterval: 0.8, scrap: 20, radius: 0.35 },
-    screamer: { hp: 4, speed: 1.6, keepRange: 10, screamInterval: 6.0, screamSpawns: 3, biteDamage: 5, biteInterval: 1.2, scrap: 50, radius: 0.5 },
-    butcher: { hp: 60, speed: 0.9, chargeSpeed: 6.5, chargeRange: 9, chargeTelegraph: 1.0, chargeRecover: 2.0, chargeDamage: 35, biteDamage: 20, biteInterval: 1.4, scrap: 400, radius: 0.95, backstabMult: 2.0 },
+    spitter: { hp: 2, speed: 1.0, biteDamage: 8, biteInterval: 1.2, scrap: 25, radius: 0.5, mass: 1, spitRange: 12, spitKeep: 7, spitInterval: 3.0, spitDamage: 8 },
+    crawler: { hp: 2, speed: 2.6, lungeSpeed: 5.0, lungeRange: 4, biteDamage: 8, biteInterval: 0.8, scrap: 20, radius: 0.35, mass: 0.6 },
+    screamer: { hp: 4, speed: 1.6, keepRange: 10, screamInterval: 6.0, screamSpawns: 3, biteDamage: 5, biteInterval: 1.2, scrap: 50, radius: 0.5, mass: 1 },
+    butcher: { hp: 60, speed: 0.9, chargeSpeed: 6.5, chargeRange: 9, chargeTelegraph: 1.0, chargeRecover: 2.0, chargeDamage: 35, biteDamage: 20, biteInterval: 1.4, scrap: 400, radius: 0.95, mass: 12, backstabMult: 2.0 },
   },
 
   // ---- 3. Weapons -------------------------------------------------------

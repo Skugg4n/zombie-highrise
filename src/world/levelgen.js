@@ -74,43 +74,34 @@ function buildHighRise(group, x, z, { w = 15, h = 48, d = 13 } = {}) {
 // ---- The elevator (shared by every level) -------------------------------
 // Worn metal cab, two sliding doors, an interior lamp. The cab IS the shop
 // and the transition between levels; it sits at the edge of the play area.
+// THE LIFT PLATE.
+//
+// It used to be a full cab: four walls, a ceiling and sliding doors. The
+// doors never worked properly (they shut in your face, they clipped
+// through level geometry when the cab was rotated, and in VR you stood
+// inside a box you could not see out of). It is now what
+// docs/level-design.md actually asks for: a metal plate you stand on,
+// with a control panel on a post beside it.
+//
+// Open on every side. Nothing to walk into, nothing to get stuck in,
+// and on a holdout level you can keep shooting while you board.
 export function makeElevator() {
   const g = new THREE.Group();
   const shell = MATS.metalShell;
   const dark = MATS.metalDoor;
-  const W = 2.6, H = 2.5, D = 2.2, T = 0.08;
+  const W = 2.6, D = 2.4, T = 0.16;
 
-  box(g, W, T, D, dark, 0, T / 2, 0);                    // floor
-  box(g, W, T, D, dark, 0, H - T / 2, 0);                // ceiling
-  box(g, W, H, T, shell, 0, H / 2, -D / 2);              // back
-  box(g, T, H, D, shell, -W / 2, H / 2, 0);              // left
-  box(g, T, H, D, shell, W / 2, H / 2, 0);               // right
-  // Door frame header
-  box(g, W, 0.35, T, shell, 0, H - 0.175, D / 2);
-  // Sliding doors (front, facing +Z); dynamic: excluded from merging
-  const doorL = box(g, W / 2 - 0.05, H - 0.35, 0.06, dark, -W / 4, (H - 0.35) / 2, D / 2);
-  const doorR = box(g, W / 2 - 0.05, H - 0.35, 0.06, dark, W / 4, (H - 0.35) / 2, D / 2);
-  doorL.userData.dynamic = true;
-  doorR.userData.dynamic = true;
-  // Flickering fluorescent tube (the lamp's visible source)
-  const tube = new THREE.Mesh(
-    new THREE.BoxGeometry(0.9, 0.05, 0.12),
-    new THREE.MeshStandardMaterial({ color: 0xf8f4e8, emissive: 0xfff4d8, emissiveIntensity: 1.4 }));
-  tube.position.set(0, H - 0.12, 0);
-  g.add(tube);
-  // Button panel with two glowing buttons
-  box(g, 0.22, 0.5, 0.03, MATS.metalDoor, W / 2 - 0.16, 1.25, D / 2 - 0.35);
-  for (const [by, on] of [[1.35, true], [1.18, false]]) {
-    const btn = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.03, 0.02, 8),
-      new THREE.MeshStandardMaterial({
-        color: 0x202020, emissive: on ? 0xffa030 : 0x203020, emissiveIntensity: on ? 1.2 : 0.4,
-      }));
-    btn.rotation.x = Math.PI / 2;
-    btn.position.set(W / 2 - 0.16, by, D / 2 - 0.33);
-    g.add(btn);
+  // The plate itself, with a raised lip so it reads as a platform rather
+  // than a painted rectangle on the floor.
+  box(g, W, T, D, dark, 0, T / 2, 0);
+  for (const [lx, lz, lw, ld] of [
+    [0, -D / 2 + 0.06, W, 0.12], [0, D / 2 - 0.06, W, 0.12],
+    [-W / 2 + 0.06, 0, 0.12, D], [W / 2 - 0.06, 0, 0.12, D],
+  ]) {
+    box(g, lw, 0.1, ld, shell, lx, T + 0.05, lz);
   }
-  // Hazard stripe across the door sill
+  // Hazard stripes across the plate: the one piece of the old cab worth
+  // keeping, because it is what makes the plate read as "stand here".
   const stripeC = document.createElement('canvas');
   stripeC.width = 64; stripeC.height = 16;
   const sc = stripeC.getContext('2d');
@@ -123,31 +114,83 @@ export function makeElevator() {
     sc.fill();
   }
   const stripeTex = new THREE.CanvasTexture(stripeC);
-  const sill = new THREE.Mesh(new THREE.BoxGeometry(W, 0.02, 0.18),
-    new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.8 }));
-  sill.position.set(0, T + 0.02, D / 2 - 0.06);
-  g.add(sill);
-  const lamp = new THREE.PointLight(0xfff2d0, 1.1, 5);
-  lamp.position.set(0, H - 0.25, 0);
+  stripeTex.wrapS = stripeTex.wrapT = THREE.RepeatWrapping;
+  stripeTex.repeat.set(3, 1);
+  for (const sz of [-D / 2 + 0.24, D / 2 - 0.24]) {
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(W - 0.24, 0.02, 0.2),
+      new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.8 }));
+    stripe.position.set(0, T + 0.02, sz);
+    g.add(stripe);
+  }
+
+  // The control post: a waist-high stand at one corner with the panel on
+  // top, angled toward whoever is standing on the plate.
+  const postX = W / 2 - 0.3, postZ = -D / 2 + 0.3;
+  box(g, 0.14, 1.1, 0.14, shell, postX, 0.55, postZ);
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.3, 0.1), dark);
+  panel.position.set(postX, 1.16, postZ);
+  panel.rotation.set(-0.5, -Math.PI / 4, 0);
+  g.add(panel);
+  // Two buttons and a readout strip, all emissive so the post is findable
+  // in the dark without a flashlight.
+  const buttons = [];
+  for (const [bx, by, on] of [[-0.1, 0.05, true], [0.1, 0.05, false]]) {
+    const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.03, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0x202020, emissive: on ? 0xffa030 : 0x204020, emissiveIntensity: on ? 1.4 : 0.4,
+      }));
+    btn.rotation.x = Math.PI / 2;
+    btn.position.set(bx, by, 0.06);
+    panel.add(btn);
+    buttons.push(btn);
+  }
+  const readout = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.07, 0.02),
+    new THREE.MeshStandardMaterial({ color: 0x101418, emissive: 0x30ff90, emissiveIntensity: 0.9 }));
+  readout.position.set(0, -0.07, 0.06);
+  panel.add(readout);
+
+  // A short mast above the post carrying the lamp, so the plate is lit
+  // from something you can see.
+  box(g, 0.08, 1.5, 0.08, shell, postX, 1.85, postZ);
+  const tube = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.05, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0xf8f4e8, emissive: 0xfff4d8, emissiveIntensity: 1.4 }));
+  tube.position.set(postX - 0.22, 2.56, postZ);
+  g.add(tube);
+  const lamp = new THREE.PointLight(0xfff2d0, 1.1, 7);
+  lamp.position.set(postX - 0.2, 2.45, postZ);
   g.add(lamp);
 
   const api = {
     group: g, lamp,
-    // t: 0 closed .. 1 open
+    plateW: W, plateD: D, plateTop: T + 0.1,
+    postX, postZ,
+    // Kept for callers: "doors" is now the readiness state of the plate.
+    // 0 = idle, 1 = ready to ride. It drives the panel instead of moving
+    // geometry, so nothing can shut in your face any more.
     setDoors(t) {
-      const slide = t * (W / 2 - 0.1);
-      doorL.position.x = -W / 4 - slide;
-      doorR.position.x = W / 4 + slide;
+      readout.material.emissiveIntensity = 0.4 + 1.4 * t;
+      buttons[0].material.emissiveIntensity = 0.5 + 1.5 * t;
+      buttons[1].material.emissiveIntensity = 0.4 + 0.2 * (1 - t);
     },
   };
   api.setDoors(1);
   return api;
 }
 
-// The cab blocks movement and bullets as one solid block (the doors face
-// the boarding zone; boarding is standing in front of the open doors).
-function addElevatorColliders(level, x, z) {
-  level.colliders.push({ x, z, hx: 1.35, hz: 1.2, tall: true });
+// The plate is walkable, not a wall: you step up onto it. Only the
+// control post is solid, and it is small enough to walk around.
+function addElevatorColliders(level, x, z, api = null) {
+  const W = api ? api.plateW : 2.6, D = api ? api.plateD : 2.4;
+  const top = api ? api.plateTop : 0.26;
+  level.colliders.push({
+    x, z, hx: W / 2, hz: D / 2, tall: false, top, walkable: true,
+  });
+  if (api) {
+    level.colliders.push({
+      x: x + api.postX, z: z + api.postZ, hx: 0.16, hz: 0.16, tall: false, top: 1.1,
+    });
+  }
 }
 
 // ---- Wasteland backdrop (ground + upper share it) -----------------------
@@ -365,7 +408,7 @@ function buildGround(level, rng, quality) {
   level.elevator.group.position.set(-half + 2.2, 0, half - 3.0);
   level.elevator.group.rotation.y = -Math.PI / 4;
   g.add(level.elevator.group);
-  addElevatorColliders(level, -half + 2.2, half - 3.0);
+  addElevatorColliders(level, -half + 2.2, half - 3.0, level.elevator);
   level.elevatorZone = { x: -half + 4.0, z: half - 4.6, hx: 1.9, hz: 1.9 };
 
   level.heightAt = makeHeightAt(level, 0);
@@ -470,7 +513,7 @@ function buildBasement(level, rng) {
   level.elevator.group.position.set(-half + 2.4, 0, -half + 3.0);
   level.elevator.group.rotation.y = Math.PI / 2;
   g.add(level.elevator.group);
-  addElevatorColliders(level, -half + 2.4, -half + 3.0);
+  addElevatorColliders(level, -half + 2.4, -half + 3.0, level.elevator);
   level.elevatorZone = { x: -half + 4.6, z: -half + 3.0, hx: 1.8, hz: 1.8 };
 
   level.heightAt = makeHeightAt(level, 0);
@@ -596,7 +639,7 @@ function buildUpper(level, rng, quality) {
   level.elevator.group.position.set(half - 3.0, 0, half - 6);
   level.elevator.group.rotation.y = -Math.PI / 2;
   g.add(level.elevator.group);
-  addElevatorColliders(level, half - 3.0, half - 6);
+  addElevatorColliders(level, half - 3.0, half - 6, level.elevator);
   level.elevatorZone = { x: half - 5.2, z: half - 6, hx: 1.8, hz: 1.9 };
 
   roomscaleZone(level, 0, 8);
@@ -712,7 +755,7 @@ function buildTrench(level, rng) {
   level.elevator.group.position.set(-half + 1.6, 0, laneZ[0]);
   level.elevator.group.rotation.y = Math.PI / 2;
   g.add(level.elevator.group);
-  addElevatorColliders(level, -half + 1.6, laneZ[0]);
+  addElevatorColliders(level, -half + 1.6, laneZ[0], level.elevator);
   level.elevatorZone = { x: -half + 4.0, z: laneZ[0], hx: 1.8, hz: 1.3 };
 
   level.heightAt = makeHeightAt(level, 0);
@@ -927,7 +970,7 @@ function buildBossArena(level, rng) {
   level.elevator.group.position.set(-half + 2.6, 0, -half + 3.0);
   level.elevator.group.rotation.y = Math.PI / 2;
   g.add(level.elevator.group);
-  addElevatorColliders(level, -half + 2.6, -half + 3.0);
+  addElevatorColliders(level, -half + 2.6, -half + 3.0, level.elevator);
   level.elevatorZone = { x: -half + 5.0, z: -half + 3.0, hx: 1.9, hz: 1.9 };
 
   level.heightAt = makeHeightAt(level, 0);

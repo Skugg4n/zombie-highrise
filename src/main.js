@@ -1146,6 +1146,8 @@ function dispatchAction(m) {
   else if (sim) sim.applyAction('H', m);
 }
 
+let vrReloadHint = 0;
+
 // Flat-mode viewmodel: the active weapon in the lower right of the camera.
 const viewmodel = new THREE.Group();
 viewmodel.position.set(0.28, -0.24, -0.5);
@@ -1243,6 +1245,10 @@ const actions = {
   adsAmount: () => arsenal.adsT,
   fireFrom: (o, d) => { if (canAct()) arsenal.fire(o, d); },
   reload: () => { if (canAct()) arsenal.reload(); },
+  // How far through the VR "point the gun down" reload gesture we are,
+  // 0..1. Drives the visible charge on the weapon so the gesture has
+  // feedback before it fires, not only after.
+  setReloadHint: (t) => { vrReloadHint = t; },
   cycle: () => { if (canAct()) arsenal.cycle(); },
   switchTo: (w) => { if (canAct()) arsenal.switchTo(w); },
   grenade: () => {
@@ -2173,11 +2179,18 @@ function presentPhase(ph) {
       nightTarget = 0;
       break;
     case 'night':
-      nightTarget = clipDef ? 0 : 1;   // feel clips stay in daylight
+      // OLA: "it should be DAY when the zombies come, when you are on the
+      // surface." Our whole art direction is zombies in daylight, and a
+      // holdout level's tension comes from SEEING them cross 40 m of open
+      // ground. Darkness belongs to the underground traverse levels.
+      // Surface levels only take on a low afternoon light as waves climb.
+      nightTarget = clipDef ? 0
+        : level.daylight ? Math.min(0.26, 0.05 * ((lastWave && lastWave.n) || 1))
+        : 1;
       closeShop();
       break;
     case 'elevator':
-      nightTarget = 0.35;
+      nightTarget = level.daylight ? 0.2 : 0.35;
       closeShop();
       break;
     case 'ride':
@@ -2222,12 +2235,18 @@ function updateWaveHud(w) {
   if (!w) { hud.setWave('NIGHT 1'); return; }
   switch (w.ph) {
     case 'lobby': hud.setWave(role === 'client' ? 'WAITING FOR HOST' : 'NIGHT 1'); break;
-    case 'day': hud.setWave(`FLOOR ${w.lv} - DAY - lay traps - night in ${w.t}s`); break;
+    case 'day': {
+      const nxt = (level.waveLabel || 'NIGHT').toLowerCase();
+      hud.setWave(`FLOOR ${w.lv} - REGROUP - repair and lay traps - ${nxt} in ${w.t}s`);
+      break;
+    }
     case 'countdown':
-      hud.setWave(`NIGHT ${w.n + 1}`);
+      hud.setWave(`${level.waveLabel || 'NIGHT'} ${w.n + 1}`);
       showCenterText(String(w.t), 0.5);
       break;
-    case 'night': hud.setWave(`NIGHT ${w.n} - ${w.left} left`); break;
+    case 'night':
+      hud.setWave(`${level.waveLabel || 'NIGHT'} ${w.n} - ${w.left} left`);
+      break;
     case 'elevator': hud.setWave('CLEARED - board the elevator'); break;
     case 'ride':
       hud.setWave(level.type === 'wagon'
@@ -2314,6 +2333,12 @@ renderer.setAnimationLoop(() => {
     arsenal.update(dt, fireHeld && canAct(), aimRay, fireHeldR && canAct());
     if (viewmodelKick > 0) viewmodelKick = Math.max(0, viewmodelKick - dt * 0.4);
     if (viewmodelKickL > 0) viewmodelKickL = Math.max(0, viewmodelKickL - dt * 0.4);
+
+    // The flat-mode viewmodel is a camera-mounted gun. In VR your hands
+    // already hold the weapon, so leaving it on gave the player a third
+    // one floating in front of them.
+    viewmodel.visible = !inVR;
+    if (inVR && vrInput) vrInput.setReloadPose(arsenal, vrReloadHint);
 
     // ---- Viewmodel pose: ADS, reload animation, per-hand recoil --------
     const a = arsenal.adsT;
@@ -2569,6 +2594,10 @@ window.__zhr = {
   },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
   debugTeleport: (x, z) => { rig.group.position.x = x; rig.group.position.z = z; },
+  debugLook: (x, z) => {
+    rig.yaw = Math.atan2(rig.group.position.x - x, rig.group.position.z - z);
+    rig.pitch = 0;
+  },
 
   // Foundation bug 3 check: feed the VR rig a grip pose rotated away from the
   // aim ray (Touch controllers really are tilted this much) and report the
@@ -2715,6 +2744,26 @@ window.__zhr = {
   // Every spawn point must have a real route to the base, or a night
   // never ends: one zombie sits behind a wall and the counter sticks.
   baseCentre: () => (level.baseCentre ? [level.baseCentre.x, 0, level.baseCentre.z] : null),
+
+  // Bodies must not occupy the same space. Reports the worst overlap in
+  // the crowd as a fraction of the pair's combined radius.
+  debugCrowding: () => {
+    if (!sim) return null;
+    const zs = [...sim.zombies.values()].filter((z) => z.alive);
+    let worst = 0, overlapping = 0, pairs = 0;
+    for (let i = 0; i < zs.length; i++) {
+      for (let j = i + 1; j < zs.length; j++) {
+        const ra = TUNING.enemies[zs[i].type].radius, rb = TUNING.enemies[zs[j].type].radius;
+        const min = (ra + rb) * 0.82;
+        const d = Math.hypot(zs[i].pos.x - zs[j].pos.x, zs[i].pos.z - zs[j].pos.z);
+        pairs++;
+        if (d >= min) continue;
+        overlapping++;
+        worst = Math.max(worst, (min - d) / min);
+      }
+    }
+    return { count: zs.length, pairs, overlapping, worstOverlap: +worst.toFixed(3) };
+  },
   debugSpawnRoutes: () => {
     if (!sim || !level.baseCentre) return null;
     const nav = sim._nav();
@@ -2742,9 +2791,17 @@ window.__zhr = {
   debugBoarding: () => {
     const z = level.elevatorZone;
     if (!z || !level.baseCentre) return null;
-    const blockers = level.colliders.filter((c) => !c.playerOnly && !c.dead
-      && (c.tall || (c.top !== undefined && c.top > LOCO.stepUp))
-      && Math.abs(c.x - z.x) < c.hx + z.hx - 0.05 && Math.abs(c.z - z.z) < c.hz + z.hz - 0.05);
+    // A slim post at the corner of the plate is furniture, not a
+    // blockage. Only count solids that eat a real share of the zone.
+    const zoneArea = 4 * z.hx * z.hz;
+    const blockers = level.colliders.filter((c) => {
+      if (c.playerOnly || c.dead) return false;
+      if (!(c.tall || (c.top !== undefined && c.top > LOCO.stepUp))) return false;
+      const ox = Math.min(c.x + c.hx, z.x + z.hx) - Math.max(c.x - c.hx, z.x - z.hx);
+      const oz = Math.min(c.z + c.hz, z.z + z.hz) - Math.max(c.z - c.hz, z.z - z.hz);
+      if (ox <= 0.05 || oz <= 0.05) return false;
+      return (ox * oz) / zoneArea > 0.12;
+    });
     // Can you actually walk from the middle of the base to the zone?
     const c = level.baseCentre;
     const save = rig.group.position.clone();

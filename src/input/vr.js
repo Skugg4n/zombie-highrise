@@ -7,14 +7,18 @@
 //   smooth move, right stick snap turn), chosen in the lobby.
 // - Controls: trigger = shoot (hold for auto), grip squeeze = reload,
 //   A = cycle weapon, B = grenade, X = health pack, Y = flashlight.
+// - Reload: point the gun straight down and hold. The grip still works.
 // - The active weapon's model sits on both controller grips.
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
-import { makeWeaponMesh } from '../world/weapons3d.js';
+import { makeWeaponMesh, makeGloveMesh } from '../world/weapons3d.js';
 
 // Quest touch controller gamepad button indices (xr-standard mapping):
 // 0 trigger, 1 squeeze, 3 stick press, 4 A/X, 5 B/Y.
 const BTN_STICK = 3, BTN_AX = 4, BTN_BY = 5;
+
+// How long the gun must point at the floor before it reloads.
+const RELOAD_HOLD = 0.35;
 
 // How far down -Z the barrel tip sits on each weapon model, so tracers and
 // muzzle flash leave the gun and not the player's wrist.
@@ -35,6 +39,9 @@ export class VRInput {
     this.prevButtons = new Map();               // inputSource -> [bool,...]
     this.weaponKind = 'pistol';
     this._q = new THREE.Quaternion();           // scratch, avoid per-frame allocation
+    this._fwd = new THREE.Vector3();
+    this.downT = 0;                             // how long the gun has pointed down
+    this.downArmed = true;                      // one reload per gesture
 
     const renderer = ctx.renderer;
     renderer.xr.enabled = true;
@@ -74,6 +81,9 @@ export class VRInput {
       controller.addEventListener('connected', (e) => {
         const h = e.data && e.data.handedness;
         if (h === 'left' || h === 'right') this.hands[h] = grip;
+        // Handedness decides which hand holds the gun, so re-dress now
+        // that we finally know which grip is which.
+        this._dressHands();
       });
       controller.addEventListener('disconnected', () => {
         for (const h of ['left', 'right']) if (this.hands[h] === grip) this.hands[h] = null;
@@ -121,11 +131,32 @@ export class VRInput {
   }
 
   // Swap the weapon model on both grips (active weapon changed).
+  // ONE weapon, in the hand that is actually holding it.
+  //
+  // Every grip used to get a full copy of the model, so a player with
+  // dual pistols saw a gun in each hand AND the flat-mode viewmodel
+  // hanging off the camera: three weapons for two hands. Now only akimbo
+  // arms both hands; everything else is the dominant hand, and the free
+  // hand gets a glove so it is still visibly a hand.
   setWeaponModel(kind) {
     this.weaponKind = kind;
-    for (const holder of this.gripWeapons) {
+    this._dressHands();
+  }
+
+  _dressHands() {
+    const kind = this.weaponKind;
+    const twoHanded = kind === 'akimbo';
+    for (let i = 0; i < this.gripWeapons.length; i++) {
+      const holder = this.gripWeapons[i];
+      const grip = this.grips[i];
+      // Until handedness arrives from the 'connected' event, treat the
+      // first grip as the main hand so something is always visible.
+      const isMain = this.hands.right ? grip === this.hands.right : i === 0;
+      const want = (twoHanded || isMain) ? kind : 'glove';
+      if (holder.userData.shown === want) continue;
+      holder.userData.shown = want;
       holder.clear();
-      holder.add(makeWeaponMesh(kind));
+      holder.add(want === 'glove' ? makeGloveMesh() : makeWeaponMesh(kind));
     }
   }
 
@@ -190,6 +221,76 @@ export class VRInput {
       // Both poses share rig.group as their parent, so local quaternions
       // compose directly: holderLocal = grip^-1 * targetRay.
       holder.quaternion.copy(this._q.copy(grip.quaternion).invert().multiply(ray.quaternion));
+      // Re-apply the reload cant on top of the aim alignment (the pose
+      // pass writes rotation.z, which this copy would otherwise erase).
+      if (holder.userData.reloadRoll) holder.rotateZ(holder.userData.reloadRoll);
+    }
+  }
+
+  // RELOAD BY POINTING THE GUN AT THE FLOOR.
+  //
+  // In VR you never see the flat-mode reload animation, so reloading had
+  // no readable trigger and no feedback. Pointing the barrel straight
+  // down is the standard VR gesture and it is one you cannot do by
+  // accident while fighting. Hold it briefly, and the gun reloads.
+  _reloadGesture(dt) {
+    const grip = this.hands.right || this.grips[0];
+    const i = this.grips.indexOf(grip);
+    const holder = i >= 0 ? this.gripWeapons[i] : null;
+    if (!holder) return;
+    this._fwd.set(0, 0, -1).applyQuaternion(holder.getWorldQuaternion(this._q));
+    // -0.85 is about 32 degrees of slack around straight down: deliberate
+    // enough that lowering the gun to walk does not trigger it.
+    const pointingDown = this._fwd.y < -0.85;
+    if (!pointingDown) {
+      this.downT = 0;
+      this.downArmed = true;
+      this.ctx.actions.setReloadHint(0);
+      return;
+    }
+    this.downT += dt;
+    // Feed the hold back to the game so the weapon can show it filling.
+    this.ctx.actions.setReloadHint(Math.min(1, this.downT / RELOAD_HOLD));
+    if (this.downT >= RELOAD_HOLD && this.downArmed) {
+      this.downArmed = false;
+      this.ctx.actions.reload();
+    }
+  }
+
+  // The VR reload animation. There is no camera-mounted viewmodel in the
+  // headset, so the weapon in your hand has to carry the whole state:
+  // it cants over while the magazine is worked, and a charge light on it
+  // fills while you hold the barrel down.
+  setReloadPose(arsenal, hint) {
+    for (let i = 0; i < this.gripWeapons.length; i++) {
+      const holder = this.gripWeapons[i];
+      if (holder.userData.shown === 'glove') continue;
+      let roll = 0, drop = 0;
+      if (arsenal.reloading && arsenal.reloadTotal > 0) {
+        const p = 1 - arsenal.reloadT / arsenal.reloadTotal;
+        const dip = Math.sin(Math.min(1, p * 1.25) * Math.PI);
+        roll = dip * 1.1;                     // cant it over to work the mag
+        drop = dip * 0.06;
+      } else if (hint > 0) {
+        roll = hint * 0.25;                   // it starts to tip as you hold
+      }
+      holder.userData.reloadRoll = roll;
+      holder.position.y = -drop;
+      // The charge light: amber while you hold the gesture, green the
+      // moment the fresh magazine is in.
+      let lamp = holder.userData.lamp;
+      if (!lamp) {
+        lamp = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.008, 0.018),
+          new THREE.MeshStandardMaterial({ color: 0x101010, emissive: 0xffa030 }));
+        lamp.position.set(0.026, 0.03, 0.02);
+        holder.add(lamp);
+        holder.userData.lamp = lamp;
+      }
+      const charging = !arsenal.reloading && hint > 0;
+      lamp.material.emissive.setHex(arsenal.reloading ? 0xffa030 : charging ? 0xffd060 : 0x30ff70);
+      lamp.material.emissiveIntensity = arsenal.reloading ? 1.8
+        : charging ? 0.4 + 2.2 * hint
+        : (arsenal.hudInfo && arsenal.hudInfo().mag === 0 ? 0.2 : 1.0);
     }
   }
 

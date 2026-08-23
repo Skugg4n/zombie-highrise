@@ -31,10 +31,10 @@ function rotXZ(lx, lz, rot) {
 
 export const FIELD = 80;            // the open field, edge to edge
 export const BASE_SIZE = 8;         // the base footprint (players' whole world)
-const WALL_H = 1.15;                // low enough to see and shoot over
+const WALL_H = 0.95;                // waist high: shoot over it standing on the ground
 const SEG = 1.0;                    // wall segment width
 export const SEG_HP = 120;          // hit points per segment
-const SANDBAG_H = 0.95;
+const SANDBAG_H = 0.8;             // rest a barrel on it, do not hide behind it
 
 // ---- The base wall ------------------------------------------------------
 // One InstancedMesh for the whole perimeter. Each instance is a segment
@@ -337,6 +337,10 @@ export function buildHoldout(level, rng, quality, makeElevator) {
   level.floorY = 0;
   level.baseY = 0;
   level.archetype = 'holdout';
+  // A surface level never goes dark. Waves arrive in daylight; the sun
+  // just gets lower and warmer as they climb.
+  level.daylight = true;
+  level.waveLabel = 'WAVE';
   level.mapExtent = FIELD * 0.62;   // the tactical map has to show the whole field
   // The horde spawns out to 46 m from a base that is not at the world
   // origin. The default nav grid is a 34 m box around (0,0), which left
@@ -505,27 +509,26 @@ export function buildHoldout(level, rng, quality, makeElevator) {
   // FOUNDATION BUG 5: the lift is part of the base, so its position AND
   // its facing are derived from the base, never chosen independently.
   //
-  // It stands flush against the WEST wall in the south-west area (sketch:
-  // ELEVATOR FLOOR W CONTROL PANEL) with its doors facing straight east,
-  // into the base. Axis-aligned on purpose: the cab was previously rotated
-  // to "look at the centre" while its collider stayed axis-aligned, so the
-  // visible cab stuck out past its own collision, poked through the south
-  // wall, and the boarding zone landed half inside solid geometry. You
-  // could not get in.
-  const CAB_W = 2.6, CAB_D = 2.2, DOOR_FACE_EAST = Math.PI / 2;
-  const ex = BX - hb + 0.24 + CAB_D / 2;      // flush to the west wall's inner face
-  const ez = BZ + hb - 1.8;
+  // It is a plate you stand on with a control post beside it (sketch:
+  // ELEVATOR FLOOR W CONTROL PANEL), flush against the west wall in the
+  // south-west corner. No cab, no doors, nothing to be shut out of or
+  // trapped inside, and you keep your sightlines while you board.
   level.elevator = makeElevator();
+  const PW = level.elevator.plateW, PD = level.elevator.plateD;
+  const ex = BX - hb + 0.24 + PW / 2;      // flush to the west wall's inner face
+  const ez = BZ + hb - 0.24 - PD / 2;      // and to the south wall's
   level.elevator.group.position.set(ex, 0, ez);
-  level.elevator.group.rotation.y = DOOR_FACE_EAST;
   g.add(level.elevator.group);
-  // Rotated 90 degrees, so the footprint's width and depth swap.
-  level.colliders.push({ x: ex, z: ez, hx: CAB_D / 2, hz: CAB_W / 2, tall: true });
-  // Boarding zone: the floor directly in front of the doors, entirely
-  // inside the base and clear of the cab.
-  // Sits a hand's width clear of the cab rather than exactly tangent to
-  // it, so "is anything blocking the doors" has an unambiguous answer.
-  level.elevatorZone = { x: ex + CAB_D / 2 + 1.4, z: ez, hx: 1.2, hz: 1.3 };
+  level.colliders.push({
+    x: ex, z: ez, hx: PW / 2, hz: PD / 2,
+    tall: false, top: level.elevator.plateTop, walkable: true,
+  });
+  level.colliders.push({
+    x: ex + level.elevator.postX, z: ez + level.elevator.postZ,
+    hx: 0.16, hz: 0.16, tall: false, top: 1.1,
+  });
+  // Boarding is standing ON the plate now, so the zone IS the plate.
+  level.elevatorZone = { x: ex, z: ez, hx: PW / 2, hz: PD / 2 };
 
   // ---- Player confinement ----
   // The wall itself is the boundary while it stands. This outer ring only
@@ -548,7 +551,7 @@ export function buildHoldout(level, rng, quality, makeElevator) {
 
   // Explosive barrels: two inside as a risk, three out in the field on the
   // approach lanes as a reward for a good shot at range.
-  level.barrels.push({ x: BX + 2.6, z: BZ - 0.2 });
+  level.barrels.push({ x: BX - 2.2, z: BZ - 1.6 });   // clear of the ramp lane
   level.barrels.push({ x: 4, z: -18 }, { x: 14, z: 2 }, { x: -14, z: 10 });
 
   level.heightAt = makeHeightAt(level, 0);
