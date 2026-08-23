@@ -2761,6 +2761,19 @@ function getDebugMenu() {
     { label: 'Floor 6: the wagon', run: () => window.__zhr.debugGotoLevel(6) },
     { label: 'Floor 12: THE BUTCHER', run: () => window.__zhr.debugGotoFinal() },
     { label: 'Repair the base', run: () => { window.__zhr.debugRepairAll(); showToast('Base repaired', 1200); } },
+    // ---- Wrist calibration. Read the two characters out loud. ----
+    { label: 'Wrist: move AROUND the arm', run: () => {
+      if (!vrInput) return;
+      showToast(`Wrist at ${vrInput.calibrateWrist('pip', 1)}`, 2200);
+    } },
+    { label: 'Wrist: change the ANGLE', run: () => {
+      if (!vrInput) return;
+      showToast(`Wrist at ${vrInput.calibrateWrist('tilt', 1)}`, 2200);
+    } },
+    { label: 'Wrist: done, hide the bracelet', run: () => {
+      if (!vrInput) return;
+      showToast(`Saved: wrist at ${vrInput.finishWristCalibration()}`, 3000);
+    } },
     { label: 'Close', run: () => getDebugMenu().toggle() },
   ];
   const status = () => {

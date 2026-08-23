@@ -22,6 +22,28 @@ import * as THREE from 'three';
 
 const W = 512, H = 320;                 // wrist canvas, 1.6:1
 const PULSE_SECONDS = 1.4;              // how long an announcement plays
+// The five tilt settings the bracelet's letters name, in radians of
+// rotation back toward the eyes.
+const TILTS = [0, 0.35, 0.7, 1.05, 1.4];
+
+// A single character on a dark chip, for the bracelet.
+function glyphTexture(ch, colour) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(10,12,16,0.9)';
+  x.beginPath();
+  x.roundRect(2, 2, 60, 60, 12);
+  x.fill();
+  x.fillStyle = colour;
+  x.font = 'bold 42px system-ui, sans-serif';
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillText(ch, 32, 34);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
 const AMMO_W = 256, AMMO_H = 128;
 
 const COL = {
@@ -103,6 +125,89 @@ export class WristDisplay {
     this._key = '';
     this.pulseT = 0;              // 1 -> 0 while an announcement plays
     this._lastObjective = null;
+    this.calPip = 0;
+    this.calTilt = 2;
+    this.calibrating = false;
+    this.bracelet = null;
+  }
+
+  // ---- THE CALIBRATION BRACELET ----
+  //
+  // Ola: "if you cannot determine the correct orientation without a
+  // headset, build the calibration aid: a bracelet around the forearm with
+  // numbers in a ring and letters marking the angle, so he can read off
+  // the coordinates that actually work and tell you."
+  //
+  // He is right that this beats guessing. Two guesses have now been wrong:
+  // first on top of the forearm like a bolted-on panel, then on the
+  // underside of the hand, upside down. So this stops guessing and
+  // measures instead.
+  //
+  // TWELVE NUMBERED PIPS run around the forearm like a clock face seen
+  // down the arm, and FIVE LETTERED marks set the tilt. The display sits
+  // at one (number, letter) pair and prints that pair on itself. Cycle
+  // until it looks right, read the two characters out, and that is the
+  // answer, permanently.
+  buildBracelet() {
+    if (this.bracelet) return;
+    const g = new THREE.Group();
+    const ringR = 0.062;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const pip = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.03, 0.022),
+        new THREE.MeshBasicMaterial({
+          map: glyphTexture(String(i + 1), i === 0 ? '#e0a33c' : '#e8e4da'),
+          transparent: true, depthTest: false, toneMapped: false,
+        }));
+      // Around the arm's long axis, which is Z in grip space.
+      pip.position.set(Math.sin(a) * ringR, Math.cos(a) * ringR, 0.10);
+      pip.lookAt(pip.position.clone().multiplyScalar(3));
+      pip.renderOrder = 998;
+      g.add(pip);
+    }
+    for (let i = 0; i < TILTS.length; i++) {
+      const mark = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.026, 0.026),
+        new THREE.MeshBasicMaterial({
+          map: glyphTexture('ABCDE'[i], '#7fb069'),
+          transparent: true, depthTest: false, toneMapped: false,
+        }));
+      mark.position.set(-0.085, 0.03 - i * 0.022, 0.10);
+      mark.renderOrder = 998;
+      g.add(mark);
+    }
+    this.bracelet = g;
+    if (this.group.parent) this.group.parent.add(g);
+    g.visible = false;
+  }
+
+  // Place the display at bracelet coordinates: a pip number 1..12 and a
+  // tilt letter A..E.
+  setCalibration(pipIndex, tiltIndex) {
+    this.calPip = ((pipIndex % 12) + 12) % 12;
+    this.calTilt = Math.max(0, Math.min(TILTS.length - 1, tiltIndex));
+    const a = (this.calPip / 12) * Math.PI * 2;
+    const r = 0.055;
+    this.group.position.set(Math.sin(a) * r, Math.cos(a) * r, 0.115);
+    // Face outward from the arm, then tilt back toward the eyes by the
+    // chosen amount.
+    this.group.rotation.set(0, 0, 0);
+    this.group.lookAt(this.group.position.clone().multiplyScalar(4));
+    this.group.rotateX(TILTS[this.calTilt]);
+    this._key = '';
+    return this.label();
+  }
+
+  label() {
+    return `${this.calPip + 1}${'ABCDE'[this.calTilt]}`;
+  }
+
+  showBracelet(on) {
+    this.buildBracelet();
+    if (this.bracelet) this.bracelet.visible = on;
+    this.calibrating = on;
+    this._key = '';
   }
 
   // ON THE INNER FOREARM, AT A WATCH ANGLE.
@@ -201,7 +306,7 @@ export class WristDisplay {
     c.fillStyle = COL.accent;
     c.font = 'bold 20px system-ui, sans-serif';
     c.textBaseline = 'top';
-    c.fillText('OBJECTIVE', 34, 26);
+    c.fillText(this.calibrating ? `POSITION ${this.label()}` : 'OBJECTIVE', 34, 26);
     c.fillStyle = COL.text;
     // The new line is held larger for the first part of the announcement,
     // then settles: the size change is what catches the eye.

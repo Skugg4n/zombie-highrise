@@ -322,6 +322,49 @@ for (const vp of VIEWPORTS) {
 }
 await galleryCtx.close();
 
+// ---- 2a. The HUD never overlaps itself ----------------------------------
+// The objective banner and the base bar collided at the top of the screen
+// until neither could be read. A layout that happens to fit at one width
+// is not a layout, so this checks every visible HUD box against every
+// other at five window sizes.
+console.log('HUD LAYOUT');
+{
+  const ctx = await browser.newContext();
+  const page = await newPage(ctx, 'hudlayout', errs);
+  await page.goto(`${BASE}/?uistate=hud`);
+  await page.waitForFunction(() => !!document.getElementById('hud'), null, { timeout: 10000 });
+  // Every HUD box VISIBLE, including the ones a given state would hide.
+  // The two that collided were the objective banner and the base bar, and
+  // the base bar is hidden unless a level has a base: a test that cannot
+  // see the bug proves nothing.
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll('#hud .hud-box')) el.classList.remove('hidden');
+  });
+  for (const [w, h] of [[360, 740], [768, 1024], [1280, 720], [1920, 1080], [2560, 1440]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.waitForTimeout(120);
+    const bad = await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll('#hud .hud-box')]
+        .filter((e) => !e.classList.contains('hidden') && e.offsetParent !== null)
+        .map((e) => ({ id: e.id, r: e.getBoundingClientRect() }))
+        .filter((b) => b.r.width > 0 && b.r.height > 0);
+      const hits = [];
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i].r, b = boxes[j].r;
+          const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+          const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+          if (ox > 1 && oy > 1) hits.push(`${boxes[i].id} over ${boxes[j].id}`);
+        }
+      }
+      return hits;
+    });
+    note(bad.length === 0, `HUD boxes do not overlap at ${w}x${h}`
+      + (bad.length ? ': ' + bad.join(', ') : ''));
+  }
+  await ctx.close();
+}
+
 // ---- 2b. Every level type generates and renders --------------------------
 console.log('LEVEL TYPES');
 {

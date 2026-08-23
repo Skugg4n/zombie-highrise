@@ -146,12 +146,33 @@
   #hud-ammo { left: max(14px, env(safe-area-inset-left)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 46px); }
   #hud-weapon { left: max(14px, env(safe-area-inset-left)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 92px); font-size: 12px; opacity: 0.85; }
   #hud-items { left: max(14px, env(safe-area-inset-left)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 128px); font-size: 12px; opacity: 0.85; }
-  #hud-wave { left: 50%; transform: translateX(-50%); top: max(10px, env(safe-area-inset-top)); font-size: 13px; opacity: 0.85; }
-  #hud-room { left: max(14px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); font-size: 12px; opacity: 0.8; }
-  #hud-scrap { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 18px); font-size: 12px; color: var(--accent); }
-  #hud-nv { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 52px); font-size: 12px; }
+  /* THE TOP OF THE SCREEN IS A BAR, NOT A PILE.
+     Room, objective, base integrity, scrap and night vision were five
+     independent absolute positions that each looked fine alone and
+     collided with each other on a phone: the objective banner ran under
+     the base bar, and both ran under SCRAP. They are one grid now, three
+     cells wide, so nothing at the top can overlap anything else at any
+     window size. test/smoke.mjs asserts it at five widths with every box
+     forced visible. */
+  #hud-topbar {
+    position: absolute; left: 0; right: 0;
+    top: max(10px, env(safe-area-inset-top));
+    padding: 0 max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+    display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: start; gap: 10px; pointer-events: none;
+  }
+  .hud-topcell { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .hud-topcell.left { align-items: flex-start; }
+  .hud-topcell.mid { align-items: center; }
+  .hud-topcell.right { align-items: flex-end; }
+  /* Inside the bar the boxes are laid out, not placed. */
+  #hud-topbar .hud-box { position: static; transform: none; }
+  #hud-wave { font-size: 13px; opacity: 0.85; }
+  #hud-room { font-size: 12px; opacity: 0.8; }
+  #hud-scrap { font-size: 12px; color: var(--accent); }
+  #hud-nv { font-size: 12px; }
   /* Base integrity: the holdout level's real health bar. */
-  #hud-base { left: 50%; transform: translateX(-50%); top: calc(max(10px, env(safe-area-inset-top)) + 30px); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+  #hud-base { font-size: 12px; display: flex; align-items: center; gap: 8px; }
   #hud-base .bar { width: 96px; height: 6px; background: rgba(255,255,255,0.16); border-radius: 3px; overflow: hidden; }
   #hud-base .bar > i { display: block; height: 100%; background: var(--accent2); transition: width 0.25s linear, background 0.25s linear; }
   #hud-base.warn .bar > i { background: var(--accent); }
@@ -159,7 +180,10 @@
   #hud-base.crit { animation: basepulse 0.9s ease-in-out infinite; }
   @keyframes basepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   /* Repair prompt: only up during prep, only when you are next to damage. */
-  #repair-prompt { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); font-size: 13px; text-align: center; }
+  /* 22% of a short phone screen is level with the top of the left-hand
+     stack, so the prompt landed on top of the carried-items box. The floor
+     is the stack's height, not a percentage. */
+  #repair-prompt { position: absolute; left: 50%; bottom: max(22%, 190px); transform: translateX(-50%); font-size: 13px; text-align: center; }
 
   /* One-frame white flash on nearby explosions */
   #boom-flash {
@@ -312,15 +336,22 @@
       <div id="nv-overlay" class="hidden"></div>
       <div id="countdown" class="hidden"></div>
       <div id="downed-note" class="hidden">DOWNED - a teammate close to you revives you</div>
-      <div id="hud-room" class="hud-box" data-smoke>ROOM ----</div>
-      <div id="hud-wave" class="hud-box" data-smoke>FLOOR 1 - DAY</div>
+      <div id="hud-topbar">
+        <div class="hud-topcell left"><div id="hud-room" class="hud-box" data-smoke>ROOM ----</div></div>
+        <div class="hud-topcell mid" id="hud-top">
+          <div id="hud-wave" class="hud-box" data-smoke>FLOOR 1 - DAY</div>
+          <div id="hud-base" class="hud-box hidden" data-smoke>BASE <span class="bar"><i style="width:100%"></i></span> <span id="hud-base-pct">100%</span></div>
+        </div>
+        <div class="hud-topcell right">
+          <div id="hud-scrap" class="hud-box" data-smoke>SCRAP 25</div>
+          <div id="hud-nv" class="hud-box hidden">NV 30s</div>
+        </div>
+      </div>
       <div id="hud-health" class="hud-box" data-smoke>HP 100</div>
       <div id="hud-ammo" class="hud-box" data-smoke>8 / 8</div>
       <div id="hud-weapon" class="hud-box" data-smoke>PISTOL</div>
       <div id="hud-items" class="hud-box" data-smoke>FRAG x1  PACK 0  MINE 0</div>
-      <div id="hud-scrap" class="hud-box" data-smoke>SCRAP 25</div>
-      <div id="hud-nv" class="hud-box hidden">NV 30s</div>
-      <div id="hud-base" class="hud-box hidden" data-smoke>BASE <span class="bar"><i style="width:100%"></i></span> <span id="hud-base-pct">100%</span></div>
+
       <div id="repair-prompt" class="hud-box hidden">Hold <b>E</b> to repair the wall <span id="repair-cost">(5 scrap)</span></div>
       <div id="touch-ui" class="hidden">
         <div id="stick-zone"><div id="stick-base"></div><div id="stick-nub"></div></div>

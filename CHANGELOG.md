@@ -1,5 +1,31 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.18.1 - 2026-08-24 - stop guessing where the wrist is, stop stacking the HUD
+
+**The wrist display, third attempt, but this time with a ruler.** Two
+guesses at where a forearm display should sit have both been wrong, so
+this version stops guessing and hands Ola the measuring tool he asked for.
+A bracelet appears around the forearm: twelve numbered pips around the arm
+and five lettered marks for the angle. The debug menu steps the display
+through them, the display prints its own coordinate on itself, e.g.
+POSITION 7C, and the choice is saved to localStorage. Ola reads two
+characters out loud and the guessing is over.
+
+**The top of the screen is a bar now, not a pile.** The objective banner
+and the base integrity bar were both absolutely positioned at the top
+centre, so on anything narrow they sat on top of each other and neither
+could be read. Room, objective, base, scrap and night vision are one
+three-cell grid now: they are laid out relative to each other, so they
+cannot overlap at any window size.
+
+smoke.mjs checks it at five window sizes, every visible HUD box against
+every other, with the normally-hidden boxes forced visible first. That
+last part matters: the first version of the check passed while looking at
+a screen the base bar was not on, which is not a test of anything. With
+the boxes actually visible it immediately found two more collisions on a
+phone that nobody had reported: the base bar under SCRAP, and the repair
+prompt under the carried-items box. Both fixed.
+
 ## v0.18.0 - 2026-08-23 - a way back, a debug menu, and a level preview
 
 **Dying in VR left you dead.** Ola: "a box appears where you can press A

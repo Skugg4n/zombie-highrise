@@ -217,9 +217,40 @@ export class VRInput {
   // the default player, so the gesture is a natural wrist turn rather
   // than taking the gun off target.
   _placeWrist() {
-    if (!this.wrist) this.wrist = new WristDisplay();
+    if (!this.wrist) {
+      this.wrist = new WristDisplay();
+      // A saved calibration wins over any default. Once Ola reads a pair
+      // of bracelet coordinates out, that is where it lives, permanently.
+      const saved = (() => {
+        try { return JSON.parse(localStorage.getItem('zhr-wrist') || 'null'); }
+        catch { return null; }
+      })();
+      if (saved) this.wrist.setCalibration(saved.pip, saved.tilt);
+    }
     const left = this.hands.left || this.grips[1] || this.grips[0];
-    if (left) this.wrist.attachTo(left);
+    if (left) {
+      this.wrist.attachTo(left);
+      if (this.wrist.bracelet) left.add(this.wrist.bracelet);
+    }
+  }
+
+  // Step the bracelet: `which` is 'pip' or 'tilt'. Returns the new label.
+  calibrateWrist(which, delta) {
+    if (!this.wrist) this._placeWrist();
+    const w = this.wrist;
+    w.showBracelet(true);
+    const label = which === 'tilt'
+      ? w.setCalibration(w.calPip, w.calTilt + delta)
+      : w.setCalibration(w.calPip + delta, w.calTilt);
+    try {
+      localStorage.setItem('zhr-wrist', JSON.stringify({ pip: w.calPip, tilt: w.calTilt }));
+    } catch { /* private browsing */ }
+    return label;
+  }
+
+  finishWristCalibration() {
+    if (this.wrist) this.wrist.showBracelet(false);
+    return this.wrist ? this.wrist.label() : '';
   }
 
   // The modal panel. Created on demand and parented to the camera, so it

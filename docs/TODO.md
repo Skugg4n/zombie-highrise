@@ -21,10 +21,14 @@ doing the bookkeeping. That is my job.
       FOREARM like a watch: same side as the back of the hand, angled so a
       natural turn of the forearm brings it to the eyes, and NOT attached
       to the hand itself.
-- [ ] Build the calibration aid instead of guessing again: a bracelet
-      around the forearm with numbers in a ring and letters marking the
-      angle, so Ola can read off the coordinates that work. Guessing has
-      cost two attempts already.
+- [x] (v0.18.1) Build the calibration aid instead of guessing again: a
+      bracelet around the forearm with numbers in a ring and letters
+      marking the angle, so Ola can read off the coordinates that work.
+      Guessing has cost two attempts already. Open the debug menu in VR:
+      "Wrist: move AROUND the arm" and "Wrist: change the ANGLE" step the
+      display through 12 positions and 5 tilts, the bracelet shows where
+      it is, and the choice is saved. The display prints its own
+      coordinate, e.g. POSITION 7C.
 
 ### Strategy view in VR (the drone is unusable without it)
 - [ ] The wrist is the TRIGGER, not the whole surface. Looking at it
@@ -43,10 +47,13 @@ doing the bookkeeping. That is my job.
       absorbed".
 - [ ] The hand flashlight does not toggle on the trigger. It should.
 - [ ] Remove the headlamp. It should not exist yet.
-- [ ] Desktop HUD overlaps at the top: the objective banner and the base
-      integrity bar collide and become unreadable. Lay out the top HUD so
-      nothing can overlap at ANY window size, and add that to the UI state
-      checks so it cannot come back.
+- [x] (v0.18.1) Desktop HUD overlaps at the top: the objective banner and
+      the base integrity bar collide and become unreadable. The top of the
+      screen is one three-cell grid now, not five independent absolute
+      positions, so nothing there can overlap anything else. smoke.mjs
+      checks every visible box against every other at five window sizes
+      with all boxes forced visible, and it found two more overlaps on a
+      phone that nobody had reported yet.
 - [ ] MINE and DRONE:MINE read as duplicates. If there is no real
       difference, remove the plain MINE. If there is, make the label say
       what it is.
