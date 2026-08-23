@@ -12,6 +12,8 @@ import { LOCO, moveAndCollide, blockingFor } from './game/locomotion.js';
 import { CharacterController, BODY } from './game/controller.js';
 import { NavGrid } from './game/navgrid.js';
 import { voidBlocker } from './world/levelkit.js';
+import { overrideSpec, specUrl } from './world/levels/index.js';
+import { LevelHotReload } from './views/hotreload.js';
 import { InteractionLayer } from './world/interact.js';
 import { DebugMenu } from './world/debugmenu.js';
 import { StrategyView } from './world/strategy.js';
@@ -191,9 +193,80 @@ let runSeed = (PHOTOMODE || UISTATE) ? 1337
 // changes how many sketches I can try."
 const LEVELPREVIEW = PARAMS.get('levelpreview')
   ? Math.max(1, parseInt(PARAMS.get('levelpreview'), 10) || 1) : 0;
+// ?hot=1 watches the level data files and rebuilds the current floor
+// when one changes, without restarting the run. Dev only; nothing polls
+// in a normal session.
+const HOT = PARAMS.get('hot') === '1';
 let levelIndex = LEVELPREVIEW || (PHOTOMODE ? (PHOTO_LEVEL[PHOTOMODE] || 1) : 1);
 let level = buildLevel(scene, QUALITY, runSeed, levelIndex);
 let doorT = 0;   // elevator doors 0 closed .. 1 open (visual)
+
+// ---- Hot reload of level data (?hot=1) --------------------------------
+//
+// Rebuild the CURRENT floor from a freshly edited data file without
+// restarting the run: same phase, same wave, same scrap, same inventory,
+// and you keep standing where you were standing if that spot still
+// exists. The point is to change a number and see it, not to play the
+// level again.
+let hotReload = null;
+let hotCount = 0;
+let hotError = '';
+
+function rebuildLevelInPlace() {
+  const wasAt = { x: rig.group.position.x, z: rig.group.position.z };
+  const wasYaw = rig.yaw;
+  disposeLevel(scene, level);
+  clearTransientVisuals();
+  level = buildLevel(scene, QUALITY, runSeed, levelIndex);
+  applyLevelLighting(level);
+  if (sim) sim.setLevel(level);
+  rebuildEntryArrows();
+  toggleMap(false);
+  // Stay put if the new layout still has floor there. If the edit moved a
+  // wall through you, the spawn plate is the honest fallback: being left
+  // inside a new wall is the one outcome that would make this useless.
+  const g = level.heightAt(wasAt.x, wasAt.z);
+  const inside = level.playBounds
+    && wasAt.x > level.playBounds.minX && wasAt.x < level.playBounds.maxX
+    && wasAt.z > level.playBounds.minZ && wasAt.z < level.playBounds.maxZ;
+  if (Number.isFinite(g) && inside) placePlayer(wasAt.x, wasAt.z);
+  else {
+    const s = level.playerSpawns[0];
+    placePlayer(s.x, s.z);
+  }
+  rig.yaw = wasYaw;
+  rig.group.rotation.y = wasYaw;
+  // In preview mode the labelled overlay is built FROM the level, so it
+  // has to be rebuilt with it or it describes the layout you just
+  // replaced. Which would be worse than no preview.
+  if (preview) {
+    const old = document.getElementById('levelpreview');
+    if (old) old.remove();
+    preview = applyLevelPreview(level, { scene, camera, renderer });
+  }
+  hotCount++;
+}
+
+function startHotReload() {
+  if (hotReload) return hotReload;
+  hotReload = new LevelHotReload({
+    specPath: (i) => specUrl(i),
+    apply: (i, spec) => {
+      overrideSpec(i, spec);
+      hotError = '';
+      if (i === levelIndex) rebuildLevelInPlace();
+      showToast(`Level ${i} reloaded`, 1200);
+    },
+    onError: (e) => {
+      // A half-typed file is the normal case while editing. Say what is
+      // wrong and keep watching rather than dying on a stray comma.
+      hotError = String(e && e.message ? e.message : e);
+      showToast(`Level data error: ${hotError}`, 3200);
+      console.warn('[hot]', e);
+    },
+  });
+  return hotReload;
+}
 
 function loadLevel(idx) {
   disposeLevel(scene, level);
@@ -222,6 +295,7 @@ function loadLevel(idx) {
   }
   if (sim) sim.setLevel(level);
   rebuildEntryArrows();
+  if (HOT) startHotReload().watch(idx);
 }
 
 // ---- Player rig ---------------------------------------------------------
@@ -2791,6 +2865,10 @@ function buildPose() {
 }
 
 // ---- Special boots ------------------------------------------------------
+// Watch the floor we booted on. loadLevel() picks up every later floor,
+// but nothing calls it for the first one: it is built at module scope.
+if (HOT && !LEVELPREVIEW) startHotReload().watch(levelIndex);
+
 if (LEVELPREVIEW) {
   // A diagram of the level, not a view of the game. The HUD, the lobby
   // and the player are all out of the way.
@@ -2799,6 +2877,9 @@ if (LEVELPREVIEW) {
   viewmodel.visible = false;
   rig.group.visible = false;
   preview = applyLevelPreview(level, { scene, camera, renderer });
+  // ?levelpreview=N&hot=1 is the pairing this was built for: a labelled
+  // diagram of the level that redraws itself as the data file is edited.
+  if (HOT) startHotReload().watch(LEVELPREVIEW);
 }
 if (PHOTOMODE) {
   // Dressed zombies render through the same instanced horde as live play.
@@ -3965,6 +4046,14 @@ window.__zhr = {
     return strategy.cursor ? [+strategy.cursor.u.toFixed(2), +strategy.cursor.v.toFixed(2)] : null;
   },
   debugStrategyClick: () => actions.strategyClick(),
+  // Hot reload, from the outside: how many rebuilds have happened, and
+  // whether the last import complained.
+  debugColliderCount: () => (level.colliders || []).length,
+  debugScrapNow: () => scrap,
+  debugHot: () => ({
+    on: HOT, reloads: hotCount, error: hotError,
+    watching: hotReload ? [...hotReload.watching] : [],
+  }),
   debugPanelToWorld: (u, v) => panelToWorld(u, v),
   // The same question answered by the camera's own projection matrix,
   // for the probe to check my arithmetic against. If these two disagree,

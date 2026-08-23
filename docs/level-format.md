@@ -333,3 +333,18 @@ after(level, ctx) {
 
 Reach for it seldom. Every use is a piece of a level that lives outside
 the format, and the point of the format is that a sketch does not need one.
+
+## Working on a sketch
+
+- `docs/sketching.md` is the answer to "what is cheap and what is
+  expensive", written for deciding BEFORE you draw.
+- `?levelpreview=N` is a labelled top-down diagram of floor N.
+- `?hot=1` rebuilds the current floor when its data file changes, without
+  restarting the run.
+- `?levelpreview=N&hot=1` is the loop for tuning a layout: a diagram that
+  redraws itself while you edit the numbers.
+
+A broken data file is reported and the last good level keeps standing, so
+editing with the game running is safe. The spec validator runs on every
+hot reload exactly as it does on load, which means a typo in a prop name
+tells you the entry index and the level you were playing is untouched.

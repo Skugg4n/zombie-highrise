@@ -260,3 +260,23 @@ just `undefined`.
 **Where else to look:** the same pattern exists for items, grenades,
 barrels, drones, mines and traps. They have not diverged yet. They will,
 the first time one of them grows a field.
+
+## fetch and import() do not agree on what a relative path means (v0.20.0)
+
+**Symptom.** The hot reloader detected every edit correctly and then
+silently failed to load any of them.
+
+**Cause.** One relative string, `./src/world/levels/L1.js`, used for both
+polling and importing. `fetch` resolves against the DOCUMENT, so it read
+the right file. `import()` resolves against the calling MODULE, which was
+`/src/views/hotreload.js`, so it asked for
+`/src/views/src/world/levels/L1.js`, which does not exist.
+
+**Solution.** Build the URL once, absolute, from `import.meta.url` in the
+module that owns the files. The same URL then means the same thing to
+both, and it keeps working when the game is served from a subdirectory,
+which GitHub Pages does.
+
+**The general shape:** any path used by two different APIs is a path that
+needs to be absolute. The failure is quiet because both APIs happily
+accept the string.

@@ -1,5 +1,51 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.20.0 - 2026-08-24 - edit a number, see it happen
+
+**Hot reload of level data: `?hot=1`.** Ola asked for it and the reason is
+arithmetic. The loop before this was: edit the file, reload the page,
+click solo, wait for the level, walk back to the thing you were looking
+at. Half a minute per number. On a layout that is thirty numbers, most of
+an afternoon goes into walking.
+
+Now the data files are watched and the current floor rebuilds when one
+changes. Same phase, same wave, same scrap, same inventory, and you keep
+standing where you were standing if that spot still has floor under it. If
+the edit moved a wall through you, you go back to the spawn plate, because
+being left inside a new wall is the one outcome that would make this
+useless.
+
+It works without a build step because ES modules cache by URL, so a fresh
+query string is a fresh module. The file is polled rather than watched: a
+browser cannot watch a disk, and a dev server that could is a build step
+by another name.
+
+**`?levelpreview=N&hot=1`** is the pairing this was built for: a labelled
+diagram of the level that redraws itself while the data file is edited.
+
+**A half-typed file is the normal state of a file being edited**, so it
+must never be fatal. A broken file is reported by name and reason, the
+last good level keeps standing, and fixing it recovers. The spec validator
+runs on every reload exactly as it does on load, so a typo in a prop name
+names the entry index and leaves the level you were playing alone. That
+behaviour is checked on purpose, not assumed: `test/hotprobe.mjs` edits a
+real data file on disk while the game is running, breaks it, and fixes it.
+
+**A trap worth writing down.** `fetch` resolves a relative path against
+the DOCUMENT and `import()` resolves it against the calling MODULE, so one
+relative string cannot serve both. The first version polled the right file
+and imported a path two directories deep that does not exist. The paths
+are absolute, built from `import.meta.url`, which is also what keeps them
+working when Pages serves the game from a subdirectory.
+
+**docs/sketching.md**, the cheap-versus-expensive guide. The whole prop
+library in a table with the numbers each one takes, the four cost tiers
+with a tell for each ("if describing it needs the word WHEN, it is a
+mechanism"), and what to put in a sketch in the first place: the shape
+rather than coordinates, what the player should feel at three moments,
+where the enemies come from and what hides them, and a circle around
+anything that moves.
+
 ## v0.19.2 - 2026-08-24 - a phone can repair the wall, and three things that happened silently
 
 **Mobile could not repair or open doors at all.** `TouchInput` bound seven

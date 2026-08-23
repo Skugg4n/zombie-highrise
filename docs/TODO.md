@@ -110,12 +110,20 @@ doing the bookkeeping. That is my job.
       audited yet.)
 
 ### Tooling to make future levels fast
-- [ ] Hot reload of level data files in dev, so changing a number rebuilds
-      the level without restarting the run.
-- [ ] Write the practical version of cheap-versus-expensive: which kinds of
-      sketch are just numbers and existing props (free), and which cost new
-      prop code or new mechanism. Ola wants to know before he draws so he
-      can stay on the cheap side by choice.
+- [x] (v0.20.0) Hot reload of level data files in dev, so changing a
+      number rebuilds the level without restarting the run. `?hot=1`.
+      Same phase, same scrap, same inventory, and you keep standing where
+      you were standing if that spot still exists. Pairs with
+      `?levelpreview=N` for a diagram that redraws itself as you edit. A
+      half-typed file is reported and the last good level keeps standing.
+      `test/hotprobe.mjs` edits a real data file on disk while the game
+      is running and checks all of that.
+- [x] (v0.20.0) Write the practical version of cheap-versus-expensive:
+      which kinds of sketch are just numbers and existing props (free),
+      and which cost new prop code or new mechanism. `docs/sketching.md`,
+      with the whole prop library in a table, the tell for each cost tier
+      ("if describing it needs the word WHEN, it is a mechanism"), and
+      advice on what to put in a sketch in the first place.
 
 ## Open: from the dead-code audit (v0.14.2)
 
