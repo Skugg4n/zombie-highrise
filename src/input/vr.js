@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeWeaponMesh, makeFlashlightMesh, makeUnderBarrelLight } from '../world/weapons3d.js';
 import { WristDisplay, WeaponAmmoTag } from '../world/wrist.js';
+import { VrPanel } from '../world/vrpanel.js';
 
 // Quest touch controller gamepad button indices (xr-standard mapping):
 // 0 trigger, 1 squeeze, 3 stick press, 4 A/X, 5 B/Y.
@@ -51,6 +52,10 @@ export class VRInput {
     for (let i = 0; i < 2; i++) {
       const controller = renderer.xr.getController(i);
       controller.addEventListener('selectstart', () => {
+        // BUG (Ola): "the flashlight fires bullets." Since the off hand
+        // started carrying a torch, its trigger was still wired to the
+        // gun. Only a hand actually holding a weapon can shoot.
+        if (!this._holdsGun(controller)) return;
         this.firingController = controller;
         this.fireHeld = true;
         this._fireFrom(controller);
@@ -190,6 +195,14 @@ export class VRInput {
     this._placeWrist();
   }
 
+  // Is this controller's hand holding a weapon, as opposed to the torch?
+  _holdsGun(controller) {
+    const i = this.controllers.indexOf(controller);
+    if (i < 0) return true;              // unknown hand: do not break firing
+    const holder = this.gripWeapons[i];
+    return !holder || holder.userData.shown !== 'light';
+  }
+
   // The wrist display lives on the LEFT forearm. Left is the off hand for
   // the default player, so the gesture is a natural wrist turn rather
   // than taking the gun off target.
@@ -197,6 +210,34 @@ export class VRInput {
     if (!this.wrist) this.wrist = new WristDisplay();
     const left = this.hands.left || this.grips[1] || this.grips[0];
     if (left) this.wrist.attachTo(left);
+  }
+
+  // The modal panel. Created on demand and parented to the camera, so it
+  // is always in front of the player however they turn.
+  getPanel() {
+    if (!this.panel) {
+      this.panel = new VrPanel();
+      this.panel.attachTo(this.ctx.camera);
+    }
+    return this.panel;
+  }
+
+  // TEST SEAM. A real XR session cannot be created headlessly, but every
+  // line of VR logic above this can run without one: three creates the
+  // controller and grip groups on demand. This flips the session flag so
+  // a probe can drive the VR interface and assert on it, which is the only
+  // way "downed in VR is a softlock" gets caught by a test rather than by
+  // Ola putting the headset on.
+  debugForceActive(on) {
+    if (this.active === on) return;
+    this.active = on;
+    // update() bails without a session, so a probe would exercise none of
+    // the per-frame VR logic. A session with no input sources lets every
+    // pose-driven path run (alignment, the reload gesture, recoil) while
+    // the gamepad loop simply finds nothing to read.
+    this._fakeSession = on ? { inputSources: [] } : null;
+    this._dressHands();
+    this.ctx.onSessionChange(on);
   }
 
   // Called every frame from the game with everything a flat player can
@@ -419,9 +460,11 @@ export class VRInput {
 
   update(dt) {
     if (!this.active) return;
-    const session = this.ctx.renderer.xr.getSession();
+    const session = this.ctx.renderer.xr.getSession() || this._fakeSession;
     if (!session) return;
     this._alignWeapons();
+    this._stepRecoil(dt);
+    this._reloadGesture(dt);
     const stationary = this.ctx.getLocoMode() === 'stationary';
 
     for (const src of session.inputSources) {
@@ -433,6 +476,15 @@ export class VRInput {
       const now = gp.buttons.map((b) => b.pressed);
       this.prevButtons.set(src, now);
       const pressed = (i) => now[i] && !prev[i];
+      // A modal panel eats its buttons first: a player trying to restart a
+      // lost run must not cycle a weapon instead.
+      if (this.panel && this.panel.open) {
+        const name = src.handedness === 'right'
+          ? (pressed(BTN_AX) ? 'A' : pressed(BTN_BY) ? 'B' : null)
+          : (pressed(BTN_AX) ? 'X' : pressed(BTN_BY) ? 'Y' : null);
+        if (name && this.panel.press(name)) continue;
+        if (name) continue;              // swallow it either way while open
+      }
       if (src.handedness === 'right') {
         if (pressed(BTN_AX)) this.ctx.actions.cycle();          // A
         if (pressed(BTN_BY)) this._grenadeFrom(src);            // B

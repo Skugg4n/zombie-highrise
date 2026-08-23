@@ -1047,35 +1047,33 @@ const lobby = new LobbyUI({
   onLeave: leaveToMenu,
 });
 const $ = (id) => document.getElementById(id);
-$('btn-go-retry').addEventListener('click', () => {
-  if (sim) {
-    $('panel-gameover').classList.add('hidden');
-    sim.restartLevel();
-  } else {
-    leaveToMenu();   // clients cannot restart; the host does
-  }
-});
-$('btn-go-lobby').addEventListener('click', () => {
+// The three ways a stopped run can move forward. They are functions, not
+// click handlers, because VR has no DOM: the same three actions have to be
+// reachable from a face button inside the headset.
+function actRetryLevel() {
   $('panel-gameover').classList.add('hidden');
-  leaveToMenu();
-});
-$('btn-win-again').addEventListener('click', () => {
+  if (sim) sim.restartLevel();
+  else leaveToMenu();          // clients cannot restart; the host does
+}
+function actNewRun() {
   $('panel-victory').classList.add('hidden');
-  if (sim) {
-    // A fresh run on a fresh building.
-    clearFinale();
-    runSeed = ((Math.random() * 1e9) >>> 0);
-    loadLevel(1);
-    sim.newRun();
-    $('hud').classList.remove('hidden');
-  } else {
-    leaveToMenu();
-  }
-});
-$('btn-win-lobby').addEventListener('click', () => {
+  $('panel-gameover').classList.add('hidden');
+  if (!sim) { leaveToMenu(); return; }
+  clearFinale();
+  runSeed = ((Math.random() * 1e9) >>> 0);
+  loadLevel(1);
+  sim.newRun();
+  $('hud').classList.remove('hidden');
+}
+function actQuitToMenu() {
+  $('panel-gameover').classList.add('hidden');
   $('panel-victory').classList.add('hidden');
   leaveToMenu();
-});
+}
+$('btn-go-retry').addEventListener('click', actRetryLevel);
+$('btn-go-lobby').addEventListener('click', actQuitToMenu);
+$('btn-win-again').addEventListener('click', actNewRun);
+$('btn-win-lobby').addEventListener('click', actQuitToMenu);
 
 // ---- Elevator shop ------------------------------------------------------
 let shopOpen = false;
@@ -1370,6 +1368,7 @@ function applyWallState(hps) {
 // once per frame while the prompt could change.
 let baseAlarmT = 0;
 let magSeatFlashT = 0;   // brief 'ready' confirmation after a reload
+let victorySummary = '';  // run stats, shown in the DOM AND in the headset
 let lastDt = 1 / 60;     // the frame loop's dt, for helpers called from it
 function updateBaseHud() {
   const wall = level && level.baseWall;
@@ -1990,9 +1989,12 @@ function handleEvents(evs) {
         meta.recordRun({ ...st, won: true });
         $('menu-meta').textContent = meta.summaryLine();
         const wn = st.nights || 0, wk = st.kills || 0;
-        $('win-stats').textContent =
+        victorySummary =
           `${wn} night${wn === 1 ? '' : 's'} survived. ${wk} zombie${wk === 1 ? '' : 's'} down. `
           + `${st.scrap || 0} scrap left unspent.`;
+        // The same sentence reaches VR through the wrist and the panel:
+        // score is state, and state must not exist only in the DOM.
+        $('win-stats').textContent = victorySummary;
         $('btn-win-again').style.display = role === 'client' ? 'none' : '';
         audio.stinger('day');
         break;
@@ -2347,9 +2349,53 @@ function vrObjective(w) {
   }
 }
 
+// EVERY STOPPED STATE HAS A WAY FORWARD IN VR.
+//
+// Being downed, losing, and winning are all DOM overlays in flat mode, and
+// DOM does not exist in a headset: the player saw nothing and could do
+// nothing. This maps each of those states onto the world-space panel, with
+// the resolving actions on face buttons.
+function updateVrPanel(w) {
+  const panel = vrInput.getPanel();
+  const ph = w && w.ph;
+  if (ph === 'gameover') {
+    panel.show('GAME OVER', [
+      role === 'solo' || role === 'host'
+        ? 'The base is lost. You can try this floor again.'
+        : 'The host decides what happens next.',
+      `You reached floor ${w.lv}.`,
+    ], role === 'client' ? [
+      { key: 'B', label: 'QUIT TO MENU', run: actQuitToMenu },
+    ] : [
+      { key: 'A', label: 'TRY THIS FLOOR AGAIN', run: actRetryLevel },
+      { key: 'B', label: 'QUIT TO MENU', run: actQuitToMenu },
+    ], 'danger');
+    return;
+  }
+  if (ph === 'victory') {
+    panel.show('EXTRACTED', [
+      'You got out.',
+      victorySummary || '',
+    ], [
+      { key: 'A', label: 'RUN IT AGAIN', run: actNewRun },
+      { key: 'B', label: 'QUIT TO MENU', run: actQuitToMenu },
+    ], 'good');
+    return;
+  }
+  if (myDown) {
+    panel.show('YOU ARE DOWN', role === 'solo'
+      ? ['You cannot get up on your own.', 'The run ends when the timer does.']
+      : ['A teammate has to reach you and hold to revive.', 'Call out where you are.'],
+      [{ key: 'B', label: 'QUIT TO MENU', run: actQuitToMenu }], 'danger');
+    return;
+  }
+  panel.hide();
+}
+
 function updateVrReadouts() {
   if (!vrInput || !vrInput.active) return;
   const w = lastWave;
+  updateVrPanel(w);
   const info = arsenal.hudInfo();
   const { objective, sub } = vrObjective(w);
   vrInput.setWristState({
@@ -3028,6 +3074,63 @@ window.__zhr = {
     }
     return { tested: free, stuck: pockets };
   },
+
+  // ---- VR probe surface ----
+  // A real XR session cannot start headlessly, but every line of VR
+  // interface logic can run without one. These drive it so that "downed in
+  // VR is a softlock" is caught by a test rather than by Ola putting the
+  // headset on.
+  debugEnterVR: (on = true) => {
+    if (!vrInput) return false;
+    vrInput.debugForceActive(on);
+    return vrInput.active === on;
+  },
+  debugVrPanel: () => {
+    if (!vrInput || !vrInput.panel) return null;
+    const p = vrInput.panel;
+    return {
+      open: p.open,
+      // The rendered text, read back from the same canvas the player sees,
+      // so the test cannot pass on a panel that was never drawn.
+      title: p._key ? p._key.split('|')[0] : '',
+      actions: p.actions.map((a) => `${a.key}: ${a.label}`),
+      visible: p.mesh.visible,
+    };
+  },
+  debugVrPress: (key) => (vrInput && vrInput.panel ? vrInput.panel.press(key) : false),
+  debugVrWrist: () => {
+    if (!vrInput || !vrInput.wrist) return null;
+    return { key: vrInput.wrist._key, attached: !!vrInput.wrist.group.parent };
+  },
+  // Point the weapon at the floor for `t` seconds of game time, the way
+  // the reload gesture is actually performed.
+  debugVrPointDown: (down = true) => {
+    if (!vrInput || !vrInput.grips.length) return false;
+    const q = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(down ? -Math.PI / 2 : 0, 0, 0));
+    const pose = (obj, quat) => {
+      obj.matrix.compose(obj.position.set(0, 1.2, -0.3), quat, obj.scale.set(1, 1, 1));
+      obj.matrix.decompose(obj.position, obj.quaternion, obj.scale);
+      obj.matrixWorldNeedsUpdate = true;
+    };
+    for (let i = 0; i < vrInput.grips.length; i++) {
+      pose(vrInput.grips[i], q);
+      pose(vrInput.controllers[i], q);
+    }
+    return true;
+  },
+  debugHands: () => (vrInput ? vrInput.gripWeapons.map((h) => h.userData.shown || null) : null),
+  debugVrGesture: () => (vrInput ? {
+    active: vrInput.active,
+    downT: +(vrInput.downT || 0).toFixed(2),
+    armed: vrInput.downArmed,
+    fwdY: +(vrInput._fwd ? vrInput._fwd.y : 0).toFixed(2),
+    grips: vrInput.grips.length,
+  } : null),
+  debugDown: () => myDown,
+  reloading: () => arsenal.reloading,
+  debugEndRun: () => { if (sim) { sim.wave.phase = 'gameover'; sim.wave.t = 0; for (const p of sim.players.values()) { p.down = true; p.hp = 0; } } },
+  debugSetDowned: (v) => setDowned(v),
 
   // ---- Recoil probe surface ----
   tuning: () => TUNING,

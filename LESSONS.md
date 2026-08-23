@@ -174,3 +174,42 @@ new entries in the same format: Symptom, Cause, Solution.
   an angle. Note that three sets `matrixAutoUpdate = false` on XR
   controller groups, so a fake pose in a test must write `.matrix` and
   decompose it, exactly as a real XR frame does.
+
+## VR is an interface, not a rendering mode (v0.14.x)
+
+- **Symptom:** A VR feature is written, described in the changelog, and
+  does nothing on the device. **Cause:** the code was authored but never
+  wired into the frame loop. Specifically, the reload gesture was added
+  with a search-and-replace whose anchor did not match, so the edit was a
+  silent no-op and `_reloadGesture` was never called. **Solution:** two
+  rules. (1) Every scripted edit must ASSERT that it changed something;
+  a replace that matches nothing must fail loudly, not pass quietly.
+  (2) Every VR feature needs a probe assertion, because a headset is the
+  only other place it would have been noticed.
+
+- **Symptom:** Being downed in VR is a softlock: no text, no explanation,
+  no way to restart or quit. **Cause:** every stopped state (downed, game
+  over, victory) was a DOM overlay, and DOM does not exist inside a
+  headset. The player could neither see their state nor act on it.
+  **Solution:** a world-space panel parented to the camera, with actions
+  on FACE BUTTONS rather than a laser pointer (a downed player should not
+  have to aim at anything to get out of it). The general rule, from Ola:
+  a feature is NOT done until it is usable in VR. Every piece of state a
+  flat player can see must reach a VR player, and every action a flat
+  player can take must be performable in VR. `test/vrprobe.mjs` asserts
+  that list.
+
+- **Symptom:** The flashlight fires bullets. **Cause:** the trigger was
+  wired to "shoot" on every controller, and the off hand had since
+  stopped holding a gun. **Solution:** only a hand actually holding a
+  weapon fires. When a hand's contents become dynamic, everything bound
+  to that hand has to become conditional at the same time.
+
+- **Note on headless VR testing:** a real XR session cannot be created in
+  a headless browser, but nearly all VR logic can run without one, since
+  three creates the controller and grip groups on demand. A test seam
+  that flips the session flag and supplies a session object with no input
+  sources lets every pose-driven path (alignment, gestures, recoil, the
+  panel) be driven and asserted. Poses must be written to `.matrix` and
+  decomposed, because three sets `matrixAutoUpdate = false` on those
+  groups.
