@@ -16,7 +16,8 @@ import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeRng } from '../util/rng.js';
 import { PALETTE, MATS, mat, matT } from './materials.js';
-import { buildHoldout } from './holdout.js';
+import { buildFromSpec } from './levelkit.js';
+import { specFor } from './levels/index.js';
 export { PALETTE, MATS };
 import { mergeStaticMeshes } from './merge.js';
 import {
@@ -1074,7 +1075,11 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
     baseWall: null, baseCentre: null, archetype: null,
     floorY: 0, baseY: 0, heightAt: () => 0, lighting: null,
   };
-  if (type === 'holdout') buildHoldout(level, rng, quality, makeElevator);
+  // A floor described by a data file is built from that file. Everything
+  // else falls through to the legacy hand-written builders below, which are
+  // being retired archetype by archetype.
+  const spec = specFor(levelIndex);
+  if (spec) buildFromSpec(level, spec, { rng, quality, makeElevator });
   else if (type === 'ground') buildGround(level, rng, quality);
   else if (type === 'basement') buildBasement(level, rng);
   else if (type === 'upper') buildUpper(level, rng, quality);

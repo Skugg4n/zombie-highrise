@@ -1,6 +1,6 @@
 // Central configuration and constants. Version is bumped on every change
 // and shown in the UI corner (see ui/hud.js -> #version).
-export const VERSION = '0.13.0';
+export const VERSION = '0.14.0';
 
 export const CONFIG = {
   // Networking
