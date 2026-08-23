@@ -22,7 +22,7 @@ import { applyLevelPreview } from './views/levelpreview.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
-import { HostSim, ZOMBIE_TYPES, ITEM_KINDS, TRAP_KINDS, DRONE_LOADS } from './game/state.js';
+import { HostSim, ZOMBIE_TYPES, ITEM_KINDS, TRAP_KINDS, DRONE_LOADS, zombieRow } from './game/state.js';
 import { TUNING } from './game/tuning.js';
 import { Arsenal } from './game/arsenal.js';
 import { makeWeaponMesh, makeItemMesh } from './world/weapons3d.js';
@@ -292,7 +292,7 @@ function updateZombieVisuals(rows, dt) {
     if (now > until) recentlyDeadZ.delete(id);
   }
   for (const r of rows) {
-    const [id, ti, x, y, z] = r;
+    const [id, ti, x, y, z, , atk] = r;
     if (recentlyDeadZ.has(id)) continue;
     keep.add(id);
     let v = zombieStates.get(id);
@@ -310,6 +310,11 @@ function updateZombieVisuals(rows, dt) {
       v.animT += dt * (v.type === 'runner' ? 11 : v.type === 'brute' ? 3.5 : 5.5);
     }
     v.x = x; v.y = y; v.z = z;
+    // The hammer runs on its own clock so every zombie on the wall is not
+    // swinging in lockstep, which would read as one animation on twenty
+    // bodies rather than a crowd tearing at a barricade.
+    v.attacking = !!atk;
+    if (v.attacking) v.swingT = (v.swingT || Math.random() * 3) + dt * 7.5;
     if (v.flashT > 0) v.flashT -= dt;
     if (v.staggerT > 0) v.staggerT -= dt;
     if (v.lungeT > 0) v.lungeT -= dt;
@@ -324,6 +329,7 @@ function updateZombieVisuals(rows, dt) {
       x: v.x, y: v.y, z: v.z, rotY: v.rotY, type: v.type, animT: v.animT,
       stagger: Math.max(0, v.staggerT / 0.35), flash: v.flashT, fall: 0, sink: 0,
       lunge: Math.max(0, (v.lungeT || 0) / 0.35),
+      swing: v.attacking ? (v.swingT || 0) : 0,
       scale: v.scale,
     });
   }
@@ -3291,11 +3297,11 @@ renderer.setAnimationLoop(() => {
           if (hostP.inv.s !== scrap) { scrap = hostP.inv.s; hud.setScrap(scrap); }
         }
       }
-      // Visuals straight from the authoritative sim.
+      // Visuals straight from the authoritative sim, through the SAME row
+      // builder the snapshot uses. Written out by hand here once, and the
+      // host promptly fell a column behind the clients.
       const rows = [];
-      for (const z of sim.zombies.values()) {
-        rows.push([z.id, ZOMBIE_TYPES.indexOf(z.type), z.pos.x, z.pos.y, z.pos.z, z.hp]);
-      }
+      for (const z of sim.zombies.values()) rows.push(zombieRow(z));
       updateZombieVisuals(rows, dt);
       const irows = [];
       for (const it of sim.items.values()) {
@@ -3839,6 +3845,43 @@ window.__zhr = {
   debugVrButtonY: () => (vrInput ? vrInput.debugPressButton('left', 5) : false),
   // The torch: is it lit, and does the empty hand's trigger work it?
   debugVrTrigger: (hand) => (vrInput ? vrInput.debugPullTrigger(hand) : null),
+  // What the reload LOOKS like: where the magazine is and whether it is
+  // in the gun at all. "Readable as a reload" is a claim about the mesh,
+  // so this reports the mesh.
+  debugReload: () => actions.reload(),
+  // Is anything visibly attacking the base? Reports the ANIMATION state,
+  // not the sim's intention: what a player at the far side of the field
+  // would be able to see.
+  debugAttackPose: () => {
+    let attacking = 0, swinging = 0, spread = 0;
+    const phases = [];
+    for (const v of zombieStates.values()) {
+      if (!v.attacking) continue;
+      attacking++;
+      if ((v.swingT || 0) > 0) { swinging++; phases.push((v.swingT % (Math.PI * 2)).toFixed(2)); }
+    }
+    // Are they hammering in lockstep? A crowd all swinging together reads
+    // as one animation played on many bodies.
+    if (phases.length > 1) {
+      const nums = phases.map(Number);
+      const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+      spread = Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length);
+    }
+    return { attacking, swinging, spread: +spread.toFixed(2) };
+  },
+  debugReloadPose: () => {
+    if (!vrInput) return null;
+    for (const holder of vrInput.gripWeapons) {
+      if (holder.userData.shown === 'light') continue;
+      const mag = holder.userData.mag;
+      return {
+        roll: +(holder.userData.reloadRoll || 0).toFixed(3),
+        magY: mag ? +(mag.position.y - (holder.userData.magHome || 0)).toFixed(4) : null,
+        magIn: mag ? mag.visible : null,
+      };
+    }
+    return null;
+  },
   // The holster and the strategy view, as a player would meet them.
   debugReachHolster: () => (vrInput ? vrInput.debugReachHolster() : null),
   debugHolster: () => (vrInput ? {

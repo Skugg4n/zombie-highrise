@@ -24,6 +24,14 @@ const base = `http://localhost:${server.address().port}`;
 const browser = await chromium.launch();
 const page = await browser.newPage();
 const errors = [];
+// Every OK/FAIL line goes through here, so this probe can actually fail.
+// It printed FAIL strings and exited 0, which meant a red run looked
+// exactly like a green one to anything reading the exit code.
+let failures = 0;
+function note(ok, good, bad) {
+  if (!ok) failures++;
+  console.log(ok ? good : bad);
+}
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`${base}/index.html?seed=5`);
 await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
@@ -46,8 +54,9 @@ for (const [ring, [lo, hi]] of Object.entries(RINGS)) {
     + `${list.map((s) => `${s.from} ${s.dist.toFixed(0)}m`).join(', ') || 'NONE'}`
     + (bad.length ? `  OUT OF BAND (${lo}-${hi} m)` : ''));
 }
-console.log(ringsOk ? 'OK: near, mid and far rings are all populated and in band'
-  : 'FAIL: the approach is not mixed');
+note(ringsOk,
+  'OK: near, mid and far rings are all populated and in band',
+  'FAIL: the approach is not mixed');
 
 // Every spawn must have a route in. A single zombie that cannot reach the
 // base leaves "NIGHT 1 - 1 left" on screen forever.
@@ -57,14 +66,15 @@ for (const r of routes) {
   console.log(`  spawn ${r.from} @${r.at}: nudged ${r.nudged} m to reach open ground, `
     + `best path gets ${r.reaches} m from the base ${bad ? 'FAIL' : 'ok'}`);
 }
-console.log(routes.every((r) => r.nudged <= 2.5 && r.reaches <= 6)
-  ? 'OK: every spawn can reach the base' : 'FAIL: a spawn is walled in');
+note(routes.every((r) => r.nudged <= 2.5 && r.reaches <= 6),
+  'OK: every spawn can reach the base',
+  'FAIL: a spawn is walled in');
 
 // The lift has to be boardable. A crate in front of the doors ends the run.
 const board = await page.evaluate(() => window.__zhr.debugBoarding());
-console.log(`boarding zone: ${board.blockers} solids in it, walked to within ${board.walkedToWithin} m`);
-console.log(board.blockers === 0 && board.walkedToWithin < 0.6
-  ? 'OK: the elevator can be boarded' : 'FAIL: something is in the way of the lift');
+note(`boarding zone: ${board.blockers} solids in it, walked to within ${board.walkedToWithin} m`); console.log(board.blockers === 0 && board.walkedToWithin < 0.6,
+  'OK: the elevator can be boarded',
+  'FAIL: something is in the way of the lift');
 
 // Pockets: stand everywhere in the base and try to walk back to the
 // middle. Anything that cannot is a place the player gets pinned, which
@@ -87,9 +97,9 @@ for (let i = 0; i < 8; i++) {
   escapes.push(await page.evaluate((d) => window.__zhr.debugEscape(d), i));
 }
 const worst = Math.max(...escapes.map((e) => e.out));
-console.log(`walked into the wall from the centre in 8 directions, furthest reached: ${worst.toFixed(2)} m`
-  + ` (base half-size 4.0 m)`);
-console.log(worst < 4.6 ? 'OK: players cannot leave the base' : 'FAIL: there is a way out');
+note(`walked into the wall from the centre in 8 directions, furthest reached: ${worst.toFixed(2)} m` + ` (base half-size 4.0 m)`); console.log(worst < 4.6,
+  'OK: players cannot leave the base',
+  'FAIL: there is a way out');
 
 // Force a night and let the horde walk in. Nobody shoots: this measures
 // whether the base falls on its own.
@@ -99,10 +109,29 @@ await page.evaluate(() => { window.__zhr.debugClearNight(); window.__zhr.forceNi
 const keepAlive = setInterval(
   () => page.evaluate(() => window.__zhr.debugHeal && window.__zhr.debugHeal()).catch(() => {}), 700);
 const samples = [];
+// Ola: "zombies attacking the base just stand and stare while it breaks."
+// The wall attack pushed no event and set no state, so nothing on screen
+// ever moved. Sampled through the whole assault: is anything visibly
+// swinging while the integrity falls?
+let sawAttack = 0, sawSwing = 0, bestSpread = 0;
 for (let i = 0; i < 26; i++) {
   await page.waitForTimeout(2000);
   samples.push(await page.evaluate(() => window.__zhr.holdout().state));
+  const pose = await page.evaluate(() => window.__zhr.debugAttackPose());
+  if (pose) {
+    sawAttack = Math.max(sawAttack, pose.attacking);
+    sawSwing = Math.max(sawSwing, pose.swinging);
+    bestSpread = Math.max(bestSpread, pose.spread);
+  }
 }
+console.log(`attack pose: up to ${sawAttack} on the wall, ${sawSwing} swinging, `
+  + `phase spread ${bestSpread.toFixed(2)}`);
+note(sawSwing > 0,
+  `OK: zombies visibly swing at the base (${sawSwing} at once)`,
+  'FAIL: the wall is being eaten by statues');
+note(sawSwing < 2 || bestSpread > 0.5,
+  `OK: they are not swinging in lockstep (spread ${bestSpread.toFixed(2)})`,
+  `FAIL: the whole crowd swings as one (spread ${bestSpread.toFixed(2)})`);
 clearInterval(keepAlive);
 const first = samples[0], last = samples[samples.length - 1];
 
@@ -131,8 +160,9 @@ console.log(`crowding: worst body overlap ${(worstCrowd * 100).toFixed(0)}% of c
 // Under 45% is bodies pressing shoulder to shoulder in a crush, which
 // is what a horde funnelling through a breach should look like. Above
 // that they are genuinely inside one another.
-console.log(worstCrowd < 0.45 ? 'OK: zombies do not stand inside each other'
-  : 'FAIL: bodies are interpenetrating');
+note(worstCrowd < 0.45,
+  'OK: zombies do not stand inside each other',
+  'FAIL: bodies are interpenetrating');
 
 console.log(`still more than 12 m from the base after ${samples.length * 2}s: ${stranded}`);
 console.log(`integrity ${(first.integrity * 100).toFixed(0)}% -> ${(last.integrity * 100).toFixed(0)}%`);
@@ -141,7 +171,9 @@ console.log(`breached segments: ${last.dead}`);
 console.log(`zombies inside the base: ${last.inside}`);
 const chewed = last.integrity < first.integrity;
 const gotIn = samples.some((s) => s.inside > 0);
-console.log(chewed ? 'OK: the horde damages the wall' : 'FAIL: the wall was never touched');
+note(chewed,
+  'OK: the horde damages the wall',
+  'FAIL: the wall was never touched');
 console.log(last.dead > 0 ? 'OK: the wall can be breached' : 'NOTE: no segment fully broke in this window');
 console.log(gotIn ? 'OK: zombies got inside through a breach' : 'NOTE: nobody got in yet');
 
@@ -172,10 +204,13 @@ for (let i = 0; i < 60; i++) {
   if (st.ph !== 'night') { finished = true; break; }
 }
 clearInterval(alive2);
-console.log(finished
-  ? 'OK: night 1 can be finished - every zombie reached the base'
-  : `FAIL: night 1 never ended, stuck at ${lastLeft} left (zombies walled in)`);
+note(finished,
+  'OK: night 1 can be finished - every zombie reached the base',
+  `FAIL: night 1 never ended, stuck at ${lastLeft} left (zombies walled in)`);
 
 console.log('errors:', errors.length ? errors.slice(0, 3).join(' | ') : 'none');
 await browser.close();
 server.close();
+if (errors.length) failures += errors.length;
+console.log(failures ? `\nHOLDOUT RED (${failures})` : '\nHOLDOUT GREEN');
+process.exit(failures ? 1 : 0);

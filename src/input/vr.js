@@ -234,6 +234,7 @@ export class VRInput {
         holder.userData.lamp = null;
         holder.userData.ammoTag = null;
         holder.userData.slide = null;
+        holder.userData.mag = undefined;      // re-found on the new mesh
         holder.userData.flash = null;
         holder.clear();
         if (want === 'light') {
@@ -784,14 +785,53 @@ export class VRInput {
     for (let i = 0; i < this.gripWeapons.length; i++) {
       const holder = this.gripWeapons[i];
       if (holder.userData.shown === 'light') continue;   // the torch does not reload
-      let roll = 0, drop = 0;
+      // THE RELOAD, IN THREE BEATS.
+      //
+      // Ola: "the reload animation in VR is a slow quarter turn left and
+      // back, and it is not readable as a reload." It was one sine sweep
+      // rolling the whole gun over and back, which is a gun tipping, not
+      // a reload. What makes a reload legible is the MAGAZINE: you see
+      // the old one leave and a new one arrive. So:
+      //
+      //   0.00-0.18  CANT AND DROP. The gun snaps over fast and the
+      //              magazine falls out of the well.
+      //   0.18-0.58  EMPTY. The well is visibly empty. This is the beat
+      //              that says "you cannot shoot right now".
+      //   0.58-0.82  SEAT. A fresh magazine rises and snaps home.
+      //   0.82-1.00  BACK UP. The gun snaps upright and the slide runs
+      //              forward.
+      //
+      // The motion between beats is sharp, not sinusoidal: a reload is a
+      // series of fast movements with pauses, and easing everything
+      // smoothly is what made it read as one slow turn.
+      let roll = 0, drop = 0, magDrop = 0, magHidden = false;
       if (arsenal.reloading && arsenal.reloadTotal > 0) {
-        const p = 1 - arsenal.reloadT / arsenal.reloadTotal;
-        const dip = Math.sin(Math.min(1, p * 1.25) * Math.PI);
-        roll = dip * 1.1;                     // cant it over to work the mag
-        drop = dip * 0.06;
+        const p = Math.max(0, Math.min(1, 1 - arsenal.reloadT / arsenal.reloadTotal));
+        const seg = (a, b) => Math.max(0, Math.min(1, (p - a) / (b - a)));
+        const snap = (t) => 1 - (1 - t) * (1 - t) * (1 - t);   // fast out
+        const slam = (t) => t * t * t;                          // fast in
+        // The cant: on quickly, held, off quickly.
+        roll = 0.62 * (p < 0.82 ? snap(seg(0, 0.18)) : 1 - snap(seg(0.82, 1)));
+        drop = 0.05 * (p < 0.82 ? snap(seg(0, 0.18)) : 1 - snap(seg(0.82, 1)));
+        if (p < 0.18) {
+          magDrop = 0.16 * slam(seg(0, 0.18));       // falls, accelerating
+        } else if (p < 0.58) {
+          magHidden = true;                          // gone: the empty beat
+        } else if (p < 0.82) {
+          magDrop = 0.16 * (1 - snap(seg(0.58, 0.82)));   // rises and seats
+        }
       } else if (hint > 0) {
         roll = hint * 0.25;                   // it starts to tip as you hold
+      }
+      // The magazine part, found once and remembered.
+      let mag = holder.userData.mag;
+      if (mag === undefined) {
+        mag = holder.userData.mag = holder.getObjectByName('mag') || null;
+        if (mag) holder.userData.magHome = mag.position.y;
+      }
+      if (mag) {
+        mag.visible = !magHidden;
+        mag.position.y = holder.userData.magHome - magDrop;
       }
       holder.userData.reloadRoll = roll;
       holder.position.y = -drop;

@@ -238,3 +238,25 @@ Related: the reload gesture that was changelogged as shipped and never
 wired up, and the HUD overlap check that passed on a screen the
 overlapping box was not on. Same family: the test ran, the test was
 green, the test never looked at the thing.
+
+## The host fell a column behind its own clients (v0.19.1)
+
+**Symptom.** Zombies hammering the base animated correctly for a joining
+client and stood perfectly still for the host, which in solo play means
+they stood still for everybody.
+
+**Cause.** The zombie row `[id, type, x, y, z, hp]` was written out as a
+literal in two places: `snapshot()` in state.js, for the wire, and the
+host's own render path in main.js, which reads the sim directly and never
+needs a snapshot. Adding an `attacking` column to the first left the
+second a field short. Nothing errored: the extra slot was simply
+`undefined`, which is falsy, which is exactly "not attacking".
+
+**Solution.** One exported `zombieRow(z, rounded)` used by both. A row
+shape written down twice is a row shape that will disagree, and the
+failure is silent because a missing trailing field in a destructure is
+just `undefined`.
+
+**Where else to look:** the same pattern exists for items, grenades,
+barrels, drones, mines and traps. They have not diverged yet. They will,
+the first time one of them grows a field.

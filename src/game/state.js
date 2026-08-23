@@ -37,6 +37,21 @@ export const DRONE_LOADS = ['mine', 'tar', 'spike', 'lure', 'fetch'];
 
 const AMMO_PICKUP = { ammo_shotgun: ['shotgun', 25], ammo_smg: ['smg', 120] };
 
+// ONE zombie row, used by the snapshot AND by the host's own rendering.
+//
+// These were two separate literals in two files, and adding a field to
+// one of them silently left the other behind: the host saw zombies
+// standing still while every client saw them hammering the wall, because
+// the host built its rows by hand and never got the new column. A row
+// shape written down twice is a row shape that will disagree.
+//
+// rounded: snapshots go over the wire, the host's own rows do not.
+export function zombieRow(z, rounded = false) {
+  const r = rounded ? (n) => +n.toFixed(2) : (n) => n;
+  return [z.id, ZOMBIE_TYPES.indexOf(z.type),
+    r(z.pos.x), r(z.pos.y), r(z.pos.z), z.hp, z.attacking ? 1 : 0];
+}
+
 export class HostSim {
   constructor(level) {
     this.level = level;
@@ -913,6 +928,15 @@ export class HostSim {
     // never takes a scratch.
     z.stuckT = 0;
     z.path = null;
+    // ATTACKING IS A STATE, NOT AN EVENT. Ola: "zombies attacking the
+    // base just stand and stare while it breaks. They need an attack
+    // animation readable from across the field." The wall attack pushed
+    // no event at all, so nothing on any screen ever moved: the only clue
+    // that the base was under attack was the integrity bar going down.
+    // A per-bite event would give one twitch every 0.9 seconds, which is
+    // not what hammering on a wall looks like either. This rides the
+    // snapshot instead, so the animation runs for as long as it is true.
+    z.attacking = true;
     z.biteT += dt;
     if (z.biteT >= stats.biteInterval) {
       z.biteT = 0;
@@ -1650,6 +1674,7 @@ export class HostSim {
       // because a sealed perimeter leaves no route in, so this is simply
       // "what do you do when you arrive".
       if (this.level.baseWall && this._attackWall(z, stats, dt)) continue;
+      z.attacking = false;         // walking again: drop the hammer pose
       z.biteT = 0;
 
       const steer = this._navSteer(z, stats, goal, dt);
@@ -2265,10 +2290,7 @@ export class HostSim {
       };
     }
     const zs = [];
-    for (const z of this.zombies.values()) {
-      zs.push([z.id, ZOMBIE_TYPES.indexOf(z.type),
-        +z.pos.x.toFixed(2), +z.pos.y.toFixed(2), +z.pos.z.toFixed(2), z.hp]);
-    }
+    for (const z of this.zombies.values()) zs.push(zombieRow(z, true));
     const gs = [];
     const GKINDS = ['frag', 'smoke', 'molotov', 'spit'];
     for (const g of this.grenades.values()) {

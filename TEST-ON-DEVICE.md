@@ -54,6 +54,16 @@ and I will make that the default. It is saved on your headset meanwhile.
 - [ ] Nothing should be shining from your face any more. If you still see
       light coming from your viewpoint in VR, say so.
 
+**Two animations that were saying nothing.**
+
+- [ ] Reload in VR. You should see the magazine DROP OUT of the gun, a
+      moment with an empty well, then a fresh one snap in. Tell me if it
+      still reads as the gun just tipping over.
+- [ ] Let the horde reach the base wall and watch from the far side of
+      the field. They should be visibly swinging at it, arms over the
+      head and down, and not all in time with each other. They used to
+      stand perfectly still while the bar went down.
+
 **Mines.** (Anywhere, VR or flat.)
 
 - [ ] Shoot a mine you laid: it should go off.

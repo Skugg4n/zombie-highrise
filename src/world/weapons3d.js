@@ -35,7 +35,7 @@ export function makeWeaponMesh(kind) {
     case 'smg': {
       namedPart(g, new THREE.BoxGeometry(0.05, 0.08, 0.3), metal(), 0, 0, -0.08, 0, 'slide');
       part(g, new THREE.CylinderGeometry(0.016, 0.016, 0.16, 8), metal(), 0, 0.01, -0.3, Math.PI / 2);
-      part(g, new THREE.BoxGeometry(0.035, 0.14, 0.05), metal(), 0, -0.1, -0.02, 0.15);
+      namedPart(g, new THREE.BoxGeometry(0.035, 0.14, 0.05), metal(), 0, -0.1, -0.02, 0.15, 'mag');
       part(g, new THREE.BoxGeometry(0.032, 0.09, 0.045), tape(), 0, -0.06, 0.09, 0.25);
       break;
     }
@@ -46,6 +46,7 @@ export function makeWeaponMesh(kind) {
       part(g, new THREE.BoxGeometry(0.045, 0.05, 0.14), wood(), 0, -0.01, -0.32);      // foregrip
       const mag = part(g, new THREE.BoxGeometry(0.035, 0.16, 0.07), metal(), 0, -0.11, -0.06);
       mag.rotation.x = 0.5;                                                            // curved mag hint
+      mag.name = 'mag';
       break;
     }
     case 'akimbo': {
@@ -78,6 +79,12 @@ export function makeWeaponMesh(kind) {
       const guard = part(g, new THREE.BoxGeometry(0.006, 0.03, 0.045), metal(), 0, -0.028, -0.015);
       guard.rotation.x = 0.15;
       part(g, new THREE.BoxGeometry(0.034, 0.085, 0.042), tape(), 0, -0.05, 0.022, 0.22); // taped grip
+      // The MAGAZINE, tagged so the reload can drop it and seat a fresh
+      // one. Ola: "the reload animation in VR is a slow quarter turn."
+      // A reload reads as a reload when you can see the magazine leave
+      // and a new one arrive; rotating the whole gun says nothing.
+      const mag = part(g, new THREE.BoxGeometry(0.026, 0.05, 0.03), metal(), 0, -0.082, 0.03, 0.22);
+      mag.name = 'mag';
       break;
     }
   }

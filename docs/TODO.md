@@ -78,10 +78,17 @@ doing the bookkeeping. That is my job.
       12. The plain button is gone; remote delivery is the drone's job.
 
 ### Feel and animation
-- [ ] The VR reload is a slow quarter turn left and back, and it is
-      unclear what it represents. One quick decisive motion instead.
-- [ ] Zombies attacking the base stand and stare while it breaks. They
-      need an attack animation that reads from across the field.
+- [x] (v0.19.1) The VR reload is a slow quarter turn left and back, and it
+      is unclear what it represents. It is three beats now: the gun snaps
+      over and the magazine drops out, a beat where the well is visibly
+      empty, then a fresh magazine seats and the gun snaps upright. The
+      weapons grew a tagged magazine part so there is something to watch.
+- [x] (v0.19.1) Zombies attacking the base stand and stare while it
+      breaks. They need an attack animation that reads from across the
+      field. Whole body: arms over the head and down, torso rocking with
+      them, each on its own clock so a crowd does not swing in lockstep.
+      The wall attack pushed no event and set no state at all, which is
+      why nothing had ever moved.
 
 ### Mechanics
 - [x] (v0.18.2) Shooting a mine should detonate it. Armed mines are in

@@ -1,5 +1,41 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.19.1 - 2026-08-24 - two animations that were not saying anything
+
+**The reload was a gun tipping over, not a reload.** Ola: "the reload
+animation in VR is a slow quarter turn left and back, and it is unclear
+what it represents." It was one sine sweep rolling the whole weapon and
+back. What makes a reload legible is the MAGAZINE, so the weapons grew a
+tagged magazine part and the animation is three beats: the gun snaps over
+and the magazine drops out, a beat where the well is visibly empty (this
+is the beat that says "you cannot shoot right now"), then a fresh
+magazine rises and seats and the gun snaps upright. Sharp motion at the
+ends, held in the middle. Easing everything smoothly is what made it read
+as one slow turn.
+
+**Zombies ate the base without moving.** Ola: "zombies attacking the base
+just stand and stare while it breaks. They need an attack animation
+readable from across the field." The wall attack pushed no event and set
+no state, so nothing on any screen had ever moved: the only clue that the
+base was under attack was the integrity bar going down. Attacking is now
+a STATE that rides the snapshot rather than an event, because an event
+gives you one twitch every 0.9 seconds and that is not what hammering on
+a wall looks like. The pose is whole-body, arms over the head and down
+with the torso rocking, because at thirty metres a hand movement is
+invisible. Each one runs on its own clock so a crowd does not swing in
+lockstep.
+
+**The host was a column behind its own clients.** Found by the new check.
+The zombie row was written out as a literal in two places, the snapshot
+and the host's own render path, so adding a column to one left the other
+short. Nothing errored: the missing field destructures to `undefined`,
+which is falsy, which is exactly "not attacking". There is one exported
+row builder now. LESSONS.md, including which other row shapes are waiting
+to do the same thing.
+
+**holdoutprobe can fail now.** It printed FAIL strings and exited 0, so a
+red run looked exactly like a green one to anything reading the exit code.
+
 ## v0.19.0 - 2026-08-24 - the strategy view, and a holster to free your hand
 
 **The drone existed and could not be used in a headset.** It is the

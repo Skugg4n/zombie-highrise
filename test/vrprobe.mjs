@@ -239,6 +239,55 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
     'squeezing there again draws it back', JSON.stringify(h.drawn));
 }
 
+// ---- 2e. The reload READS as a reload ----
+// Ola: "the reload animation in VR is a slow quarter turn left and back,
+// and it is not readable as a reload." A reload is legible when you see
+// the magazine leave and a new one arrive, so that is what this samples:
+// the actual position of the actual magazine mesh, all the way through.
+{
+  const film = await page.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugRefill();
+    D.debugFireOnce(true);
+    D.debugReload();
+    // A reload is 1.4 s. Sampling 40 frames caught two thirds of it and
+    // then complained that the magazine was not back yet.
+    const frames = [];
+    for (let i = 0; i < 110; i++) {
+      await new Promise((r) => requestAnimationFrame(r));
+      const p = D.debugReloadPose();
+      if (p) frames.push(p);
+    }
+    return frames;
+  });
+  const magFrames = film.filter((f) => f.magY !== null);
+  check(magFrames.length > 5, `the weapon has a magazine to move (${magFrames.length} frames)`);
+  const gone = magFrames.some((f) => f.magIn === false);
+  const dropped = Math.max(...magFrames.map((f) => -f.magY), 0);
+  const back = magFrames.length && magFrames[magFrames.length - 1].magIn === true
+    && Math.abs(magFrames[magFrames.length - 1].magY) < 0.01;
+  check(dropped > 0.05, `the magazine visibly leaves the gun (${dropped.toFixed(3)} m)`);
+  check(gone, 'there is a beat where the well is empty');
+  check(back, 'and a fresh magazine ends up seated',
+    JSON.stringify(magFrames[magFrames.length - 1]));
+  // Not just a slow turn: the cant must arrive fast and leave fast rather
+  // than sweeping across the whole reload. Measured over the ANIMATION,
+  // not the sampling window: idle frames after the reload finished were
+  // diluting the ratio and making a correct animation look like a slow
+  // one.
+  const all = film.map((f) => f.roll);
+  const first = Math.max(0, all.findIndex((r) => r > 0.001));
+  let last = all.length - 1;
+  while (last > first && all[last] <= 0.001) last--;
+  const rolls = all.slice(first, last + 1);
+  const peak = Math.max(...rolls);
+  const atPeak = rolls.filter((r) => r > peak * 0.9).length / (rolls.length || 1);
+  // A sweep spends its time in transit; this should spend its time held
+  // over, with two short sharp moves at the ends.
+  check(peak > 0.3 && atPeak > 0.45 && atPeak < 0.9,
+    `the gun snaps over and holds rather than sweeping (peak ${peak.toFixed(2)}, held ${(atPeak * 100).toFixed(0)}% of frames)`);
+}
+
 // ---- 3. Manual reload works in VR (regression guard) ----
 // Point the barrel at the floor and hold: this is the whole gesture, and
 // it silently stopped working once before.

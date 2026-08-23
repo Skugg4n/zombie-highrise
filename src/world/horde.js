@@ -91,10 +91,29 @@ export class HordeRenderer {
       // roll so bodies do not fall in identical clone poses; + bite lunge
       // pitching the whole body at its victim).
       const fall2 = (z.fall || 0) ** 2;
+      // THE WALL HAMMER. Ola: "zombies attacking the base just stand and
+      // stare while it breaks. They need an attack animation readable
+      // from across the field." Readable at 30 m means WHOLE BODY: arms
+      // above the head and down, and the torso rocking with them. A
+      // subtle hand movement is invisible past ten metres, which is why
+      // the bite lunge alone was never going to be enough.
+      //
+      // Sharpened rather than sinusoidal: the arms rear back slowly and
+      // come down fast, which is what makes it read as hitting something
+      // rather than waving.
+      const swinging = (z.swing || 0) > 0;
+      let swingRaise = 0, swingBody = 0;
+      if (swinging) {
+        const ph = (z.swing % (Math.PI * 2)) / (Math.PI * 2);
+        // 0 to 0.62: wind up. 0.62 to 1: slam down.
+        const w = ph < 0.62 ? ph / 0.62 : 1 - (ph - 0.62) / 0.38;
+        swingRaise = w < 0.999 ? w * w : 1;
+        swingBody = ph < 0.62 ? -0.10 * swingRaise : 0.34 * (1 - swingRaise);
+      }
       // Crawlers move prone: whole body pitched forward onto all fours.
       const crawl = look.crawl ? 1.25 : 0;
       this._e.set(
-        -(Math.PI / 2) * fall2 + (z.lunge || 0) * 0.45 + crawl,
+        -(Math.PI / 2) * fall2 + (z.lunge || 0) * 0.45 + crawl + swingBody,
         z.rotY,
         (z.roll || 0) * (0.12 + fall2), 'YXZ');
       this._q.setFromEuler(this._e);
@@ -108,14 +127,17 @@ export class HordeRenderer {
       this._part(P.legR, i, look,
         0.11 * look.sx, 0.75, 0, -s * 0.45, 0.16 * look.sx, 0.75, 0.16, 0, -0.375, 0);
       // Arms: pivot at shoulder, stretched forward with sway + stagger.
-      const armRx = -0.52 - look.lean * 0.45 + (z.stagger || 0) * 0.5;
+      // Arms go up over the head on the wind-up (a large negative pitch)
+      // and past horizontal on the slam.
+      const armRx = -0.52 - look.lean * 0.45 + (z.stagger || 0) * 0.5
+        + (swinging ? -1.55 * swingRaise + 0.55 * (1 - swingRaise) : 0);
       this._part(P.armL, i, look,
         -0.28 * look.sx, 1.22, 0.05, armRx + s * 0.1, 0.11, 0.11, look.armLen, 0, 0, look.armLen / 2);
       this._part(P.armR, i, look,
         0.28 * look.sx, 1.22, 0.05, armRx - s * 0.1, 0.11, 0.11, look.armLen, 0, 0, look.armLen / 2);
       // Torso with hit-flash color and walk roll.
       this._part(P.torso, i, look,
-        0, 1.05, 0, look.lean * 0.5 - (z.stagger || 0) * 0.35,
+        0, 1.05, 0, look.lean * 0.5 - (z.stagger || 0) * 0.35 + swingBody * 0.6,
         0.44 * look.sx, 0.6 * look.sy, 0.24 * look.sx, 0, 0, 0, s * 0.06);
       const col = (z.flash || 0) > 0 ? FLASH : look.accent;
       P.torso.setColorAt(i, col);
