@@ -1480,6 +1480,18 @@ function updateInteractions(dt) {
       progress: Math.min(1, mate.rv / TUNING.player.reviveTime),
     };
     repairHoldT = 0;
+  } else if (nearestPickup()) {
+    // Pickups are automatic, but they were also invisible: Ola could not
+    // tell whether a med kit could be collected at all. It now names
+    // itself as you approach, so walking over it is a decision.
+    const it = nearestPickup();
+    target = {
+      x: it.x, y: it.y, z: it.z,
+      label: PICKUP_LABEL[it.kind] || 'SUPPLIES',
+      sub: 'walk over it',
+      progress: 0,
+    };
+    repairHoldT = 0;
   } else if (level.doors && level.doors.length) {
     // A closed door is the same interaction: walk to the button, hold,
     // watch it fill. The design doc asks for "a moment of standing still
@@ -1533,6 +1545,68 @@ function updateInteractions(dt) {
 }
 
 function inVRNow() { return !!(vrInput && vrInput.active); }
+
+// "+1 HEALTH PACK", floating in front of you for a moment. In a headset
+// the toast that carries this on a monitor simply does not exist, so a
+// player had no idea what they had just picked up, or whether they had.
+let pickupFlash = null;
+let pickupFlashT = 0;
+function showPickupFlash(text) {
+  if (!pickupFlash) {
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 96;
+    pickupFlash = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.5, 0.094),
+      new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, toneMapped: false }));
+    pickupFlash.renderOrder = 999;
+    pickupFlash.position.set(0, -0.18, -1.1);
+    camera.add(pickupFlash);
+    pickupFlash.userData.canvas = c;
+    pickupFlash.material.map = new THREE.CanvasTexture(c);
+    pickupFlash.material.map.colorSpace = THREE.SRGBColorSpace;
+  }
+  const c = pickupFlash.userData.canvas;
+  const x = c.getContext('2d');
+  x.clearRect(0, 0, 512, 96);
+  x.fillStyle = 'rgba(10,12,16,0.8)';
+  x.beginPath(); x.roundRect(4, 4, 504, 88, 20); x.fill();
+  x.strokeStyle = '#7fb069'; x.lineWidth = 3; x.stroke();
+  x.fillStyle = '#e8e4da';
+  x.font = 'bold 44px system-ui, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(text.toUpperCase(), 256, 50);
+  pickupFlash.material.map.needsUpdate = true;
+  pickupFlash.visible = true;
+  pickupFlashT = 1.6;
+}
+function stepPickupFlash(dt) {
+  if (!pickupFlash || pickupFlashT <= 0) return;
+  pickupFlashT -= dt;
+  pickupFlash.material.opacity = Math.min(1, pickupFlashT * 2.5);
+  if (pickupFlashT <= 0) pickupFlash.visible = false;
+}
+
+const PICKUP_LABEL = {
+  pack: 'MED KIT', grenade: 'GRENADE',
+  ammo_shotgun: 'SHELLS', ammo_smg: 'SMG AMMO',
+};
+
+// The nearest collectable within prompt range of where the player ACTUALLY
+// is, which in VR is the camera and not the play-space origin.
+function nearestPickup() {
+  const here = inVRNow() ? camera.getWorldPosition(tmpV2) : rig.group.position;
+  let best = null, bd = 2.6 * 2.6;
+  for (const v of itemVisuals.values()) {
+    if (v.beam && v.beam.visible) continue;      // a field crate: drone job
+    const dx = v.group.position.x - here.x, dz = v.group.position.z - here.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bd) {
+      bd = d2;
+      best = { x: v.group.position.x, y: 0, z: v.group.position.z, kind: v.kind };
+    }
+  }
+  return best;
+}
 
 // Every player the client knows about, including its own mirror, as
 // snapshot-shaped records. The host reads its own sim, a client its
@@ -2072,6 +2146,8 @@ function handleEvents(evs) {
           }[ev.kind] || ev.kind;
           showToast(label, 1800);
           audio.play('pickup');
+          // VR has no toast, so the confirmation has to be in the world.
+          if (vrInput && vrInput.active) showPickupFlash(label);
         }
         break;
       }
@@ -2161,6 +2237,20 @@ function handleEvents(evs) {
       }
       case 'down':
         if (ev.id === (role === 'client' ? net?.myId : 'H')) setDowned(true);
+        break;
+      case 'respawn':
+        // The authoritative "you are on your feet again". Sent by the one
+        // reset path for every restart and level change, so the client can
+        // never be left believing it is still down.
+        if (ev.id === (role === 'client' ? net?.myId : 'H')) {
+          setDowned(false);
+          myHp = ev.hp;
+          hud.setHealth(myHp);
+          if (ev.at) rig.group.position.fromArray(ev.at);
+          playerVel.set(0, 0, 0);
+          arsenal.cancelReload && arsenal.cancelReload();
+          updateLowHpVignette();
+        }
         break;
       case 'revive':
         if (ev.id === (role === 'client' ? net?.myId : 'H')) {
@@ -2973,9 +3063,19 @@ renderer.setAnimationLoop(() => {
     // Wave-driven presentation.
     if (isPlaying()) {
       if (lastWave && lastWave.ph !== presentedPhase) presentPhase(lastWave.ph);
+      // DERIVED, NOT LATCHED. A missed or reordered event must not be able
+      // to leave the player pinned on the floor with the run over and the
+      // game silent about it. The simulation is the truth; this follows it.
+      const meId = role === 'client' ? net?.myId : 'H';
+      const authoritative = role === 'client'
+        ? (replica.latest && replica.latest.players && replica.latest.players[meId])
+        : (sim && sim.players.get('H'));
+      if (authoritative && !!authoritative.down !== myDown) setDowned(!!authoritative.down);
+
       updateWaveHud(lastWave);
       updateBaseHud();
       updateInteractions(dt);
+      stepPickupFlash(dt);
       updateVrReadouts();
     }
     updateDayNight();
@@ -3420,6 +3520,33 @@ window.__zhr = {
     grips: vrInput.grips.length,
   } : null),
   debugDown: () => myDown,
+  // What a PLAYER can tell about their own state, rather than what a
+  // variable says. Used by assertions that must prove the game is
+  // playable, not that a flag flipped.
+  debugCanPlay: async () => {
+    const before = rig.group.position.clone();
+    const beforeAmmo = arsenal.hudInfo().mag;
+    // Can I move?
+    debugKeepAvatars.size;
+    rig.group.position.x += 0.6;
+    const moved = Math.abs(rig.group.position.x - before.x) > 0.3;
+    rig.group.position.copy(before);
+    // Can I shoot?
+    let fired = false;
+    if (canAct()) {
+      const ray = aimRay();
+      if (ray) fired = arsenal.fire(ray.origin, ray.dir);
+    }
+    return {
+      downed: myDown,
+      hp: myHp,
+      canAct: canAct(),
+      canMove: moved,
+      canShoot: !!fired,
+      ammoBefore: beforeAmmo,
+      ammoAfter: arsenal.hudInfo().mag,
+    };
+  },
   // What the interaction layer is currently offering, as the player sees
   // it. "Actionable, not just announced" is a claim that needs a test.
   debugInteraction: () => {
@@ -3433,6 +3560,7 @@ window.__zhr = {
     };
   },
   debugRepairHold: (down) => { repairHeld = !!down; },
+  debugClearItems: () => { if (sim) sim.items.clear(); },
   // Two stand-in teammates so avatars can be looked at without a second
   // headset in the room: one flat and walking, one with tracked hands.
   debugFakeMates: () => {
@@ -3481,7 +3609,17 @@ window.__zhr = {
   },
   reloading: () => arsenal.reloading,
   debugEndRun: () => { if (sim) { sim.wave.phase = 'gameover'; sim.wave.t = 0; for (const p of sim.players.values()) { p.down = true; p.hp = 0; } } },
-  debugSetDowned: (v) => setDowned(v),
+  // Down the player the way the game does, in the SIMULATION. Setting the
+  // client flag alone no longer works, and should not: the client derives
+  // that state now, so a faked flag is corrected on the next frame. A
+  // probe that fakes the wrong layer proves nothing.
+  debugSetDowned: (v) => {
+    if (!sim) { setDowned(v); return; }
+    const p = sim.players.get('H');
+    if (!p) return;
+    if (v) { p.down = true; p.hp = 0; sim.events.push({ e: 'down', id: 'H' }); }
+    else { sim.resetPlayers(); }
+  },
 
   // ---- Recoil probe surface ----
   tuning: () => TUNING,
@@ -3546,6 +3684,9 @@ window.__zhr = {
     hx: +r.hx.toFixed(2), hz: +r.hz.toFixed(2),
   })),
   debugHeightAt: (x, z) => level.heightAt(x, z),
+  debugVoidAt: (x, z) => (level.voidAt ? level.voidAt(x, z) : null),
+  debugSimZombies: () => (sim ? [...sim.zombies.values()].filter((z) => z.alive)
+    .map((z) => [+z.pos.x.toFixed(1), +z.pos.z.toFixed(1), +z.pos.y.toFixed(1), z.type]) : []),
   debugEscape: (dirIdx, steps = 60) => {
     const c = level.baseCentre;
     if (!c) return null;

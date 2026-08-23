@@ -742,10 +742,25 @@ export function validateSpawns(spec) {
 
 // A chasm is not a collider, it is an ABSENCE. The pathfinder has to be
 // told about it separately or the horde walks cheerfully into the hole.
+//
+// NavGrid.build calls this with the GRID and expects it to mark cells
+// itself. An earlier version returned an (x, z) predicate instead, which
+// the grid called once and threw the answer away, so the hole was never
+// blocked and bodies stood in mid-air over it. Match the contract.
 export function voidBlocker(level) {
   if (!level.voids || !level.voids.length) return null;
-  return (x, z) => level.voids.some(
-    (v) => Math.abs(x - v.x) < v.hx + 0.4 && Math.abs(z - v.z) < v.hz + 0.4);
+  return (grid) => {
+    for (const v of level.voids) {
+      // Inflated by an agent radius, so nobody is steered to the very lip.
+      const x0 = grid.toCellX(v.x - v.hx - 0.4), x1 = grid.toCellX(v.x + v.hx + 0.4);
+      const z0 = grid.toCellZ(v.z - v.hz - 0.4), z1 = grid.toCellZ(v.z + v.hz + 0.4);
+      for (let cz = Math.max(0, z0); cz <= Math.min(grid.h - 1, z1); cz++) {
+        for (let cx = Math.max(0, x0); cx <= Math.min(grid.w - 1, x1); cx++) {
+          grid.blocked[grid.idx(cx, cz)] = 1;
+        }
+      }
+    }
+  };
 }
 
 export function deriveNavBounds(level) {

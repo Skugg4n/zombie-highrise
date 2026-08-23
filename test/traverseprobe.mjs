@@ -78,24 +78,33 @@ check(fell.hp < 100, 'and it costs you', `hp ${fell.hp}`);
 check(fell.end[1] > -5, 'and you are put back on solid ground, not left falling',
   `y ${fell.end[1].toFixed(1)}`);
 
-// The horde must not path into it.
-await page.evaluate(() => { window.__zhr.debugHeal(); });
+// The horde must not path into it. They fight for real now, so the
+// observer is kept alive: this measures where they WALK, not whether one
+// stationary player survives them.
 let worstInChasm = 0;
 for (let i = 0; i < 14; i++) {
   await page.waitForTimeout(1400);
-  const st = await page.evaluate(() => window.__zhr.debugRoute());
+  const st = await page.evaluate(() => {
+    window.__zhr.debugHeal();
+    return window.__zhr.debugRoute();
+  });
   worstInChasm = Math.max(worstInChasm, st.inChasm);
 }
 check(worstInChasm === 0, 'the horde never walks into the chasm',
   `worst ${worstInChasm} inside it`);
 
 // Advancing is what summons them.
+// Measured from a FRESH route: `reached` is a high-water mark, so a
+// level already walked end to end can never push again.
+await page.evaluate(() => window.__zhr.debugGotoLevel(2));
+await page.waitForTimeout(900);
 const pushed = await page.evaluate(async () => {
   const D = window.__zhr;
+  D.debugHeal();
   const before = D.debugRoute().pushed;
   const e = D.debugRoute().exit;
   D.debugTeleport(e.x, e.z - 2.5);      // most of the way across
-  await new Promise((res) => setTimeout(res, 1500));
+  await new Promise((res) => setTimeout(res, 1600));
   return { before, after: D.debugRoute().pushed };
 });
 check(pushed.after > pushed.before, 'pushing forward brings them',
@@ -107,6 +116,7 @@ const done = await page.evaluate(async () => {
   const e = D.debugRoute().exit;
   D.debugKillAll();
   for (let i = 0; i < 40; i++) {
+    D.debugKillAll();
     D.debugTeleport(e.x, e.z);
     D.debugHeal();
     await new Promise((res) => setTimeout(res, 100));

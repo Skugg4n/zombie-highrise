@@ -42,11 +42,14 @@ const check = (ok, label, detail = '') => {
 
 console.log('HOLD TO ACT');
 
-// Nothing damaged: nothing offered. A prompt that is always up is noise.
-await page.evaluate(() => window.__zhr.debugRepairAll());
-await page.waitForTimeout(300);
+// Nothing damaged and nothing to pick up: nothing offered. A prompt that
+// is always up is noise. (Loot is cleared too, because a med kit on the
+// floor is legitimately something to do and now says so.)
+await page.evaluate(() => { window.__zhr.debugRepairAll(); window.__zhr.debugClearItems(); });
+await page.waitForTimeout(400);
 let s = await page.evaluate(() => window.__zhr.debugInteraction());
-check(s && !s.promptVisible, 'no prompt when there is nothing to do');
+check(s && !s.promptVisible, 'no prompt when there is nothing to do',
+  s && s.label ? `offered "${s.label}"` : '');
 
 // Damage a section, stand at it.
 const seg = await page.evaluate(() => {

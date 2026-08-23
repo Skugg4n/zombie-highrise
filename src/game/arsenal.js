@@ -153,6 +153,16 @@ export class Arsenal {
     return true;
   }
 
+  // Drop any reload in progress. Used by the authoritative respawn, so a
+  // player who went down mid-reload does not come back mid-reload.
+  cancelReload() {
+    this.reloading = false;
+    this.reloadT = 0;
+    this.heat = 0;
+    this.shotIndex = 0;
+    this.onHudChange();
+  }
+
   reload() {
     const w = this.active;
     if (!this.isGun(w) || this.reloading) return;

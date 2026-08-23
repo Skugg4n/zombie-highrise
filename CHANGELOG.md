@@ -1,5 +1,61 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.16.1 - 2026-08-23 - the L2 playtest, and the same mistake three times
+
+Ola's L2 playtest, plus the restart bug. Three of the four level bugs were
+the same organisational failure he named himself: something built for the
+first variant only partly ported to the second.
+
+**"Zombies do not attack at all on L2."** Verified before fixing, as he
+asked, and the hypothesis was wrong in an instructive way. They were not
+failing to attack; they were never being STEPPED. `_stepZombies` ran only
+in the `night` and `elevator` phases, and the route phase was never added
+to that list. Daylight raiders on L1 had been frozen for the same reason
+the whole time. The list of phases where the horde moves is now an
+allow-list of phases in which the world is RUNNING, because a list of
+combat phases is a list that gets forgotten.
+
+**The chasm read as a flat plate, and the horde stood on it.** Two
+separate faults. Visually it had no depth: it now has banded shaft walls
+nine metres down, girders across the top to measure the drop against, and
+a floor at the bottom of them rather than one floating in space with a gap
+between. Mechanically the hole was never in the navigation grid at all:
+`extraBlocked` is called with the GRID and expects it to mark cells, while
+the void blocker returned an (x, z) predicate whose answer was thrown
+away. Same family as the dead reload gesture: a contract mismatch that
+fails silently.
+
+**Zombies spawned on the open floor instead of from the holes.** A hole
+was a dark rectangle painted on a solid wall, so there was nowhere to come
+from. The outer walls are built as segments now with real gaps where the
+holes are, and each hole has a recess behind it that they walk out of.
+
+**Pickups could not be collected.** It was the rig-origin class of bug, as
+Ola guessed: the radius was measured from the play-space origin, so in
+roomscale VR a med kit at your feet was two metres away. It measures from
+the head now, with a bigger radius, a proximity prompt naming what it is,
+and a world-space confirmation card in VR where the toast does not exist.
+
+**TRY AGAIN left you downed.** The simulation reset `down` and told
+nobody, so the client's own flag stayed latched: you respawned on the
+floor, unable to move or shoot, with the run over and the game silent
+about it. There is now ONE authoritative reset path that every restart and
+level transition calls, it announces itself, and the client DERIVES the
+downed state from the simulation rather than latching it from events. Ad
+hoc resets are how a field gets forgotten.
+
+**And the probe that was green while that was broken.** It asserted
+`phase !== 'gameover'`, which is a variable, not a player. It now checks
+that after pressing TRY AGAIN you are not downed, have full health, can
+move and can shoot. Fixing it immediately exposed a second layer of the
+same mistake: the probe had been faking the downed flag on the CLIENT,
+which the new derivation correctly ignores. It downs the actual player in
+the simulation now.
+
+**Also unified: one way to put a body on the ground.** There were three
+copies and only one handled a void, and none of them ran before the early
+exits, so a zombie with no path hovered over the hole forever.
+
 ## v0.16.0 - 2026-08-23 - LEVEL 2: THE UNDERWORKS
 
 The traverse archetype, built to Ola's sketch L2. Floor 2 of the campaign

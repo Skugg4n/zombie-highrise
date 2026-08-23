@@ -35,12 +35,36 @@ function buildChasm(level, c) {
   const lip = mat(0x4a453d, 1.0);
   const deep = new THREE.MeshBasicMaterial({ color: 0x05060a });
 
-  // A black plane far below, so looking in reads as depth and not as a
-  // hole in the rendering.
+  // DEPTH YOU CAN SEE. It read as a flat dark plate, which is exactly how
+  // a hole you can walk over looks, so nobody believed it was a hole.
+  // Continuous shaft walls all the way down, banded so the eye can count
+  // the distance, and a floor at the bottom of them rather than one
+  // floating in space with a gap in between.
+  const DEPTH = 9;
+  const shaft = mat(0x231f1a, 1.0);
+  const band = mat(0x35302a, 1.0);
+  for (let ring = 0; ring < 6; ring++) {
+    const y = -0.4 - ring * (DEPTH / 6);
+    const h = DEPTH / 6;
+    const m = ring % 2 ? band : shaft;
+    // Each ring insets a little further, so the shaft tapers and the
+    // perspective reads as going DOWN rather than as a painted square.
+    const inset = ring * 0.06;
+    box(g, c.w - inset * 2, h, 0.24, m, c.x, y - h / 2, c.z - hz + inset);
+    box(g, c.w - inset * 2, h, 0.24, m, c.x, y - h / 2, c.z + hz - inset);
+    box(g, 0.24, h, c.d - inset * 2, m, c.x - hx + inset, y - h / 2, c.z);
+    box(g, 0.24, h, c.d - inset * 2, m, c.x + hx - inset, y - h / 2, c.z);
+  }
   const floorFar = new THREE.Mesh(new THREE.PlaneGeometry(c.w, c.d), deep);
   floorFar.rotation.x = -Math.PI / 2;
-  floorFar.position.set(c.x, -14, c.z);
+  floorFar.position.set(c.x, -DEPTH - 0.5, c.z);
   g.add(floorFar);
+  // Girders across the top of the shaft: something for the eye to measure
+  // the drop against, and they catch the flashlight.
+  for (let i = 1; i < 4; i++) {
+    const t = -hz + (c.d * i) / 4;
+    box(g, c.w, 0.16, 0.16, mat(0x4a4034, 1.0), c.x, -0.55, c.z + t);
+  }
 
   // Broken edging all the way round, so the drop is visible from a
   // distance rather than discovered by falling into it.
@@ -57,14 +81,6 @@ function buildChasm(level, c) {
       box(g, 0.34, h, step * 1.02, lip, c.x + side * hx, h / 2, c.z + t);
     }
   }
-  // Inner walls of the shaft, so the edge has thickness.
-  for (const [sx, sz, sw, sd] of [
-    [c.x, c.z - hz, c.w, 0.2], [c.x, c.z + hz, c.w, 0.2],
-    [c.x - hx, c.z, 0.2, c.d], [c.x + hx, c.z, 0.2, c.d],
-  ]) {
-    box(g, sw, 4, sd, mat(0x2a2721, 1.0), sx, -2, sz);
-  }
-
   level.voids.push({ x: c.x, z: c.z, hx, hz });
 }
 
@@ -139,13 +155,31 @@ function buildHole(level, h) {
   const g = level.group;
   const along = h.along || 'x';
   const w = h.width || 2.0;
+  const inward = h.inward || -1;
   const dark = new THREE.MeshBasicMaterial({ color: 0x04050a });
-  const hole = new THREE.Mesh(
-    new THREE.PlaneGeometry(w, 2.0),
-    dark);
-  hole.position.set(h.x, 1.0, h.z);
+
+  // A RECESS, not a decal. They have to walk OUT of somewhere. A flat
+  // dark rectangle painted on a wall gives them nowhere to come from, so
+  // they appear on the open floor in front of it instead, which is
+  // exactly what docs/level-design.md forbids.
+  const RD = 1.6;                       // how deep the tunnel mouth goes
+  const ax = along === 'x' ? 0 : -inward;   // outward, away from the room
+  const az = along === 'x' ? -inward : 0;
+  for (const side of [-1, 1]) {
+    const sw = along === 'x' ? 0.3 : RD;
+    const sd = along === 'x' ? RD : 0.3;
+    const px = h.x + (along === 'x' ? side * (w / 2 + 0.15) : ax * RD / 2);
+    const pz = h.z + (along === 'x' ? az * RD / 2 : side * (w / 2 + 0.15));
+    box(g, sw, 2.4, sd, MATS.basementWall, px, 1.2, pz);
+    level.colliders.push({ x: px, z: pz, hx: sw / 2, hz: sd / 2, tall: true });
+  }
+  // The back of the recess: darkness they emerge from.
+  const hole = new THREE.Mesh(new THREE.PlaneGeometry(w, 2.0), dark);
+  hole.position.set(h.x + ax * (RD - 0.15), 1.0, h.z + az * (RD - 0.15));
   hole.rotation.y = along === 'x' ? 0 : Math.PI / 2;
   g.add(hole);
+  box(g, along === 'x' ? w + 0.6 : 0.3, 2.4, along === 'x' ? 0.3 : w + 0.6,
+    MATS.basementWall, h.x + ax * RD, 1.2, h.z + az * RD);
   // Broken edging around it.
   const rubble = mat(0x574f45, 1.0);
   for (let i = 0; i < 7; i++) {
@@ -160,10 +194,10 @@ function buildHole(level, h) {
   }
   level.entries.push(new THREE.Vector3(h.x, 0, h.z));
   level.spawnSources.push({ x: h.x, z: h.z, kind: h.id || 'hole' });
+  // Born INSIDE the recess, so the first thing a player sees is a body
+  // walking out of the dark rather than one appearing on the floor.
   level.zombieSpawns.push(new THREE.Vector3(
-    h.x + (along === 'x' ? 0 : (h.inward || -1) * 0.9),
-    0,
-    h.z + (along === 'x' ? (h.inward || -1) * 0.9 : 0)));
+    h.x + ax * (RD * 0.55), 0, h.z + az * (RD * 0.55)));
 }
 
 // ---- The frame ----------------------------------------------------------
@@ -186,14 +220,43 @@ export function traverseFrame(level, spec, ctx, { makeElevator, quality }) {
   const floor = box(level.group, R.size.w, 0.2, R.size.d, MATS.basementFloor, RX, 0, RZ);
   floor.receiveShadow = quality === 'DESKTOP';
 
-  // The outer walls. Openings are made by the spawn holes, which cut
-  // their own darkness into them.
-  for (const [wx, wz, ww, wd] of [
-    [RX, RZ - hd, R.size.w + 0.6, 0.3], [RX, RZ + hd, R.size.w + 0.6, 0.3],
-    [RX - hw, RZ, 0.3, R.size.d + 0.6], [RX + hw, RZ, 0.3, R.size.d + 0.6],
-  ]) {
-    box(level.group, ww, WALL_H, wd, MATS.basementWall, wx, WALL_H / 2, wz);
-    level.colliders.push({ x: wx, z: wz, hx: ww / 2, hz: wd / 2, tall: true });
+  // The outer walls, built as runs of one-metre segments so that a spawn
+  // hole can be a REAL GAP. Building them as four solid boxes meant every
+  // hole was a dark rectangle painted on a wall with nothing behind it,
+  // and nothing could come through: the recess ended up sealed outside the
+  // room and the level failed its own routability check.
+  const openings = (R.holes || []).map((h) => ({
+    along: h.along || 'x',
+    x: RX + h.x, z: RZ + h.z,
+    half: (h.width || 2.0) / 2 + 0.15,
+  }));
+  const isOpening = (side, x, z) => openings.some((o) => o.along === side
+    && (side === 'x' ? Math.abs(x - o.x) < o.half && Math.abs(z - o.z) < 0.9
+      : Math.abs(z - o.z) < o.half && Math.abs(x - o.x) < 0.9));
+  const SEG = 1.0;
+  for (const sign of [-1, 1]) {
+    // North and south runs.
+    for (let a = -hw + SEG / 2; a <= hw - SEG / 2 + 0.001; a += SEG) {
+      const x = RX + a, z = RZ + sign * hd;
+      if (isOpening('x', x, z)) continue;
+      box(level.group, SEG + 0.02, WALL_H, 0.3, MATS.basementWall, x, WALL_H / 2, z);
+      level.colliders.push({ x, z, hx: SEG / 2 + 0.01, hz: 0.15, tall: true });
+    }
+    // East and west runs.
+    for (let a = -hd + SEG / 2; a <= hd - SEG / 2 + 0.001; a += SEG) {
+      const x = RX + sign * hw, z = RZ + a;
+      if (isOpening('z', x, z)) continue;
+      box(level.group, 0.3, WALL_H, SEG + 0.02, MATS.basementWall, x, WALL_H / 2, z);
+      level.colliders.push({ x, z, hx: 0.15, hz: SEG / 2 + 0.01, tall: true });
+    }
+    // Corner posts, so the runs meet cleanly.
+    for (const s2 of [-1, 1]) {
+      box(level.group, 0.4, WALL_H, 0.4, MATS.basementWall,
+        RX + sign * hw, WALL_H / 2, RZ + s2 * hd);
+      level.colliders.push({
+        x: RX + sign * hw, z: RZ + s2 * hd, hx: 0.2, hz: 0.2, tall: true,
+      });
+    }
   }
 
   // Interior walls, frame-local.

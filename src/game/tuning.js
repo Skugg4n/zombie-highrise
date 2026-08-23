@@ -257,6 +257,9 @@ export const TUNING = {
     // is free (the flight time is the price) and is the drone's second
     // job. A kill just outside the wall drops inside instead, so the
     // field does not fill with crates for every stray body.
+    // Generous on purpose: walking over a med kit and not getting it is
+    // far worse than getting one you did not quite step on.
+    pickupRadius: 1.25,
     lootFallsInsideWithin: 7,
     droneFetchRadius: 6,
     minePlacementFromMap: 12,      // hand-placed mines are a staple, not a luxury      // remote placement pays a small premium

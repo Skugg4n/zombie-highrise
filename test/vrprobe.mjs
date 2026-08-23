@@ -99,16 +99,26 @@ check(acts.some((a) => /AGAIN/i.test(a)), 'you can restart from inside the heads
   JSON.stringify(acts));
 check(acts.some((a) => /QUIT/i.test(a)), 'you can quit from inside the headset');
 
-// The action must actually do something: a panel that lists a button and
-// then ignores it is the same softlock with extra steps.
+// The action must leave the player ABLE TO PLAY.
+//
+// This assertion used to read `after !== 'gameover'` and was green while
+// TRY AGAIN left the player lying on the floor, unable to move or shoot,
+// with the run effectively over. It measured a phase name instead of a
+// player. What follows is what a person would actually check.
 const acted = await page.evaluate(async () => {
   const before = window.__zhr.wave()?.ph;
   const consumed = window.__zhr.debugVrPress('A');
-  await new Promise((r) => setTimeout(r, 700));
-  return { consumed, before, after: window.__zhr.wave()?.ph };
+  await new Promise((r) => setTimeout(r, 900));
+  const play = await window.__zhr.debugCanPlay();
+  return { consumed, before, after: window.__zhr.wave()?.ph, play };
 });
 check(acted.consumed, 'the face button is consumed by the panel');
-check(acted.after !== 'gameover', 'pressing it actually restarts the run',
+check(!acted.play.downed, 'after TRY AGAIN the player is no longer downed');
+check(acted.play.hp >= 100, 'and has full health', `hp ${acted.play.hp}`);
+check(acted.play.canMove, 'and can move');
+check(acted.play.canShoot, 'and can shoot',
+  `ammo ${acted.play.ammoBefore} -> ${acted.play.ammoAfter}`);
+check(acted.after !== 'gameover', 'and the run is running again',
   `${acted.before} -> ${acted.after}`);
 
 console.log(fails === 0 ? '\nVR PARITY GREEN' : `\nVR PARITY: ${fails} FAILURES`);

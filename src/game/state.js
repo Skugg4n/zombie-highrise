@@ -23,6 +23,13 @@ export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
 // Drone payloads, indexed on the wire.
 export const TRAP_KINDS = ['mine', 'tar', 'spike', 'lure'];
+// The phases in which the world is actually running. Anything not here is
+// a menu, a transition or an ending. Defined as an allow-list of RUNNING
+// states rather than of combat states, so a new phase that forgets to
+// mention itself simply does not run, rather than half-running.
+export const LIVE_PHASES = new Set([
+  'day', 'countdown', 'night', 'elevator', 'route', 'finale',
+]);
 // What a drone can be carrying on the wire. FETCH is a payload the drone
 // leaves WITHOUT, so it needs its own slot: indexing it into TRAP_KINDS
 // returned -1 and a fetch drone flew out slung with a mine crate.
@@ -74,10 +81,7 @@ export class HostSim {
     this.fires.length = 0;
     this.level.nav = null;   // rebuild navigation for the new level
     this._seedBarrels();
-    let i = 0;
-    for (const p of this.players.values()) {
-      p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
-    }
+    this.resetPlayers();
     // THE LEVEL DECIDES ITS OWN PHASE MACHINE, and it has to decide here.
     // _arrive() runs before the new geometry exists, so a check there is
     // asking the OLD level whether the NEW one has an objective. This is
@@ -505,6 +509,40 @@ export class HostSim {
     this._enterDay();
   }
 
+  // THE ONE PLACE A PLAYER IS PUT BACK ON THEIR FEET.
+  //
+  // Every restart and every level transition calls this. It used to be
+  // done case by case, and a case-by-case reset is how a field gets
+  // forgotten: restartLevel cleared `down` in the simulation and told
+  // nobody, so the client's own downed flag stayed latched. You respawned
+  // on the floor, unable to move or shoot, with the run effectively over
+  // and the game saying nothing.
+  //
+  // `fullKit` also resets the loadout, for a brand new run.
+  resetPlayers({ fullKit = false } = {}) {
+    let i = 0;
+    for (const [id, p] of this.players) {
+      p.down = false;
+      p.reviveT = 0;
+      p.hp = TUNING.player.maxHp;
+      p.ready = false;
+      if (this.level && this.level.playerSpawns.length) {
+        p.pos.copy(this.level.playerSpawns[i % this.level.playerSpawns.length]);
+      }
+      i++;
+      if (fullKit) {
+        p.inv.w = ['pistol', 'machete'];
+        p.inv.active = 'pistol';
+        p.inv.a = { pistol: [TUNING.weapons.pistol.magazine, -1] };
+        p.inv.g = 1; p.inv.gs = 0; p.inv.gm = 0;
+        p.inv.k = 0; p.inv.m = 0; p.inv.nv = false;
+        p.inv.s = TUNING.economy.startingScrap;
+      }
+      // TELL EVERYONE. A reset the client never hears about is the bug.
+      this.events.push({ e: 'respawn', id, hp: p.hp, at: p.pos.toArray() });
+    }
+  }
+
   restartLevel() {
     this.zombies.clear();
     this.grenades.clear();
@@ -519,11 +557,7 @@ export class HostSim {
     this.wave.night -= this.wave.nightInLevel + (this.wave.nightStarted ? 1 : 0);
     this.wave.nightStarted = false;
     this.wave.nightInLevel = 0;
-    let i = 0;
-    for (const p of this.players.values()) {
-      p.hp = TUNING.player.maxHp; p.down = false; p.reviveT = 0;
-      p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
-    }
+    this.resetPlayers();
     this._enterDay();
   }
 
@@ -718,15 +752,7 @@ export class HostSim {
     this.wave.nightInLevel = 0;
     this.wave.nightStarted = false;
     this.wave.level = 1;
-    for (const p of this.players.values()) {
-      p.hp = TUNING.player.maxHp; p.down = false; p.reviveT = 0;
-      p.inv.w = ['pistol', 'machete'];
-      p.inv.active = 'pistol';
-      p.inv.a = { pistol: [TUNING.weapons.pistol.magazine, -1] };
-      p.inv.g = 1; p.inv.gs = 0; p.inv.gm = 0;
-      p.inv.k = 0; p.inv.m = 0; p.inv.nv = false;
-      p.inv.s = TUNING.economy.startingScrap;
-    }
+    this.resetPlayers({ fullKit: true });
     this.wave.phase = 'lobby';
     this.startRun();
   }
@@ -1379,7 +1405,17 @@ export class HostSim {
         break;
     }
 
-    if (wave.phase === 'night' || wave.phase === 'elevator') this._stepZombies(dt);
+    // THE HORDE MOVES WHENEVER THE GAME IS LIVE.
+    //
+    // This used to name two phases, 'night' and 'elevator'. Every phase
+    // added since has silently omitted the horde: daylight raiders froze
+    // where they spawned, and on a route level nothing moved at all, which
+    // read as "zombies do not attack on L2". They attacked fine; they were
+    // never stepped.
+    //
+    // A list of phases where enemies DO move is a list that gets forgotten.
+    // A list of phases where the game is not running is short and stable.
+    if (LIVE_PHASES.has(wave.phase)) this._stepZombies(dt);
     this._stepGrenades(dt);
     this._stepEffects(dt);
     this._stepMines(dt);
@@ -1433,6 +1469,11 @@ export class HostSim {
     this._planBudget = 6;   // A* searches allowed per frame (cost control)
     for (const z of this.zombies.values()) {
       const stats = TUNING.enemies[z.type];
+      // GROUND FIRST, before any branch can `continue` past it. A body
+      // standing over a void with no path returned no steering and skipped
+      // the rest of the loop, so it hovered in the chasm forever. Whatever
+      // else happens this frame, it happens on solid ground.
+      this._placeOnGround(z);
       if (z.stunT > 0) { z.stunT -= dt; continue; }
       if (z.type === 'spitter' && this._stepSpitter(z, stats, dt)) continue;
       if (z.type === 'screamer' && this._stepScreamer(z, stats, dt)) continue;
@@ -1527,8 +1568,7 @@ export class HostSim {
       z.pos.x += mx * step;
       z.pos.z += mz * step;
       resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
-      const gy = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
-      z.pos.y = Number.isFinite(gy) ? gy : (this.level.baseY || 0);
+      this._placeOnGround(z);
 
       // WATCHDOG. Moving is not the same as getting anywhere: a zombie
       // shut inside a house can circle its rooms forever and never look
@@ -1550,7 +1590,7 @@ export class HostSim {
           z.pos.x += -mz * step * 0.9;
           z.pos.z += mx * step * 0.9;
           resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
-          z.pos.y = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
+          this._placeOnGround(z);
         }
         if (z.stuckT > 4) {
           // Last resort: teleport to the nearest legal cell. Being briefly
@@ -1568,6 +1608,26 @@ export class HostSim {
       }
     }
     this._separateBodies();
+  }
+
+  // THE ONE WAY A BODY IS PUT ON THE GROUND.
+  //
+  // There were three copies of this and only one of them handled a void,
+  // so a zombie pushed over the chasm stood on thin air at floor level.
+  // Anything over nothing gets moved to the nearest real ground, because
+  // the alternative is a body hovering in a hole.
+  _placeOnGround(z) {
+    const gy = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
+    if (Number.isFinite(gy)) { z.pos.y = gy; return; }
+    const nav = this._nav();
+    if (nav) {
+      const [cx, cz] = nav.nearestFree(z.pos.x, z.pos.z);
+      z.pos.x = nav.worldX(cx);
+      z.pos.z = nav.worldZ(cz);
+      z.path = null;
+    }
+    const gy2 = groundHeight(this.level, z.pos.x, z.pos.z, Infinity);
+    z.pos.y = Number.isFinite(gy2) ? gy2 : (this.level.baseY || 0);
   }
 
   // Steering separation is a suggestion: it biases where an agent WANTS
@@ -1617,12 +1677,13 @@ export class HostSim {
         }
       }
     }
-    // Being pushed must never shove anyone into geometry or off a ledge.
+    // Being pushed must never shove anyone into geometry, off a ledge or
+    // into a hole. A body pushed over a void used to stand on thin air at
+    // ground level, because the fallback clamped it back to baseY.
     for (const z of list) {
       const stats = TUNING.enemies[z.type];
       resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
-      const gy = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
-      z.pos.y = Number.isFinite(gy) ? gy : (this.level.baseY || 0);
+      this._placeOnGround(z);
     }
   }
 
@@ -1733,7 +1794,7 @@ export class HostSim {
       move.normalize().multiplyScalar(stats.speed * dt);
       z.pos.add(move);
       resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
-      z.pos.y = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
+      this._placeOnGround(z);
     }
     return true;
   }
@@ -1782,7 +1843,7 @@ export class HostSim {
       const before = z.pos.clone();
       z.pos.addScaledVector(z.chargeDir, step);
       resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
-      z.pos.y = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
+      this._placeOnGround(z);
       z.chargeDist += step;
       const moved = z.pos.distanceTo(before);
       // Hit a player?
@@ -1995,7 +2056,16 @@ export class HostSim {
       for (const [pid, p] of this.players) {
         if (p.down) continue;
         if (item.field) continue;          // out in the field: send the drone
-        if (p.pos.distanceToSquared(item.pos) > 0.9 * 0.9) continue;
+        // MEASURE FROM THE PLAYER, NOT THE PLAY SPACE. In roomscale VR
+        // p.pos is the rig origin and the player can be two metres from
+        // it, so a pickup at their feet was two metres away as far as this
+        // check was concerned. The head position is where they actually
+        // are; it is already on the wire for the avatars.
+        const at = p.h && p.h.p ? p.h.p : null;
+        const px = at ? at[0] : p.pos.x;
+        const pz = at ? at[2] : p.pos.z;
+        const dx = px - item.pos.x, dz = pz - item.pos.z;
+        if (dx * dx + dz * dz > TUNING.economy.pickupRadius ** 2) continue;
         if (!this._grant(p, item.kind)) continue;
         this.items.delete(item.id);
         this.events.push({ e: 'pickup', id: item.id, kind: item.kind, by: pid });

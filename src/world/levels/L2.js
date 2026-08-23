@@ -72,7 +72,13 @@ export const L2 = {
       { x: -3.95, z: -1.4, w: 5.1, d: 0.3, note: 'east-west, from the west wall' },
       // The FENCE from the sketch: it seals the direct east route past the
       // chasm, so the east side has to be reached the long way round.
-      { x: 5.0, z: 0.8, w: 2.6, d: 0.25, note: 'FENCE, east side' },
+      // The FENCE. It does NOT seal the east corridor: a fully sealed
+      // fence turns the whole east side into a dead end reachable only the
+      // long way round, and the build-time route check rightly refused it.
+      // It leaves a squeeze between its west end and the lip of the chasm,
+      // which is a better obstacle anyway: you can take the fast route
+      // east, but only by walking the edge of the hole.
+      { x: 5.4, z: 0.8, w: 2.0, d: 0.25, note: 'FENCE, east side, squeeze at its west end' },
     ],
 
     // Slide door with a button, in the gap between the two antechamber
@@ -94,7 +100,11 @@ export const L2 = {
 
     // CHASM: middle-south, splitting the room into a west route and an
     // east route. You fall in and you do not come back.
-    chasm: { x: 0.2, z: 2.6, w: 5.6, d: 3.6 },
+    // Sized so the corridors around it stay walkable once every wall and
+    // prop is inflated by an agent radius. The first version left a 0.35 m
+    // slot along the south wall, which sealed the whole east side off: the
+    // build-time route check refused to ship it.
+    chasm: { x: 0.0, z: 2.3, w: 5.2, d: 2.8 },
 
     // Zombie entrances, all visible holes. Two in the east wall (one above
     // the fence, one below it) and one in the south wall toward the west,
@@ -112,10 +122,14 @@ export const L2 = {
       { prop: 'cover', x: 5.4, z: -5.9, w: 0.9, d: 0.9, height: 0.8, material: 'crate' },
       { prop: 'cover', x: -5.9, z: 1.2, w: 0.9, d: 1.4, height: 1.0, material: 'crate', note: 'the west route' },
       { prop: 'cover', x: -5.9, z: 5.4, w: 1.2, d: 0.9, height: 0.9, material: 'crate' },
-      { prop: 'cover', x: 0.8, z: 5.9, w: 1.3, d: 0.7, height: 1.0, material: 'crate', note: 'south, near the exit' },
+      // Thin and FLUSH against the south wall. At 0.7 deep and 10 cm off
+      // it, these two and the chasm between them left exactly one blocked
+      // grid row across the south corridor, which sealed the entire east
+      // side off. Depth is not decoration in a corridor this tight.
+      { prop: 'cover', x: 0.8, z: 6.1, w: 1.3, d: 0.5, height: 1.0, material: 'crate', note: 'south, flush' },
       // The weapon locker, in the same room as the exit lift, as the
       // design doc asks. It is cover you can also buy from.
-      { prop: 'cover', x: 3.0, z: 5.9, w: 1.5, d: 0.7, height: 1.15, material: 'metalShell', note: 'WEAPON LOCKER, by the exit' },
+      { prop: 'cover', x: 3.0, z: 6.1, w: 1.5, d: 0.5, height: 1.15, material: 'metalShell', note: 'WEAPON LOCKER, flush by the exit' },
     ],
 
     // Arrive north-west, leave south-east. That diagonal is the level.
