@@ -338,6 +338,11 @@ export function buildHoldout(level, rng, quality, makeElevator) {
   level.baseY = 0;
   level.archetype = 'holdout';
   level.mapExtent = FIELD * 0.62;   // the tactical map has to show the whole field
+  // The horde spawns out to 46 m from a base that is not at the world
+  // origin. The default nav grid is a 34 m box around (0,0), which left
+  // the far spawns off the grid entirely: those zombies never found a
+  // route in and the night could not be finished.
+  level.navBounds = { minX: -52, maxX: 46, minZ: -52, maxZ: 44 };
 
   // Sketch L1: the base sits toward the north-west, and every sight
   // blocker is east and south of it. That asymmetry is the point. The
@@ -478,36 +483,49 @@ export function buildHoldout(level, rng, quality, makeElevator) {
 
   // Sandbags along the southern half of the east wall: ground-level cover
   // on the same side, so you can fight the field low or high.
+  // Flush against the platform's south edge, so the strip between the
+  // ramp and the east wall is filled rather than left as a 0.8 m slot a
+  // player can squeeze into and then not get out of.
   for (let i = 0; i < 4; i++) {
-    const sz = BZ - hb + 4.4 + i * 1.15;
+    const sz = BZ - hb + 3.32 + i * 1.15;
     box(g, 0.75, SANDBAG_H, 1.05, MATS.sandbag, BX + hb - 0.62, SANDBAG_H / 2, sz);
     level.colliders.push({
       x: BX + hb - 0.62, z: sz, hx: 0.38, hz: 0.52, top: SANDBAG_H, tall: false,
     });
   }
 
-  // Interior cover: the crate from the sketch plus a little junk, kept
-  // clear of the ramp lane and the lift.
-  cover(level, MATS.crate, BX - 2.3, BZ - 1.8, 1.3, 1.3, 1.0);
-  cover(level, MATS.crate, BX - 0.9, BZ + 2.0, 0.9, 0.9, 0.75);
-  cover(level, MATS.sandbag, BX - 1.6, BZ - 2.6, 1.5, 0.7);
+  // Interior cover: the crate from the sketch plus a little junk. All of
+  // it stays out of two lanes that must never be blocked: the ramp up to
+  // the platform, and the floor in front of the lift doors.
+  cover(level, MATS.crate, BX - 3.11, BZ - 3.11, 1.3, 1.3, 1.0);   // NW corner, flush
+  cover(level, MATS.crate, BX - 0.5, BZ, 0.9, 0.9, 0.75);          // middle
+  cover(level, MATS.sandbag, BX - 2.2, BZ - 0.6, 1.4, 0.7);        // west of the ramp
 
   // ---- The elevator plate ----
   // FOUNDATION BUG 5: the lift is part of the base, so its position AND
-  // its facing are derived from the base, never chosen independently. It
-  // stands in the south-west corner (sketch: ELEVATOR FLOOR W CONTROL
-  // PANEL) and faces inward, toward the middle of the base.
-  const ex = BX - hb + 1.6, ez = BZ + hb - 1.5;
-  const faceIn = Math.atan2(BX - ex, BZ - ez);      // doors look at the centre
+  // its facing are derived from the base, never chosen independently.
+  //
+  // It stands flush against the WEST wall in the south-west area (sketch:
+  // ELEVATOR FLOOR W CONTROL PANEL) with its doors facing straight east,
+  // into the base. Axis-aligned on purpose: the cab was previously rotated
+  // to "look at the centre" while its collider stayed axis-aligned, so the
+  // visible cab stuck out past its own collision, poked through the south
+  // wall, and the boarding zone landed half inside solid geometry. You
+  // could not get in.
+  const CAB_W = 2.6, CAB_D = 2.2, DOOR_FACE_EAST = Math.PI / 2;
+  const ex = BX - hb + 0.24 + CAB_D / 2;      // flush to the west wall's inner face
+  const ez = BZ + hb - 1.8;
   level.elevator = makeElevator();
   level.elevator.group.position.set(ex, 0, ez);
-  level.elevator.group.rotation.y = faceIn;
+  level.elevator.group.rotation.y = DOOR_FACE_EAST;
   g.add(level.elevator.group);
-  level.colliders.push({ x: ex, z: ez, hx: 1.35, hz: 1.2, tall: true });
-  // The boarding zone sits just inside the base, in front of the doors.
-  level.elevatorZone = {
-    x: ex + Math.sin(faceIn) * 1.9, z: ez + Math.cos(faceIn) * 1.9, hx: 1.5, hz: 1.5,
-  };
+  // Rotated 90 degrees, so the footprint's width and depth swap.
+  level.colliders.push({ x: ex, z: ez, hx: CAB_D / 2, hz: CAB_W / 2, tall: true });
+  // Boarding zone: the floor directly in front of the doors, entirely
+  // inside the base and clear of the cab.
+  // Sits a hand's width clear of the cab rather than exactly tangent to
+  // it, so "is anything blocking the doors" has an unambiguous answer.
+  level.elevatorZone = { x: ex + CAB_D / 2 + 1.4, z: ez, hx: 1.2, hz: 1.3 };
 
   // ---- Player confinement ----
   // The wall itself is the boundary while it stands. This outer ring only
@@ -530,7 +548,7 @@ export function buildHoldout(level, rng, quality, makeElevator) {
 
   // Explosive barrels: two inside as a risk, three out in the field on the
   // approach lanes as a reward for a good shot at range.
-  level.barrels.push({ x: BX + 2.9, z: BZ + 3.1 });
+  level.barrels.push({ x: BX + 2.6, z: BZ - 0.2 });
   level.barrels.push({ x: 4, z: -18 }, { x: 14, z: 2 }, { x: -14, z: 10 });
 
   level.heightAt = makeHeightAt(level, 0);

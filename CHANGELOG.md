@@ -1,5 +1,39 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.11.1 - 2026-08-23 - the two blockers from Ola's L1 playtest
+
+**"Level 1 is unbeatable, a zombie spawns and cannot make it to the base."**
+The navigation grid was still a 34 m box around the world ORIGIN. The
+holdout base is at (-13,-11) and its spawn points reach 46 m out, so
+several spawns sat entirely off the grid: those zombies never found a
+route in, the night's counter stuck at "1 left", and the run could not be
+finished. The holdout now declares its own nav bounds covering the whole
+field, and the A* node budget scales with the grid instead of being a
+fixed 4000 (which a 45 m walk-in blew through on its own).
+
+**"Not possible to enter the elevator, there is a box in the way."** Two
+causes, both fixed:
+- The cab was rotated to "face the centre of the base" while its collider
+  stayed axis-aligned. The visible cab stuck out past its own collision,
+  poked through the south wall, and the boarding zone landed half inside
+  solid geometry. The lift is now axis-aligned, flush against the west
+  wall, doors facing straight east into the base.
+- A crate sat squarely on the floor in front of the doors. Interior cover
+  is now laid out around two lanes that must never be blocked: the ramp
+  up to the platform, and the floor in front of the lift.
+
+Also closed a pocket beside the snipe platform where a player could
+squeeze into a 0.8 m slot between the ramp and the east wall.
+
+**New checks, so none of this can come back quietly**
+- `debugSpawnRoutes()` - every spawn point must land on open ground and
+  have a path that actually reaches the base.
+- `debugBoarding()` - nothing may stand in the lift's boarding zone, and
+  you must be able to walk to it from the middle of the base.
+- The holdout probe now plays night 1 to completion. If a single zombie
+  is walled in anywhere, the test fails instead of the player discovering
+  it twenty minutes in.
+
 ## v0.11.0 - 2026-08-23 - THE FIRST HOLDOUT LEVEL
 
 Floor 1 is now the holdout level from Ola's L1 sketch. The old high-rise

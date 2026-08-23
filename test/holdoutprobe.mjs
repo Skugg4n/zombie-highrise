@@ -36,6 +36,23 @@ console.log('spawn points:', spawnInfo.map((s) => `${s.from} @${s.dist.toFixed(0
 const tooClose = spawnInfo.filter((s) => s.dist < 25);
 console.log(tooClose.length ? `FAIL: ${tooClose.length} spawn(s) inside 25 m` : 'OK: every spawn is 25 m+ from the base');
 
+// Every spawn must have a route in. A single zombie that cannot reach the
+// base leaves "NIGHT 1 - 1 left" on screen forever.
+const routes = await page.evaluate(() => window.__zhr.debugSpawnRoutes());
+for (const r of routes) {
+  const bad = r.nudged > 2.5 || r.reaches > 6;
+  console.log(`  spawn ${r.from} @${r.at}: nudged ${r.nudged} m to reach open ground, `
+    + `best path gets ${r.reaches} m from the base ${bad ? 'FAIL' : 'ok'}`);
+}
+console.log(routes.every((r) => r.nudged <= 2.5 && r.reaches <= 6)
+  ? 'OK: every spawn can reach the base' : 'FAIL: a spawn is walled in');
+
+// The lift has to be boardable. A crate in front of the doors ends the run.
+const board = await page.evaluate(() => window.__zhr.debugBoarding());
+console.log(`boarding zone: ${board.blockers} solids in it, walked to within ${board.walkedToWithin} m`);
+console.log(board.blockers === 0 && board.walkedToWithin < 0.6
+  ? 'OK: the elevator can be boarded' : 'FAIL: something is in the way of the lift');
+
 // Pockets: stand everywhere in the base and try to walk back to the
 // middle. Anything that cannot is a place the player gets pinned, which
 // is exactly how the snipe ramp / elevator overlap showed up.
@@ -74,6 +91,17 @@ for (let i = 0; i < 26; i++) {
 }
 clearInterval(keepAlive);
 const first = samples[0], last = samples[samples.length - 1];
+
+// The reported bug: "NIGHT 1 - 1 left" forever because one zombie spawned
+// somewhere it could never walk out of. Nobody is allowed to be stranded.
+const stranded = await page.evaluate(() => {
+  const c = window.__zhr.holdout();
+  const zs = window.__zhr.zombies();
+  const b = window.__zhr.baseCentre();
+  return zs.map((z) => +Math.hypot(z.pos[0] - b[0], z.pos[2] - b[2]).toFixed(1))
+    .filter((d) => d > 12).length + '/' + zs.length;
+});
+console.log(`still more than 12 m from the base after ${samples.length * 2}s: ${stranded}`);
 console.log(`integrity ${(first.integrity * 100).toFixed(0)}% -> ${(last.integrity * 100).toFixed(0)}%`);
 console.log(`nearest zombie to base: ${first.nearest.toFixed(1)}m -> ${last.nearest.toFixed(1)}m`);
 console.log(`breached segments: ${last.dead}`);
@@ -87,6 +115,34 @@ console.log(gotIn ? 'OK: zombies got inside through a breach' : 'NOTE: nobody go
 // Repair: put a segment back and confirm it blocks again.
 const rep = await page.evaluate(() => window.__zhr.debugRepairAll());
 console.log(`repair: integrity ${(rep.before * 100).toFixed(0)}% -> ${(rep.after * 100).toFixed(0)}%, breaches ${rep.deadBefore} -> ${rep.deadAfter}`);
+// Ola's exact case: NIGHT 1 must be finishable. Spawning stops once the
+// night's budget is spent, so if a single zombie is walled in somewhere,
+// the counter sticks at "1 left" forever and the run is unwinnable.
+await page.evaluate(() => window.__zhr.debugRepairAll());
+await page.evaluate(() => { window.__zhr.debugClearNight(); window.__zhr.forceNight(1); });
+const alive2 = setInterval(
+  () => page.evaluate(() => window.__zhr.debugHeal && window.__zhr.debugHeal()).catch(() => {}), 700);
+let finished = false, lastLeft = -1;
+for (let i = 0; i < 60; i++) {
+  await page.waitForTimeout(1500);
+  // The player is a statue, so clear the field for them: this measures
+  // whether zombies ARRIVE, not whether they can be killed.
+  const st = await page.evaluate(() => {
+    const b = window.__zhr.baseCentre();
+    const zs = window.__zhr.zombies();
+    const near = zs.filter((z) => Math.hypot(z.pos[0] - b[0], z.pos[2] - b[2]) < 9);
+    if (near.length) window.__zhr.debugKillAll(9);
+    const w = window.__zhr.wave();
+    return { ph: w.ph, left: w.left, alive: zs.length };
+  });
+  lastLeft = st.left;
+  if (st.ph !== 'night') { finished = true; break; }
+}
+clearInterval(alive2);
+console.log(finished
+  ? 'OK: night 1 can be finished - every zombie reached the base'
+  : `FAIL: night 1 never ended, stuck at ${lastLeft} left (zombies walled in)`);
+
 console.log('errors:', errors.length ? errors.slice(0, 3).join(' | ') : 'none');
 await browser.close();
 server.close();

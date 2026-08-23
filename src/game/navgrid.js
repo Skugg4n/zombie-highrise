@@ -27,6 +27,9 @@ export class NavGrid {
     this._g = new Float32Array(this.w * this.h);
     this._seen = new Int32Array(this.w * this.h);
     this._stamp = 0;
+    // Budget scaled to the grid: enough to cross a big open field, still
+    // bounded so a hopeless search cannot stall a frame.
+    this.defaultBudget = Math.min(30000, Math.max(4000, Math.round(this.w * this.h * 0.35)));
   }
 
   idx(cx, cz) { return cz * this.w + cx; }
@@ -92,7 +95,11 @@ export class NavGrid {
 
   // A* from world start to world goal. Returns an array of world-space
   // waypoints [{x, z}] (goal last), or null when genuinely unreachable.
-  findPath(sx, sz, gx, gz, maxNodes = 4000) {
+  // The node budget has to scale with the grid. A holdout field is a
+  // 98x96 m grid and the horde walks 45 m in; a fixed 4000-node budget
+  // aborted those searches, the zombie fell back to drifting, and a
+  // spawn behind a sight blocker could never find its way to the base.
+  findPath(sx, sz, gx, gz, maxNodes = this.defaultBudget) {
     const [scx, scz] = this.nearestFree(sx, sz);
     const [gcx, gcz] = this.nearestFree(gx, gz);
     const start = this.idx(scx, scz), goal = this.idx(gcx, gcz);

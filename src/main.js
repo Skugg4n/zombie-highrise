@@ -2624,10 +2624,17 @@ window.__zhr = {
     sim.wave.nightInLevel = 0;
     sim.forceNight();
   },
-  debugKillAll: () => {
+  // radius: kill only what has arrived within `r` of the base, so a test
+  // can measure whether zombies ARRIVE without also measuring whether an
+  // immobile bot can kill them.
+  debugKillAll: (r = 0) => {
     if (!sim) return;
-    sim.wave.queue = [];
-    for (const z of [...sim.zombies.values()]) sim.damageZombie(z, 9999, false, 'H');
+    const c = r > 0 && level.baseCentre ? level.baseCentre : null;
+    if (!c) sim.wave.queue = [];
+    for (const z of [...sim.zombies.values()]) {
+      if (c && Math.hypot(z.pos.x - c.x, z.pos.z - c.z) > r) continue;
+      sim.damageZombie(z, 9999, false, 'H');
+    }
   },
   levelType: () => level.type,
 
@@ -2705,6 +2712,57 @@ window.__zhr = {
   // start that cannot get there is a pocket the player can be pinned in.
   // Pairwise geometry checks over-report (a tiled wall run looks full of
   // gaps); this asks the actual question.
+  // Every spawn point must have a real route to the base, or a night
+  // never ends: one zombie sits behind a wall and the counter sticks.
+  baseCentre: () => (level.baseCentre ? [level.baseCentre.x, 0, level.baseCentre.z] : null),
+  debugSpawnRoutes: () => {
+    if (!sim || !level.baseCentre) return null;
+    const nav = sim._nav();
+    const c = level.baseCentre;
+    return level.zombieSpawns.map((s, i) => {
+      const src = level.spawnSources[i] || {};
+      const [fx, fz] = nav.nearestFree(s.x, s.z);
+      const moved = Math.hypot(nav.worldX(fx) - s.x, nav.worldZ(fz) - s.z);
+      const path = nav.findPath(s.x, s.z, c.x, c.z);
+      const end = path && path.length ? path[path.length - 1] : null;
+      const reach = end ? Math.hypot(end.x - c.x, end.z - c.z) : Infinity;
+      return {
+        from: src.kind || '?', at: [+s.x.toFixed(0), +s.z.toFixed(0)],
+        // How far the spawn had to be nudged to land on a free cell: a
+        // big number means it is buried inside a sight blocker.
+        nudged: +moved.toFixed(1),
+        // How close the best path gets to the base. Anything much over
+        // the base half-size means it cannot get there.
+        reaches: Number.isFinite(reach) ? +reach.toFixed(1) : -1,
+      };
+    });
+  },
+
+  // The floor in front of the lift doors must be free and reachable.
+  debugBoarding: () => {
+    const z = level.elevatorZone;
+    if (!z || !level.baseCentre) return null;
+    const blockers = level.colliders.filter((c) => !c.playerOnly && !c.dead
+      && (c.tall || (c.top !== undefined && c.top > LOCO.stepUp))
+      && Math.abs(c.x - z.x) < c.hx + z.hx - 0.05 && Math.abs(c.z - z.z) < c.hz + z.hz - 0.05);
+    // Can you actually walk from the middle of the base to the zone?
+    const c = level.baseCentre;
+    const save = rig.group.position.clone();
+    rig.group.position.set(c.x, level.heightAt(c.x, c.z), c.z);
+    playerVel.set(0, 0, 0);
+    for (let i = 0; i < 150; i++) {
+      const dx = z.x - rig.group.position.x, dz = z.z - rig.group.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 0.5) break;
+      playerVel.set((dx / d) * 5, playerVel.y, (dz / d) * 5);
+      moveAndCollide(level, rig.group.position, playerVel, 1 / 60, [], LOCO.radius);
+      resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
+    }
+    const got = Math.hypot(rig.group.position.x - z.x, rig.group.position.z - z.z);
+    rig.group.position.copy(save);
+    return { blockers: blockers.length, walkedToWithin: +got.toFixed(2) };
+  },
+
   debugPockets: (step = 0.4) => {
     const c = level.baseCentre;
     if (!c) return null;
