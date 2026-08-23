@@ -39,3 +39,59 @@
 - [ ] A grab cue when the drone picks up a field crate. The `fetched`
       event was pushed and never handled; the crate visibly rides home
       either way.
+
+## Queue from Ola's v0.15.x VR playtest (logged 2026-08-23)
+
+Logged while finishing L2, which Ola asked to come first. In his order.
+
+### Wrist display, still wrong
+- [ ] It sits on the UNDERSIDE of the hand, upside down. It must be on the
+      FOREARM like a watch: same side as the back of the hand, angled so a
+      natural turn of the forearm brings it to the eyes, and NOT attached
+      to the hand itself.
+- [ ] If the correct orientation cannot be determined without a headset,
+      build the calibration aid Ola suggested: a bracelet around the
+      forearm with numbers in a ring and letters marking the angle, so he
+      can read off the coordinates that work and tell us. Faster than
+      guessing, and guessing has now cost two attempts.
+
+### Strategy view in VR (the drone is unusable without it)
+- [ ] The wrist is the TRIGGER, not the whole surface. Looking at it
+      unfolds a larger holographic panel at a comfortable distance, big
+      enough to read the map and place a drone target precisely.
+- [ ] Two interaction modes, both supported:
+      - holster the pistol at the hip to free the hand for pointing
+      - point with the barrel, trigger as the click
+- [ ] The holster is a real physical object visible on the hip. Move the
+      hand to it and press the hand button to stow or draw. Ola expects
+      this to feel good, so it is worth doing properly.
+
+### Bugs
+- [ ] The ramp still clips. It is solid only when entered from the LOWEST
+      end; entering from the side where it is higher clips straight
+      through. (The probe walks it from the foot, which is why it passes.
+      Add a side-entry case to test/rampprobe.mjs first, then fix.)
+- [ ] The hand flashlight does not toggle on the trigger. It should.
+- [ ] There is a HEADLAMP that should not exist yet. Remove it.
+- [ ] Desktop HUD overlaps at the top: the objective banner and the base
+      integrity bar collide and become unreadable. Lay out the top HUD so
+      nothing can overlap at ANY window size, and add that to the UI state
+      checks so it cannot come back.
+- [ ] MINE and DRONE:MINE read as duplicates. If there is no real
+      difference, remove the plain MINE. If there is, make the label say
+      what it is.
+
+### Feel and animation
+- [ ] The VR reload is a slow quarter turn left and back, and it is
+      unclear what it represents. Make it snappy and readable: one quick
+      decisive motion, not a drift.
+- [ ] Zombies attacking the base stand and stare while it breaks. They
+      need a real attack animation that reads from across the field.
+
+### Mechanics
+- [ ] Shooting a mine should detonate it.
+- [ ] Mines and barrels should damage each other, so chain reactions are
+      possible and trap placement becomes a real tactical puzzle.
+
+### Future unlocks (parked, not now)
+- [ ] Headlamp, laser sight and holo sight as things you buy with scrap.

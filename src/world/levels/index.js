@@ -9,9 +9,11 @@
 // the sim reads it for wave budgets and phase rules. Keep the two in step:
 // a spec-driven floor needs its type string to match its archetype.
 import { L1 } from './L1.js';
+import { L2 } from './L2.js';
 
 export const SPECS = {
   1: L1,
+  2: L2,
 };
 
 export function specFor(levelIndex) {

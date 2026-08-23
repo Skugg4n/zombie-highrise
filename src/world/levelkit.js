@@ -81,6 +81,7 @@ import * as THREE from 'three';
 import { PALETTE, MATS, mat } from './materials.js';
 import { box, cover, platform, railing, roomscaleZone, makeHeightAt } from './kit.js';
 import { holdoutFrame } from './holdout.js';
+import { traverseFrame } from './traverse.js';
 import { NavGrid } from '../game/navgrid.js';
 
 // Local-to-world for a prop rotated by `rot` about Y. three's Y rotation
@@ -739,6 +740,14 @@ export function validateSpawns(spec) {
   return err;
 }
 
+// A chasm is not a collider, it is an ABSENCE. The pathfinder has to be
+// told about it separately or the horde walks cheerfully into the hole.
+export function voidBlocker(level) {
+  if (!level.voids || !level.voids.length) return null;
+  return (x, z) => level.voids.some(
+    (v) => Math.abs(x - v.x) < v.hx + 0.4 && Math.abs(z - v.z) < v.hz + 0.4);
+}
+
 export function deriveNavBounds(level) {
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   const take = (x, z) => {
@@ -762,6 +771,7 @@ export function deriveNavBounds(level) {
 // else; buildFromSpec never spells out an archetype name.
 const FRAMES = {
   holdout: holdoutFrame,
+  traverse: traverseFrame,
 };
 
 // ============================================================================
@@ -917,8 +927,13 @@ export function buildFromSpec(level, spec, { rng, quality, makeElevator }) {
 // peer, so they are programming errors and they stop the build.
 function assertPlayable(level, spec) {
   const err = [];
+  // Doors are checked OPEN. A route level deliberately starts with the
+  // squad sealed in an antechamber, so "can the horde reach you right
+  // now" is the wrong question: the one that matters is whether the level
+  // is routable once the door the player must open is open.
+  const routable = level.colliders.filter((c) => c.door === undefined);
   const nav = new NavGrid(level.navBounds, 0.6);
-  nav.build(level.colliders, 0.4);
+  nav.build(routable, 0.4, voidBlocker(level));
 
   // Every spawn must have a ROUTE to the squad, and reachability is a
   // flood fill rather than a pathfinding query on purpose: A* runs on a
@@ -965,6 +980,38 @@ function assertPlayable(level, spec) {
           + `${Math.round((ox * oz) / area * 100)}% of the lift's boarding zone`);
       }
     }
+  }
+
+  // A route level must be COMPLETABLE: the exit has to be walkable from
+  // where the squad lands, with the doors open. This is the one check
+  // whose failure means the level literally cannot be finished.
+  if (level.objective === 'reach-exit' && level.exitZone && level.playerSpawns[0]) {
+    const pnav = new NavGrid(level.navBounds, 0.35);
+    pnav.build(routable, 0.32, voidBlocker(level), true);
+    const from = level.playerSpawns[0];
+    const reachP = pnav.reachableFrom(from.x, from.z);
+    const [ex, ez] = pnav.nearestFree(level.exitZone.x, level.exitZone.z);
+    if (!reachP[pnav.idx(ex, ez)]) {
+      err.push('the exit cannot be walked to from the squad\'s arrival plate, '
+        + 'even with every door open. The level cannot be finished.');
+    }
+  }
+
+  // When a route check fails, say WHERE it breaks rather than only that
+  // it does: an ASCII map of the reachable area is worth more than any
+  // amount of reasoning about wall coordinates.
+  if (err.length && typeof console !== 'undefined') {
+    const rows = [];
+    for (let cz = 0; cz < nav.h; cz += 1) {
+      let line = '';
+      for (let cx = 0; cx < nav.w; cx += 1) {
+        const i = nav.idx(cx, cz);
+        line += nav.blocked[i] ? '#' : (reach && reach[i]) ? '.' : '?';
+      }
+      rows.push(line);
+    }
+    console.warn(`[levelkit] ${spec.id} reachability from the horde anchor `
+      + `(# solid, . reachable, ? cut off):\n` + rows.join('\n'));
   }
 
   if (err.length) {

@@ -14,7 +14,9 @@ import { resolveCircle, segmentBlocked } from './collision.js';
 import { levelTypeFor, FINAL_LEVEL, LEVEL_SIZE } from '../world/levelgen.js';
 import { BASE_SIZE } from '../world/holdout.js';
 import { levelInfoFor } from '../world/levels/index.js';
+import { setDoorOpen } from '../world/traverse.js';
 import { NavGrid } from './navgrid.js';
+import { voidBlocker } from '../world/levelkit.js';
 import { blockingFor, groundHeight } from './locomotion.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 'screamer', 'butcher'];
@@ -75,6 +77,15 @@ export class HostSim {
     let i = 0;
     for (const p of this.players.values()) {
       p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
+    }
+    // THE LEVEL DECIDES ITS OWN PHASE MACHINE, and it has to decide here.
+    // _arrive() runs before the new geometry exists, so a check there is
+    // asking the OLD level whether the NEW one has an objective. This is
+    // the first moment the answer is knowable.
+    if (this.level.objective === 'reach-exit') {
+      if (this.wave.phase !== 'route') this._enterRoute();
+    } else if (this.wave.phase === 'route') {
+      this._enterDay(false);
     }
     if (this.pendingDayLoot) {
       this.pendingDayLoot = false;
@@ -163,6 +174,15 @@ export class HostSim {
         break;
       case 'buy': this._actBuy(id, p, m.item); break;
       case 'placeMine': this._actPlaceMine(id, p, m); break;
+      case 'door':
+        if (typeof m.i === 'number' && this.level.doors && this.level.doors[m.i]) {
+          if (setDoorOpen(this.level, m.i, true)) {
+            this.level.nav = null;
+            this._goodSpawns = null;
+            this.events.push({ e: 'door', i: m.i });
+          }
+        }
+        break;
       case 'repair':
         if (typeof m.i === 'number') this.repairBaseWall(id, m.i);
         break;
@@ -750,6 +770,9 @@ export class HostSim {
       e: 'level', index: this.wave.level,
       name: info ? info.name : null, note: info ? info.note : null,
     });
+    // setLevel() decides the phase once the new geometry is in place; a
+    // route level cannot be recognised from here, because `this.level` is
+    // still the floor being left.
     this._enterDay(false);
   }
 
@@ -949,6 +972,17 @@ export class HostSim {
     const inRing = all.filter((p) => p.ring === want);
     const pool = inRing.length ? inRing : all;
     return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // The underground mix. No spitters and no screamers: both want distance
+  // and there is none down here, so they would simply be walkers with
+  // extra steps.
+  _routeEnemy() {
+    const r = Math.random();
+    if (r < 0.14) return 'brute';
+    if (r < 0.42) return 'crawler';
+    if (r < 0.66) return 'runner';
+    return 'walker';
   }
 
   // A spawn point is authored to sit BEHIND a sight blocker, and "behind"
@@ -1196,10 +1230,91 @@ export class HostSim {
     }
   }
 
+  // A ROUTE level has no clock. "Movement forward is the objective, not
+  // survival timers. Waves come because you ADVANCE, not because a clock
+  // ticks." (docs/level-design.md)
+  _enterRoute() {
+    const wave = this.wave;
+    wave.phase = 'route';
+    wave.night = 1;
+    wave.t = 0;
+    wave.left = 0;
+    wave.queue = [];
+    wave.spawnT = 0;
+    wave.pushed = 0;             // how many pushes the squad has triggered
+    wave.reached = 0;            // furthest fraction of the route reached
+    wave.exitT = 0;
+    this.mod = null;
+    this.events.push({ e: 'route' });
+  }
+
+  // How far along the route the squad has got, 0 at the arrival plate and
+  // 1 at the exit. Measured on the leading player: the squad advances
+  // together or the person in front pays for it.
+  _routeProgress() {
+    const from = this.level.hordeAnchor;
+    const to = this.level.exitZone;
+    if (!from || !to) return 0;
+    const total = Math.hypot(to.x - from.x, to.z - from.z) || 1;
+    let best = 0;
+    for (const p of this.players.values()) {
+      if (p.down) continue;
+      const along = Math.hypot(p.pos.x - from.x, p.pos.z - from.z) / total;
+      best = Math.max(best, Math.min(1, along));
+    }
+    return best;
+  }
+
   // ---- Frame step ------------------------------------------------------
   step(dt) {
     const wave = this.wave;
     switch (wave.phase) {
+      case 'route': {
+        // Leaving a route level by any path other than its exit (a debug
+        // jump, a level swap) must not strand the phase machine here:
+        // without an exit zone there is nothing for this phase to do.
+        if (!this.level.exitZone) { this._enterDay(false); break; }
+        const T = TUNING.pacing.route;
+        // ADVANCING is what summons them. Cross a quarter of the room and
+        // the holes answer; stand still and the pressure stays where you
+        // left it, which is the whole difference from a holdout.
+        const progress = this._routeProgress();
+        if (progress > wave.reached) wave.reached = progress;
+        const wantPushes = Math.floor(wave.reached / T.pushEvery);
+        while (wave.pushed < wantPushes) {
+          wave.pushed++;
+          const players = Math.max(1, this.players.size);
+          const n = Math.round(T.perPush * players * (1 + wave.pushed * 0.35));
+          for (let i = 0; i < n; i++) wave.queue.push(this._routeEnemy());
+          this.events.push({ e: 'push', n: wave.pushed });
+        }
+        // A slow background trickle, so standing still is uncomfortable
+        // without being a death sentence.
+        wave.spawnT -= dt;
+        if (wave.spawnT <= 0) {
+          wave.spawnT = T.trickle;
+          if (this.zombies.size < T.maxAlive) wave.queue.push(this._routeEnemy());
+        }
+        while (wave.queue.length && this.zombies.size < T.maxAlive) {
+          this.spawnZombie(wave.queue.pop());
+        }
+        wave.left = this.zombies.size;
+
+        // Standing on the exit plate finishes the level. It takes a beat,
+        // so it cannot happen by brushing past it while running.
+        const zone = this.level.exitZone;
+        let onPlate = false;
+        for (const p of this.players.values()) {
+          if (p.down) continue;
+          if (Math.abs(p.pos.x - zone.x) <= zone.hx && Math.abs(p.pos.z - zone.z) <= zone.hz) {
+            onPlate = true;
+            break;
+          }
+        }
+        wave.exitT = onPlate ? wave.exitT + dt : 0;
+        if (wave.exitT >= T.boardSeconds) this._enterRide();
+        break;
+      }
       case 'day': {
         wave.t -= dt;
         // Daylight raid: a slow steady trickle through the same visible
@@ -1518,7 +1633,7 @@ export class HostSim {
     const half = (this.level.navSize || LEVEL_SIZE) / 2 + 4;
     const b = this.level.navBounds || { minX: -half, maxX: half, minZ: -half, maxZ: half };
     const nav = new NavGrid(b, 0.6);
-    nav.build(this.level.colliders, 0.4);
+    nav.build(this.level.colliders, 0.4, voidBlocker(this.level));
     this.level.nav = nav;
     return nav;
   }

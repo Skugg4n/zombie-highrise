@@ -10,7 +10,9 @@ import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
 import { LOCO, moveAndCollide, blockingFor } from './game/locomotion.js';
 import { NavGrid } from './game/navgrid.js';
+import { voidBlocker } from './world/levelkit.js';
 import { InteractionLayer } from './world/interact.js';
+import { setDoorOpen } from './world/traverse.js';
 import { makeAvatarMesh, makeNameTag, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
@@ -1399,7 +1401,12 @@ const actions = {
   // Repair is a HOLD, with a ring you watch fill. "OBJECTIVE: REPAIR WALL"
   // told the player nothing about how; a highlighted section, a prompt and
   // a filling ring tell them everything without a word of tutorial.
-  canRepairHere: () => !!nearestRepairTarget(),
+  canRepairHere: () => {
+    if (nearestRepairTarget()) return true;
+    const p = rig.group.position;
+    return !!(level.doors || []).find((d) => !d.open
+      && Math.hypot(d.buttonX - p.x, d.buttonZ - p.z) < 1.9);
+  },
   repairHold: (down) => { repairHeld = down && canAct(); },
 };
 
@@ -1473,6 +1480,31 @@ function updateInteractions(dt) {
       progress: Math.min(1, mate.rv / TUNING.player.reviveTime),
     };
     repairHoldT = 0;
+  } else if (level.doors && level.doors.length) {
+    // A closed door is the same interaction: walk to the button, hold,
+    // watch it fill. The design doc asks for "a moment of standing still
+    // and defending", and a hold is exactly that moment.
+    const door = level.doors.find((d) => !d.open
+      && Math.hypot(d.buttonX - here.x, d.buttonZ - here.z) < 1.9);
+    if (door) {
+      if (repairHeld) {
+        repairHoldT += dt;
+        if (repairHoldT >= TUNING.pacing.route.doorHoldTime) {
+          repairHoldT = 0;
+          dispatchAction({ t: 'door', i: door.index });
+        }
+      } else {
+        repairHoldT = Math.max(0, repairHoldT - dt * 2.5);
+      }
+      target = {
+        x: door.buttonX, y: 0, z: door.buttonZ,
+        label: inVRNow() ? 'HOLD GRIP TO OPEN' : 'HOLD E TO OPEN',
+        sub: 'the door',
+        progress: repairHoldT / TUNING.pacing.route.doorHoldTime,
+      };
+    } else {
+      repairHoldT = 0;
+    }
   } else {
     const seg = nearestRepairTarget();
     if (seg) {
@@ -2035,6 +2067,22 @@ function handleEvents(evs) {
         }
         break;
       }
+      case 'door':
+        // Every peer opens its own copy: geometry is never networked.
+        setDoorOpen(level, ev.i, true);
+        audio.play('doors');
+        showToast('The door is open. Move.', 1800);
+        break;
+      case 'route':
+        showCenterText('GET TO THE LIFT', 2.2);
+        audio.stinger('night');
+        break;
+      case 'push':
+        // Advancing is what summons them, so the game says so: the player
+        // has to learn that moving forward is what turns the pressure up.
+        showToast('They heard you move.', 1800);
+        audio.play('groan');
+        break;
       case 'fielddrop':
         showToast('Supplies down in the field. Send the drone.', 2400);
         break;
@@ -2542,6 +2590,13 @@ function vrObjective(w) {
         urgency: wall < 0.35 ? 'danger' : wall < 0.6 ? 'warn' : 'normal',
       };
     }
+    case 'route':
+      // No clock and no wave counter: the objective IS the direction.
+      return {
+        objective: 'GET TO THE LIFT',
+        sub: 'the far corner, south-east',
+        urgency: w.left > 8 ? 'danger' : w.left > 3 ? 'warn' : 'normal',
+      };
     case 'elevator':
       return { objective: 'GO TO THE LIFT', sub: 'area cleared', urgency: 'normal' };
     case 'ride':
@@ -2640,6 +2695,9 @@ function updateWaveHud(w) {
       break;
     case 'night':
       hud.setWave(`${level.waveLabel || 'NIGHT'} ${w.n} - ${w.left} left`);
+      break;
+    case 'route':
+      hud.setWave(`GET TO THE LIFT - ${w.left} on you`);
       break;
     case 'elevator': hud.setWave('CLEARED - board the elevator'); break;
     case 'ride':
@@ -3059,6 +3117,9 @@ window.__zhr = {
   debugGotoLevel: (n) => {
     if (sim) sim.wave.level = n;
     loadLevel(n);
+    // An objective level runs its own phase machine; jumping straight to
+    // one must land in that phase, not leave it on the day/night clock.
+    if (sim) sim.setLevel(level);   // setLevel picks the right phase
   },
   // Jump straight to the final floor's boss night (ending test hook).
   debugGotoFinal: () => {
@@ -3239,13 +3300,24 @@ window.__zhr = {
   // player-sized agent. Anything free but unreachable from the middle is
   // a trap.
   debugPockets: (cell = 0.2) => {
-    const c = level.baseCentre || { x: 0, z: 0 };
+    // Flood the area the player may actually occupy. A square around them
+    // would include ground outside the level's walls, which is
+    // unreachable by definition and would be reported as a giant pocket.
+    const c = level.objective === 'reach-exit' && level.playerSpawns[0]
+      ? { x: level.playerSpawns[0].x, z: level.playerSpawns[0].z }
+      : (level.baseCentre || { x: 0, z: 0 });
     const half = (level.playableHalf || 4) + 0.6;
-    const nav = new NavGrid(
-      { minX: c.x - half, maxX: c.x + half, minZ: c.z - half, maxZ: c.z + half }, cell);
+    const bounds = level.playBounds || {
+      minX: c.x - half, maxX: c.x + half, minZ: c.z - half, maxZ: c.z + half,
+    };
+    const nav = new NavGrid(bounds, cell);
     // forPlayer: the player DOES collide with player-only barriers, which
     // the horde walks straight through.
-    nav.build(level.colliders, LOCO.radius, null, true);
+    // Doors are flooded OPEN, and the chasm is flooded as solid. A route
+    // level deliberately starts with the squad sealed in an antechamber,
+    // so a closed door is not a pocket: it is the level.
+    const solids = level.colliders.filter((c) => c.door === undefined);
+    nav.build(solids, LOCO.radius, voidBlocker(level), true);
     const reach = nav.reachableFrom(c.x, c.z);
     // Group the unreachable free cells into connected islands and measure
     // each. A one or two cell island is grid-inflation rounding, not a
@@ -3377,6 +3449,21 @@ window.__zhr = {
   },
   debugDamageWall: (index, amount) => {
     if (sim && level.baseWall) sim.damageBaseWall(index, amount);
+  },
+  // Traverse probe surface.
+  debugRoute: () => {
+    if (!sim || !level.exitZone) return null;
+    const zs = [...sim.zombies.values()].filter((z) => z.alive);
+    return {
+      phase: sim.wave.phase,
+      doors: (level.doors || []).map((d) => ({ open: d.open, x: d.buttonX, z: d.buttonZ })),
+      exit: { x: level.exitZone.x, z: level.exitZone.z },
+      spawn: level.playerSpawns[0].toArray(),
+      alive: zs.length,
+      pushed: sim.wave.pushed || 0,
+      inChasm: zs.filter((z) => level.voidAt && level.voidAt(z.pos.x, z.pos.z)).length,
+      level: level.index,
+    };
   },
   debugWallSeg: (index) => {
     const w = level.baseWall;

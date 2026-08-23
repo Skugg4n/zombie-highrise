@@ -220,9 +220,13 @@ if (code) {
     note(true, 'shop opens on both peers');
     await host.click('#btn-shop-ready');
     await client.click('#btn-shop-ready');
-    await host.waitForFunction(() => window.__zhr.levelIndex() === 2 && window.__zhr.wave()?.ph === 'day', null, { timeout: 25000 });
+    // Floor 2 is a TRAVERSE level, which has no day/night clock: it goes
+    // straight into its route phase and ends when you reach the exit.
+    await host.waitForFunction(
+      () => window.__zhr.levelIndex() === 2 && window.__zhr.wave()?.ph === 'route',
+      null, { timeout: 25000 });
     await client.waitForFunction(() => window.__zhr.levelIndex() === 2, null, { timeout: 10000 });
-    note(true, 'both peers arrived on floor 2 (basement)');
+    note(true, 'both peers arrived on floor 2 (the traverse), in its route phase');
   } catch (e) {
     note(false, 'elevator/shop flow failed: ' + e.message);
   }
@@ -328,7 +332,7 @@ console.log('LEVEL TYPES');
   await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
   await page.click('#btn-solo');
   await page.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
-  for (const [n, expect] of [[2, 'basement'], [3, 'upper'], [4, 'ground'], [5, 'trench'], [6, 'wagon']]) {
+  for (const [n, expect] of [[2, 'traverse'], [3, 'upper'], [4, 'ground'], [5, 'trench'], [6, 'wagon']]) {
     await page.evaluate((lv) => window.__zhr.debugGotoLevel(lv), n);
     await page.waitForTimeout(250);
     const type = await page.evaluate(() => window.__zhr.levelType());

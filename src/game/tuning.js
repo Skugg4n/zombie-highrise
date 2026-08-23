@@ -26,7 +26,7 @@ export const TUNING = {
     surgeEvery: 3,
     surgeBudgetMult: 1.35,
     maxAlive: 24,           // Quest 2 cap; instanced horde has headroom
-    levelTypeModifier: { holdout: 1.15, ground: 1.15, basement: 0.90, upper: 1.00, trench: 0.95, wagon: 0.85, boss: 1.0 },
+    levelTypeModifier: { holdout: 1.15, traverse: 0.85, ground: 1.15, basement: 0.90, upper: 1.00, trench: 0.95, wagon: 0.85, boss: 1.0 },
   },
 
   // FLOOR HOOKS (playtest: "give each floor a distinct hook so floor 7
@@ -34,7 +34,7 @@ export const TUNING = {
   // announced on arrival, plus the mechanical twist that backs it up.
   floorHooks: {
     1: { name: 'THE FIELD', note: 'Nowhere to run. Hold the base and watch the haze.' },
-    2: { name: 'BOILER LEVEL', note: 'Tight corridors. They come up the stairwell.', mod: 'blackout' },
+    2: { name: 'THE UNDERWORKS', note: 'Get to the far corner.', mod: 'blackout' },
     3: { name: 'OFFICES', note: 'They climb the facade and ride the shaft.' },
     4: { name: 'THE YARD AGAIN', note: 'Same ground, worse odds.', mod: 'fog' },
     5: { name: 'THE TRENCH', note: 'Nowhere to run. Use the firing steps.' },
@@ -271,6 +271,18 @@ export const TUNING = {
   // create grenade/mine moments. Nights land at 45-90 s. Day 45 s,
   // skippable when everyone readies up.
   pacing: {
+    // ROUTE LEVELS (traverse). No clock: pressure is a function of how
+    // far the squad has pushed. Standing still is uncomfortable, not
+    // fatal; advancing is what opens the holes.
+    route: {
+      pushEvery: 0.22,      // a push per quarter of the route crossed
+      perPush: 3,           // enemies per push, per player, growing as you go
+      trickle: 5.5,         // seconds between background arrivals
+      maxAlive: 14,         // tight spaces: fewer bodies than a holdout
+      boardSeconds: 1.4,    // stand on the exit plate this long to leave
+      doorHoldTime: 1.6,    // longer than a repair: this is the beat you defend
+    },
+
     // THE STUCK WATCHDOG. No round may ever be unwinnable because one
     // enemy cannot reach anybody. Patience is deliberately generous: a
     // zombie walking the long way around a ridge makes no DIRECT progress

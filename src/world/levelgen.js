@@ -38,7 +38,7 @@ export { LEVEL_SIZE };
 // built to Ola's L1 sketch. The rest of the cycle is the old high-rise
 // rotation and stays until L1 is proven fun and the traverse level lands.
 export const LEVEL_TYPES = [
-  'holdout', 'basement', 'upper', 'ground', 'trench', 'wagon',
+  'holdout', 'traverse', 'upper', 'ground', 'trench', 'wagon',
   'ground', 'basement', 'upper', 'ground', 'trench', 'boss',
 ];
 // A run is exactly FINAL_LEVEL floors long: floor 12 is the Butcher's
@@ -1072,6 +1072,7 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
     spawnSources: [],   // VISIBLE fiction for each entry (never thin air)
     barrels: [],        // explosive barrels: {x, z} seeded by the generator
     elevator: null, elevatorZone: null, roomZone: null,
+    voids: [], doors: [], objective: null, exitZone: null, voidAt: null,
     baseWall: null, baseCentre: null, archetype: null,
     floorY: 0, baseY: 0, heightAt: () => 0, lighting: null,
   };

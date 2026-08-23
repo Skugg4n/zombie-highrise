@@ -151,6 +151,10 @@ export function holdoutFrame(level, spec, ctx, { makeElevator, quality }) {
   // sim uses it to decide whether a loot drop is reachable, and the pocket
   // check floods it looking for places a player can be pinned.
   level.playableHalf = hb;
+  level.playBounds = {
+    minX: BX - hb - 0.4, maxX: BX + hb + 0.4,
+    minZ: BZ - hb - 0.4, maxZ: BZ + hb + 0.4,
+  };
 
   const slab = box(level.group, size + 0.8, 0.22, size + 0.8, MATS.concrete, BX, 0, BZ);
   slab.receiveShadow = quality === 'DESKTOP';
