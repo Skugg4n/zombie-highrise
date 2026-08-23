@@ -8,14 +8,14 @@ import { buildLevel, disposeLevel, MATS, makeHelicopter, FINAL_LEVEL, LEVEL_SIZE
 import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
 import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
-import { LOCO, moveAndCollide, groundHeight, blockingFor } from './game/locomotion.js';
+import { LOCO, moveAndCollide, blockingFor } from './game/locomotion.js';
 import { NavGrid } from './game/navgrid.js';
-import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
+import { makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
-import { HostSim, ZOMBIE_TYPES, ITEM_KINDS, TRAP_KINDS } from './game/state.js';
+import { HostSim, ZOMBIE_TYPES, ITEM_KINDS, TRAP_KINDS, DRONE_LOADS } from './game/state.js';
 import { TUNING } from './game/tuning.js';
 import { Arsenal } from './game/arsenal.js';
 import { makeWeaponMesh, makeItemMesh } from './world/weapons3d.js';
@@ -238,15 +238,6 @@ const tmpV2 = new THREE.Vector3();
 const vrFeet = new THREE.Vector3();   // where the VR player's feet actually are
 const tmpQ = new THREE.Quaternion();
 
-function poseZombie(group, animT) {
-  const s = Math.sin(animT);
-  const parts = group.userData.parts;
-  parts.legL.rotation.x = s * 0.45;
-  parts.legR.rotation.x = -s * 0.45;
-  parts.armL.rotation.x = -0.12 + s * 0.1;    // shoulder sway
-  parts.armR.rotation.x = -0.12 - s * 0.1;
-  parts.torso.rotation.z = s * 0.06;
-}
 
 // Zombies killed by an instant event must not be resurrected by the
 // 120 ms-delayed interpolation still carrying their row.
@@ -811,8 +802,9 @@ function updateDroneVisuals(rows, dt) {
     keep.add(id);
     let g = droneVisuals.get(id);
     if (!g) { g = makeDroneMesh(); droneVisuals.set(id, g); scene.add(g); }
-    const kind = TRAP_KINDS[kindIdx ?? 0] || 'mine';
-    const want = empty ? null : kind;
+    const kind = DRONE_LOADS[kindIdx ?? 0] || 'mine';
+    // A fetch drone flies out empty and comes back carrying.
+    const want = (empty || kind === 'fetch') ? null : kind;
     if (g.userData.payload !== want) {
       g.userData.payload = want;
       g.userData.sling.clear();
@@ -1246,7 +1238,6 @@ function makeArsenal() {
         // Visual confirmation too: the flat viewmodel snaps up and the VR
         // weapon's charge light goes green (handled in vr.js).
         viewmodelKick = 0.045;
-        magSeatFlashT = 0.28;
       },
       dry: () => audio.play('dryfire'),
     },
@@ -1367,7 +1358,6 @@ function applyWallState(hps) {
 // Base integrity readout + the repair prompt, refreshed on wall events and
 // once per frame while the prompt could change.
 let baseAlarmT = 0;
-let magSeatFlashT = 0;   // brief 'ready' confirmation after a reload
 let victorySummary = '';  // run stats, shown in the DOM AND in the headset
 let lastDt = 1 / 60;     // the frame loop's dt, for helpers called from it
 function updateBaseHud() {
@@ -1441,8 +1431,16 @@ const PAYLOAD_LABEL = {
 };
 let dronePayload = 'mine';
 
+// Fetching your own loot is free; everything else is the payload price
+// plus the launch fee. One function, so the button label and the
+// affordability guard can never disagree again.
+function dronePayloadCost(kind) {
+  if (kind === 'fetch') return TUNING.economy.droneDeploy;
+  return (TUNING.economy.dronePayload[kind] || 0) + TUNING.economy.droneDeploy;
+}
+
 function refreshDroneButton() {
-  const cost = TUNING.economy.dronePayload[dronePayload];
+  const cost = dronePayloadCost(dronePayload);
   $('btn-map-drone').textContent = dronePayload === 'fetch'
     ? 'DRONE: FETCH LOOT - free'
     : `DRONE: ${PAYLOAD_LABEL[dronePayload]} - ${cost}`;
@@ -1595,8 +1593,13 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     }
     dispatchAction({ t: 'placeMine', p: p.toArray(), via: 'map' });
   } else if (mapMode === 'drone') {
-    if (scrap < TUNING.economy.droneDeploy) {
-      showToast('Not enough scrap (' + TUNING.economy.droneDeploy + ' needed)', 2000);
+    // You pay for the PAYLOAD, not the launch: droneDeploy is 0 by design.
+    // Checking the launch fee meant this guard could never fire, so the
+    // client played the launch sound and announced "Drone away" while the
+    // host silently refused the order and nothing ever arrived.
+    const cost = dronePayloadCost(dronePayload);
+    if (scrap < cost) {
+      showToast(`Not enough scrap (${cost} needed)`, 2000);
       return;
     }
     dispatchAction({ t: 'drone', p: p.toArray(), k: dronePayload });
@@ -1868,6 +1871,14 @@ function handleEvents(evs) {
       case 'fetchmiss':
         showToast('Nothing there to pick up.', 1600);
         break;
+      case 'nofunds':
+        // The host refused the order. Without this the client had already
+        // said "Drone away" and played the launch sound.
+        if (ev.by === (role === 'client' ? net?.myId : 'H')) {
+          showToast(`Not enough scrap (${ev.need} needed)`, 2000);
+          audio.play('dryfire');
+        }
+        break;
       case 'delivered':
         audio.play('pickup');
         showToast('Drone delivered the crate.', 1800);
@@ -2042,9 +2053,15 @@ function handleEvents(evs) {
       case 'crit':
         showHitmarker(true);
         break;
+      case 'trap':
+        // The payload landing, twenty metres out. You could hear the drone
+        // leave and then nothing arrived.
+        audio.play('dronedrop', ev.p);
+        break;
       case 'mined': {
         const me = role === 'client' ? net?.myId : 'H';
         if (ev.by === me) showToast('Mine placed (arms in 1s)', 1500);
+        audio.play('minebeep', ev.p || null);
         break;
       }
       case 'bought': {
@@ -2063,6 +2080,13 @@ function handleEvents(evs) {
         break;
       }
       case 'join': if (role === 'host') refreshHostPlayers(); break;
+      default:
+        // A sim event with no case here is a feature that was built and
+        // then never reached the player. Nine of them were hiding behind
+        // this switch until an audit went looking. Silence is not a
+        // sensible default for a message somebody deliberately sent.
+        console.warn('[events] unhandled sim event:', ev.e, ev);
+        break;
     }
   }
 }
@@ -2635,7 +2659,7 @@ renderer.setAnimationLoop(() => {
       const drows = [];
       for (const d of sim.drones.values()) {
         drows.push([d.id, d.pos.x, d.pos.y, d.pos.z,
-          TRAP_KINDS.indexOf(d.payload || 'mine'), d.phase === 'home' ? 1 : 0]);
+          DRONE_LOADS.indexOf(d.payload || 'mine'), d.phase === 'home' ? 1 : 0]);
       }
       updateDroneVisuals(drows, dt);
       const trows = [];

@@ -53,7 +53,7 @@ export const TUNING = {
   traps: {
     tar:   { radius: 3.4, duration: 100, slow: 0.38 },
     spike: { radius: 2.7, duration: 130, dps: 9 },
-    lure:  { radius: 24, duration: 26, pull: 1.0 },
+    lure:  { radius: 24, duration: 26 },
   },
 
   // THE BASE (holdout levels). The wall is the level's real health bar:
@@ -122,7 +122,7 @@ export const TUNING = {
     shotgun: { damage: 1, pellets: 6, magazine: 5, reserveMax: 40, fireCooldown: 0.42, reloadTime: 2.2, auto: false, spreadDeg: 8, name: 'SHOTGUN' },
     smg: { damage: 1, pellets: 1, magazine: 30, reserveMax: 240, fireCooldown: 0.09, reloadTime: 2.0, auto: true, spreadDeg: 2.5, name: 'SMG' },
     machete: { damage: 3, range: 1.75, arcDegrees: 100, swingCooldown: 0.8, name: 'MACHETE' },
-    fragGrenade: { fuseTime: 3.0, damageCenter: 15, falloffRadius: 4.0, damageAtEdge: 3, selfDamage: 25, friendlyFire: false, throwSpeed: 12 },
+    fragGrenade: { fuseTime: 3.0, damageCenter: 15, falloffRadius: 4.0, damageAtEdge: 3, selfDamage: 25, throwSpeed: 12 },
     // ---- Weapon roster v2 (Phase 2) ------------------------------------
     // AK: heavier auto than the SMG (2-shots a walker, 10-shots a brute),
     // the late-run workhorse. Akimbo doubles the pistol's rate with a
@@ -132,7 +132,10 @@ export const TUNING = {
     ak: { damage: 1.5, pellets: 1, magazine: 30, reserveMax: 180, fireCooldown: 0.115, reloadTime: 2.4, auto: true, spreadDeg: 2.0, name: 'AK' },
     akimbo: { damage: 1, pellets: 1, magazine: 16, reserveMax: Infinity, fireCooldown: 0.09, reloadTime: 2.0, auto: false, spreadDeg: 1.4, name: 'DUAL PISTOLS' },
     smokeGrenade: { fuseTime: 1.5, cloudRadius: 3.0, cloudDuration: 8, slowFactor: 0.4, throwSpeed: 11 },
-    molotov: { fuseTime: 0.0, burnRadius: 2.2, burnDuration: 5, dps: 3, throwSpeed: 11 },
+    // airburstFuse is the safety timer for a molotov thrown into open
+    // air. Impact detonation is separate and immediate; this is only what
+    // happens when it never hits anything.
+    molotov: { airburstFuse: 3.0, burnRadius: 2.2, burnDuration: 5, dps: 3, throwSpeed: 11 },
     nightVision: { batterySeconds: 30, rechargePerDaySecond: 1.0 },
     // RECOIL. Each shot kicks the aim upward and heats the weapon; heat
     // makes the NEXT kick bigger and the shot wider, and it bleeds off
@@ -293,7 +296,6 @@ export const TUNING = {
       everyNthSpawn: 5,
       size: (night) => Math.min(7, 2 + Math.floor(night / 2)),
     },
-    spawnDistanceFromPlayer: { min: 12, max: 22 },
     nightsPerLevel: 2,
     // No dead air: if nothing is alive and nothing is scheduled for this
     // long, the director pushes the next beat forward.

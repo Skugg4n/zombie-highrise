@@ -110,9 +110,6 @@ export class WristDisplay {
     this.group.rotation.set(-0.95, 0.0, 0.0);
   }
 
-  detach() {
-    if (this.group.parent) this.group.parent.remove(this.group);
-  }
 
   // s: { objective, sub, left, hp, hpMax, scrap, weapon, mag, reserve,
   //      reloading, baseIntegrity, packs, mines }

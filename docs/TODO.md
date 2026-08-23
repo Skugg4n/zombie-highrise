@@ -22,3 +22,20 @@
 - [ ] Physical props in the gym hall (thick mats = sandbags in-game?)
       Requires manually marking up the layout. Crazy but cool.
 - [ ] Post-run stats: most kills, longest physical distance walked (VR)
+
+## From the dead-code audit (v0.14.2)
+
+- [ ] Mobile has no repair control. `TouchInput` binds seven buttons and
+      repair is not one of them, while the prompt shows on every platform
+      and index.html hardcodes "Hold E to repair the wall". Add a touch
+      button and make the prompt name the right control per platform.
+- [ ] A mine proximity beep during its one-second arming window. The
+      countdown is host-only sim state and emits no event, so this needs a
+      new event rather than a rewiring. The placement blip is done.
+- [ ] A flat-screen READY flash on magazine seat. `magSeatFlashT` was
+      declared for it and never built; deleted rather than left dangling.
+      The other three seat confirmations (clack, viewmodel snap, VR charge
+      light) all work.
+- [ ] A grab cue when the drone picks up a field crate. The `fetched`
+      event was pushed and never handled; the crate visibly rides home
+      either way.

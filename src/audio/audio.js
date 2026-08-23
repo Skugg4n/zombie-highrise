@@ -235,7 +235,14 @@ export const audio = {
   play(name, pos = null) {
     if (!unlocked || !ensureCtx()) return;
     const recipe = RECIPES[name];
-    if (recipe) recipe(out(pos));
+    if (!recipe) {
+      // A missing recipe used to be silence, which is indistinguishable
+      // from a sound that is simply quiet. Half the sounds this game has
+      // written were never played and nobody noticed for that reason.
+      console.warn('[audio] no recipe for', name);
+      return;
+    }
+    recipe(out(pos));
   },
 
   stinger(kind) {

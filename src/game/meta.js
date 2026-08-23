@@ -35,7 +35,6 @@ function save() {
 }
 
 export const meta = {
-  get() { return { ...state }; },
 
   recordRun(stats) {
     state.runs++;

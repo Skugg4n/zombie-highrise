@@ -70,9 +70,6 @@ export class NavGrid {
     return this.blocked[this.idx(cx, cz)] === 1;
   }
 
-  isWalkableAt(x, z) {
-    return !this.isBlocked(this.toCellX(x), this.toCellZ(z));
-  }
 
   // Rasterise colliders. `agentRadius` inflates them so agents keep their
   // shoulders out of walls instead of grinding along them.

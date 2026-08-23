@@ -13,6 +13,7 @@ import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
 import { levelTypeFor, FINAL_LEVEL, LEVEL_SIZE } from '../world/levelgen.js';
 import { BASE_SIZE } from '../world/holdout.js';
+import { levelInfoFor } from '../world/levels/index.js';
 import { NavGrid } from './navgrid.js';
 import { blockingFor, groundHeight } from './locomotion.js';
 
@@ -20,6 +21,10 @@ export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
 // Drone payloads, indexed on the wire.
 export const TRAP_KINDS = ['mine', 'tar', 'spike', 'lure'];
+// What a drone can be carrying on the wire. FETCH is a payload the drone
+// leaves WITHOUT, so it needs its own slot: indexing it into TRAP_KINDS
+// returned -1 and a fetch drone flew out slung with a mine crate.
+export const DRONE_LOADS = ['mine', 'tar', 'spike', 'lure', 'fetch'];
 
 const AMMO_PICKUP = { ammo_shotgun: ['shotgun', 25], ammo_smg: ['smg', 120] };
 
@@ -113,7 +118,6 @@ export class HostSim {
 
   removePlayer(id) {
     if (!this.players.delete(id)) return;
-    this.events.push({ e: 'leave', id });
     // If the departed player was the last one standing, the run is over
     // for the downed survivors (otherwise: permanent softlock).
     const active = !['lobby', 'gameover', 'victory', 'finale'].includes(this.wave.phase);
@@ -196,7 +200,7 @@ export class HostSim {
     }
     const mid = this.nextMid++;
     this.mines.set(mid, { id: mid, pos, armT: 1.0, owner: id });
-    this.events.push({ e: 'mined', id: mid, by: id });
+    this.events.push({ e: 'mined', id: mid, by: id, p: pos.toArray() });
   }
 
   // THE DRONE is a delivery vehicle. It flies out over the field where the
@@ -238,7 +242,6 @@ export class HostSim {
       if (best) {
         d.carrying = best.id;
         best.carried = true;
-        this.events.push({ e: 'fetched', id: best.id });
       } else {
         this.events.push({ e: 'fetchmiss', by: d.owner });
       }
@@ -249,7 +252,7 @@ export class HostSim {
     if (d.payload === 'mine') {
       const mid = this.nextMid++;
       this.mines.set(mid, { id: mid, pos, armT: 1.0, owner: d.owner });
-      this.events.push({ e: 'mined', id: mid, by: d.owner });
+      this.events.push({ e: 'mined', id: mid, by: d.owner, p: pos.toArray() });
       return;
     }
     const cfg = TUNING.traps[d.payload];
@@ -282,7 +285,6 @@ export class HostSim {
       }
       if (tr.t <= 0) {
         this.traps.delete(tr.id);
-        this.events.push({ e: 'trapend', id: tr.id, kind: tr.kind });
       }
     }
   }
@@ -441,7 +443,7 @@ export class HostSim {
       id: gid, owner: id, kind,
       pos: new THREE.Vector3().fromArray(m.o).addScaledVector(dir, 0.4),
       vel: dir.multiplyScalar(def.throwSpeed).add(new THREE.Vector3(0, 3.2, 0)),
-      fuse: kind === 'molotov' ? 3.0 : def.fuseTime,   // molotov pops on impact
+      fuse: kind === 'molotov' ? TUNING.weapons.molotov.airburstFuse : def.fuseTime,   // molotov pops on impact
     });
   }
 
@@ -502,7 +504,6 @@ export class HostSim {
       p.hp = TUNING.player.maxHp; p.down = false; p.reviveT = 0;
       p.pos.copy(this.level.playerSpawns[i++ % this.level.playerSpawns.length]);
     }
-    this.events.push({ e: 'restart' });
     this._enterDay();
   }
 
@@ -738,10 +739,16 @@ export class HostSim {
         this.events.push({ e: 'revive', id, hp: p.hp });
       }
     }
-    const hook = TUNING.floorHooks[this.wave.level];
+    // The level's own data file names it. TUNING.floorHooks is the
+    // fallback for floors that are still hand-written builders, and it
+    // supplies the mechanical twist (`mod`) for every floor either way.
+    // Without this the arrival card announced whatever floorHooks said and
+    // silently ignored the spec, which its own comment claimed was the
+    // single source.
+    const info = levelInfoFor(this.wave.level) || TUNING.floorHooks[this.wave.level];
     this.events.push({
       e: 'level', index: this.wave.level,
-      name: hook ? hook.name : null, note: hook ? hook.note : null,
+      name: info ? info.name : null, note: info ? info.note : null,
     });
     this._enterDay(false);
   }
@@ -772,7 +779,6 @@ export class HostSim {
       bestDist: Infinity, noProgressT: 0, rescues: 0,
       daylight: !!opts.daylight,
     });
-    this.events.push({ e: 'zspawn', id });
   }
 
   // ---- The base wall (HOLDOUT levels) ----------------------------------
@@ -846,19 +852,6 @@ export class HostSim {
     if (wasBreach) { this.level.nav = null; this.level.collidersZ = null; }
   }
 
-  // The nearest damaged segment to a point, for the repair prompt.
-  nearestDamagedSeg(pos, maxDist = 2.2) {
-    const wall = this.level.baseWall;
-    if (!wall) return null;
-    let best = null, bd = maxDist * maxDist;
-    for (const seg of wall.segments) {
-      if (seg.hp >= seg.maxHp) continue;
-      const dx = pos.x - seg.x, dz = pos.z - seg.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bd) { bd = d2; best = seg; }
-    }
-    return best;
-  }
 
   _baseLost() {
     this.events.push({ e: 'baselost' });
@@ -906,7 +899,6 @@ export class HostSim {
     const from = this._reachableSpawn(goal);
     if (from) {
       z.pos.copy(this._legalSpawnPos(from));
-      this.events.push({ e: 'zrescue', id: z.id });
     }
     z.path = null;
     z.rescues = 0;
@@ -1056,8 +1048,6 @@ export class HostSim {
     return best;
   }
 
-  // Back-compat alias (older callers/tests).
-  shoot(o, d, damage = 1) { return this.shootRay(o, d, damage, 'H'); }
 
   _tall() {
     return this.level.collidersTall
@@ -1310,7 +1300,6 @@ export class HostSim {
       this.idleT = (this.idleT || 0) + dt;
       if (this.idleT > TUNING.pacing.maxIdleSeconds && wave.t > 2.5) {
         wave.t = 2.5;                     // skip straight to the countdown
-        this.events.push({ e: 'earlynight' });
       }
     } else {
       this.idleT = 0;
@@ -1951,7 +1940,7 @@ export class HostSim {
     const ds = [];
     for (const d of this.drones.values()) {
       ds.push([d.id, +d.pos.x.toFixed(2), +d.pos.y.toFixed(2), +d.pos.z.toFixed(2),
-        TRAP_KINDS.indexOf(d.payload || 'mine'), d.phase === 'home' ? 1 : 0]);
+        DRONE_LOADS.indexOf(d.payload || 'mine'), d.phase === 'home' ? 1 : 0]);
     }
     const is = [];
     for (const item of this.items.values()) {

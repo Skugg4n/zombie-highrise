@@ -101,19 +101,6 @@ export function makeFlashlightMesh() {
   return g;
 }
 
-// The gloved hand, kept for the case where the off hand holds nothing at
-// all (dual pistols put a light under the barrel instead).
-export function makeGloveMesh() {
-  const g = new THREE.Group();
-  const leather = new THREE.MeshStandardMaterial({ color: 0x33302c, roughness: 0.9 });
-  const strap = new THREE.MeshStandardMaterial({ color: 0x5a5348, roughness: 1.0 });
-  part(g, new THREE.BoxGeometry(0.07, 0.085, 0.11), leather, 0, 0, -0.01);   // palm
-  part(g, new THREE.BoxGeometry(0.065, 0.05, 0.06), leather, 0, 0.005, -0.08); // fingers
-  part(g, new THREE.BoxGeometry(0.03, 0.05, 0.045), leather, -0.04, -0.01, -0.03); // thumb
-  part(g, new THREE.BoxGeometry(0.075, 0.03, 0.035), strap, 0, 0, 0.06);      // wrist strap
-  return g;
-}
-
 // An under-barrel light for when both hands are full (dual pistols).
 export function makeUnderBarrelLight() {
   const g = new THREE.Group();

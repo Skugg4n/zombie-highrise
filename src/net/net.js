@@ -4,7 +4,7 @@
 // flakiness -> clear UI errors and retry, client drop -> host cleans up.
 /* global Peer */
 import { CONFIG, VERSION } from '../config.js';
-import { msg } from './protocol.js';
+import { msg, PROTO_VERSION } from './protocol.js';
 
 function randomCode() {
   const a = CONFIG.CODE_ALPHABET;
@@ -92,8 +92,19 @@ export class Net {
     });
     conn.on('data', (data) => {
       if (!data || typeof data !== 'object') return;
-      if (data.t === 'hi') this.onPeerJoin(id, data);
-      else this.onClientMessage(id, data);
+      if (data.t === 'hi') {
+        // The host's half of the version gate. Refuse a stale joiner
+        // before it is given a player id and starts sending poses: the
+        // welcome has already gone out, and the client refuses on its own
+        // side too, but a host that keeps a mismatched peer in its player
+        // list would keep simulating for someone seeing a different world.
+        if (data.pv !== undefined && data.pv !== PROTO_VERSION) {
+          try { conn.close(); } catch { /* already gone */ }
+          this.conns.delete(id);
+          return;
+        }
+        this.onPeerJoin(id, data);
+      } else this.onClientMessage(id, data);
     });
     const drop = () => {
       if (this.conns.delete(id)) this.onPeerLeave(id);
@@ -122,7 +133,18 @@ export class Net {
       conn.on('open', () => { if (hello) conn.send(hello); });
       conn.on('data', (data) => {
         if (!data || typeof data !== 'object') return;
-        if (data.t === 'welcome') { this.myId = data.id; this.established = true; this.onWelcome(data); }
+        if (data.t === 'welcome') {
+          // A cached build joining a newer host used to succeed and then
+          // quietly diverge, because geometry is rebuilt locally rather
+          // than sent. Refusing is much kinder than two different worlds.
+          if (data.pv !== undefined && data.pv !== PROTO_VERSION) {
+            this.onError('That room is running a different version of the game '
+              + `(theirs ${data.pv}, yours ${PROTO_VERSION}). Reload the page to update.`, true);
+            this.leave();
+            return;
+          }
+          this.myId = data.id; this.established = true; this.onWelcome(data);
+        }
         else if (data.t === 'snap') this.onSnapshot(data);
       });
       conn.on('close', () => this.onDisconnected());

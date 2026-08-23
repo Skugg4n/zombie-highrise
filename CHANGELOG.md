@@ -1,5 +1,131 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.14.2 - 2026-08-23 - the dead code audit
+
+Ola, after the VR reload gesture turned out to be dead code: "your rule
+protects future edits, not the ones already made. Do a one-time audit for
+siblings of that bug before moving on."
+
+**43 things existed and never ran.** 17 functions, branches and variables
+no path reached; 9 sim events built, shipped to every peer on every
+snapshot, and then discarded because the client switch had no case and no
+`default`; 17 config and tuning constants nothing read. 14 of them were
+dead in the same commit that created them, exactly like the reload
+gesture. One commit gave birth to five.
+
+### Things the player was losing
+
+- **The drone order that never arrived.** The affordability guard checked
+  `droneDeploy`, which is 0 by design, so it could never fire. The client
+  played the launch sound and announced "Drone away"; the host refused the
+  order and pushed a `nofunds` event that nothing listened to. With low
+  scrap you were told a drone launched and none existed. On a holdout
+  level the drone is the only way to touch the field.
+- **Placing a mine was silent.** A `minebeep` recipe has existed since
+  v0.6.1 and was never played. It matters most in VR, where mines are
+  placed by a grip squeeze and the toast standing in for feedback is an
+  invisible DOM overlay.
+- **The drone payload landed in silence.** `dronedrop` was written in the
+  same commit as `dronefly` and only one was wired. You heard it leave and
+  then nothing arrived twenty metres out.
+- **A FETCH drone flew out carrying a mine crate**, because `fetch` had no
+  slot in the wire's payload table and `indexOf` returned -1.
+- **The flashlight reloaded with you.** A sentinel renamed from `glove` to
+  `light` at three of four read sites, so the torch canted over and grew a
+  charge lamp on every reload, in a headset, on the hand you hold up to
+  see by.
+
+### The one change that would have caught most of it
+
+Every silent path now has a mouth. `handleEvents` has a `default:` that
+warns on any unhandled sim event, and `audio.play` warns when a recipe is
+missing. Those two lines would have caught 11 of the 43 the first time
+anyone played, including all of the above.
+
+### Deleted, because it existed and did nothing
+
+`poseZombie` (superseded by the instanced renderer in v0.7.0 and left
+behind), `makeZombieMesh` and a `groundHeight` import that fed it,
+`makeGloveMesh`, `HostSim.shoot` (a back-compat alias whose callers were
+deleted by the commit that added it), `HostSim.nearestDamagedSeg` (a
+duplicate of the live `nearestRepairTarget`), `NavGrid.isWalkableAt`,
+`WristDisplay.detach`, `meta.get`, `codeAlphabetCheck`, `magSeatFlashT`,
+a `userData.lens` cache written twice and read never, and seven orphan
+event pushes.
+
+`msg.shoot` and `msg.snap` were the most dangerous: stale constructors
+that no longer matched the wire. `msg.snap` emitted `z` where the sim
+sends `zs`, so anyone trusting the protocol file would have produced a
+snapshot whose zombies landed under the wrong key and vanished silently.
+The protocol file is now an accurate description of what actually travels.
+
+### Knobs that were not knobs
+
+Twelve Phase 0 constants in `src/config.js` that nothing read, two of
+which had drifted into *disagreeing* with the values that run: they said
+the pistol held 12 rounds and reloaded in 1.0 s while the live pistol
+holds 8 and reloads in 1.7. Balance lives in one place now.
+
+Four more in tuning: `spawnDistanceFromPlayer` (superseded by the
+level-authored spawn rings, and not even matching them),
+`fragGrenade.friendlyFire` (the rule is welded into the blast code, which
+damages only the thrower), `molotov.fuseTime` (structurally unreachable,
+and honouring its 0.0 would ignite the bottle at your feet, so the live
+constant is now named `airburstFuse` for what it actually is), and
+`traps.lure.pull` (there is no gradient for a strength factor to act on).
+
+### Wired up instead of deleted
+
+- **`PROTO_VERSION` now gates the handshake, on both sides.** It had never
+  been read, sent or compared: there was no compatibility check of any
+  kind. Builds are served from GitHub Pages and headsets cache hard, so a
+  Quest running last week's build will try to join a current host, and
+  since geometry is rebuilt locally from a seed rather than sent, the join
+  used to succeed and the two players then saw different worlds. It is
+  refused now, with a message telling you to reload.
+- **A level's data file names its own level.** The arrival card read
+  `TUNING.floorHooks` and ignored the spec, while the code comment claimed
+  the spec was the single source. It was true only because floor 1's hook
+  happened to be byte-identical to L1's. The next sketch dropped in would
+  have announced the wrong name with no error.
+
+### One more thing the audit's own fix then caught
+
+Tightening the spawn clearance rule to know how big each prop actually is
+immediately failed L1 on every seed. Several spawns were sitting inside
+the props they were meant to hide behind: a nine metre group of burnt-out
+cars and a fourteen metre ruined house do not clear at "a few metres past
+the middle". Two of those props also jitter with the level seed, so the
+failure appeared on some seeds and not others, which is the worst kind.
+Corrected, and verified on seven seeds.
+
+### Also, the record
+
+v0.14.0 and v0.14.1 shipped with no changelog entry at all, against
+CLAUDE.md's own rule. They are the two commits that produced the newest
+dead function in the repo. Entries added below.
+
+## v0.14.1 - 2026-08-23 - being downed in VR is no longer a softlock
+
+See the commit for detail: a world-space panel for every stopped state
+(downed, game over, victory) with its actions on face buttons, because
+every one of those states was a DOM overlay and DOM does not exist inside
+a headset. Manual VR reload restored (it had never once run). The
+flashlight no longer fires bullets. New `test/vrprobe.mjs` asserts the VR
+parity list headlessly.
+
+## v0.14.0 - 2026-08-23 - levels are DATA
+
+`src/world/levelkit.js` (prop library and build spine),
+`src/world/holdout.js` (the base frame only) and `src/world/levels/L1.js`
+(the level, entirely as data). Spawns are derived from the blocker they
+hide behind plus a ring distance. Validation runs at build time and fails
+loudly: unknown props, a spawn inside its own blocker, a spawn in the
+wrong ring band, a spawn with no route to the squad (by exact flood fill,
+because a budgeted A* can report a long route as a wall), and anything
+standing in the lift's boarding zone. Documented in docs/level-format.md
+with L1 as the worked example.
+
 ## v0.13.0 - 2026-08-23 - VR can see, and the round can always be won
 
 From Ola's VR playtest.

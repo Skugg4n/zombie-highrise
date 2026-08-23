@@ -1,40 +1,49 @@
-// Wire protocol v1. NETCODE owns this file; every other domain conforms.
+// Wire protocol. NETCODE owns this file; every other domain conforms.
 //
 // Transport: PeerJS DataConnections (reliable, JSON), star topology with a
 // host-authoritative server-in-a-browser.
 //
+// GEOMETRY IS NEVER SENT. Every peer builds the level locally from
+// (seed, level) in the welcome message, so the wire only ever carries
+// state, never the world.
+//
 // Message types
 //   client -> host
-//     hi     { t, name, platform, v }            once, on connect
+//     hi     { t, pv, name, platform, v, b }     once, on connect
+//              pv = PROTO_VERSION, checked by the host
+//              b  = the joiner's meta scrap bonus
 //     pose   { t, p:[x,y,z], ry, rx, vr, h?, hl?, hr? }   ~20 Hz
 //              p  = feet position (world), ry = yaw, rx = pitch
 //              vr = true when in an XR session
 //              h/hl/hr = head / left hand / right hand as { p:[..], q:[..] }
-//     shoot  { t, o:[x,y,z], d:[x,y,z] }         fire event, ray origin + dir
+//     act    { t: <action>, ... }                every player action; the
+//              action set is owned by HostSim.handle in game/state.js
 //   host -> client
-//     welcome { t, id, code, v, seed, level }    player id + level seed so
-//                                                every peer builds identical
-//                                                geometry locally
+//     welcome { t, pv, id, code, v, seed, level, area }
+//              player id plus the level seed, so every peer builds
+//              identical geometry locally
 //     snap    { t, ts, players:{id:{p,ry,rx,vr,hp,down,name,h?,hl?,hr?}},
-//               zs:[[id,typeIdx,x,y,z,hp],...],  compact zombie rows
-//               wave:{ph,n,lv,t,left},           phase machine mirror
-//               ev:[Event] }                     ~15 Hz
+//               zs:[[id,typeIdx,x,y,z,hp],...],     zombies
+//               gs, is, ms, ds, bs, tr,             grenades, items, mines,
+//                                                   drones, barrels, traps
+//               bw:[hp,...],                        base wall segment health
+//               wave:{ph,n,lv,t,left,mod},          phase machine mirror
+//               ev:[Event] }                        ~15 Hz
 //   Event (inside snap.ev)
-//     { e:'zhit', id } | { e:'zdie', id, type, p, scrap } | { e:'zspawn', id }
-//     { e:'phit', id, hp } | { e:'down', id } | { e:'revive', id, hp }
-//     { e:'day', n } | { e:'countdown', s } | { e:'night', n }
-//     { e:'elevator' } | { e:'ride' } | { e:'level', index }
-//     { e:'gameover', stats:{nights,kills,level} } | { e:'restart' }
-//     { e:'join', id, name } | { e:'leave', id }
-export const PROTO_VERSION = 1;
-
-export const codeAlphabetCheck = (code, alphabet) =>
-  code.length === 4 && [...code].every((ch) => alphabet.includes(ch));
+//     The set is owned by HostSim; the client switch in main.js handles it
+//     and now WARNS on any event it does not know, because nine of them
+//     were once being shipped every frame and silently discarded.
+//
+// PROTO_VERSION gates compatibility. Bump it whenever the shape of any
+// message above changes in a way an older peer would misread. This matters
+// more than it looks: builds are served from GitHub Pages and headsets
+// cache hard, so a Quest running last week's build WILL try to join a
+// current host. Without the gate the join succeeds and the two players
+// then see different worlds, which is far worse than a refusal.
+export const PROTO_VERSION = 2;
 
 export const msg = {
-  hi: (name, platform, v) => ({ t: 'hi', name, platform, v }),
+  hi: (name, platform, v) => ({ t: 'hi', pv: PROTO_VERSION, name, platform, v }),
   pose: (pose) => ({ t: 'pose', ...pose }),
-  shoot: (o, d) => ({ t: 'shoot', o, d }),
-  welcome: (id, code, v) => ({ t: 'welcome', id, code, v }),
-  snap: (ts, players, z, ev) => ({ t: 'snap', ts, players, z, ev }),
+  welcome: (id, code, v) => ({ t: 'welcome', pv: PROTO_VERSION, id, code, v }),
 };

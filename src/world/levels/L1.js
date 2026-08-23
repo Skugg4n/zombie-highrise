@@ -71,7 +71,7 @@ export const L1 = {
       { prop: 'crashBarrier', x: 11, z: 14, len: 18, rot: 1.35, note: 'along the road, south' },
       { prop: 'container', id: 'container', x: -4, z: 6, rot: 0.5, colour: 0x6b3a2e, note: 'south of the base' },
       { prop: 'container', x: 12, z: -22, rot: -0.9, colour: 0x2f4a52, note: 'on the ridge approach' },
-      { prop: 'container', x: -22, z: -4, rot: 1.4, colour: 0x4a4736, note: 'west, the quiet side' },
+      { prop: 'container', id: 'westbox', x: -20, z: -6, rot: 1.4, colour: 0x4a4736, note: 'west, close in, the quiet side' },
       { prop: 'busWreck', id: 'bus', x: -6, z: 20, rot: 0.35, note: 'south-west approach' },
 
       // ---- Close-in cover, so the NEAR spawn ring has somewhere to come
@@ -111,21 +111,21 @@ export const L1 = {
   // being either the moment a prop moves.
   spawns: [
     // NEAR: on you in about ten seconds, so the level opens immediately.
-    { behind: [-4, -15], dist: 14, from: 'pipes', ring: 'near' },
-    { behind: [-15, -1.5], dist: 14.5, from: 'pipes3', ring: 'near' },
-    { behind: [-22, -4], dist: 15, from: 'container', ring: 'near' },
+    { behind: [-4, -15], dist: 16, from: 'pipes', ring: 'near' },
+    { behind: [-15, -1.5], dist: 16, from: 'pipes3', ring: 'near' },
+    { behind: [-20, -6], dist: 15.5, from: 'westbox', ring: 'near' },
     // MID: the working distance, where most of the fight happens.
     { behind: [5, -3], dist: 26, from: 'depot', ring: 'mid' },
     { behind: [-17, 7], dist: 25, from: 'pipes2', ring: 'mid' },
-    { behind: [-19, -28], dist: 24, from: 'boulder', ring: 'mid' },
+    { behind: [-19, -28], dist: 27, from: 'boulder', ring: 'mid' },
     { behind: [-4, 6], dist: 26, from: 'container', ring: 'mid' },
     // FAR: the ones you watch gather out of the haze, and dread.
     { behind: [6, -34], dist: 42, from: 'ridge', ring: 'far' },
     { behind: [18, -6], dist: 40, from: 'tree', ring: 'far' },
-    { behind: [22, 9], dist: 46, from: 'cars', ring: 'far' },
+    { behind: [22, 9], dist: 50, from: 'cars', ring: 'far' },
     { behind: [-22, 16], dist: 41, from: 'rock', ring: 'far' },
-    { behind: [8, 26], dist: 48, from: 'house', ring: 'far' },
-    { behind: [-6, 20], dist: 40, from: 'bus', ring: 'far' },
+    { behind: [8, 26], dist: 54, from: 'house', ring: 'far' },
+    { behind: [-6, 20], dist: 41, from: 'bus', ring: 'far' },
   ],
 
   // Out in the field on the approach lanes: a reward for a good shot at

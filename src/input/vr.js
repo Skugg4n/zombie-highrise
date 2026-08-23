@@ -179,18 +179,6 @@ export class VRInput {
           if (bothHands && !isMain) holder.add(makeUnderBarrelLight());
         }
       }
-      // Cache the lens for the beam toggle.
-      if (!holder.userData.lensCached) {
-        holder.userData.lensCached = true;
-        holder.traverse((o) => {
-          if (o.parent && o.parent.userData && o.parent.userData.lens === o) {
-            holder.userData.lens = o;
-          }
-        });
-        holder.children.forEach((ch) => {
-          if (ch.userData && ch.userData.lens) holder.userData.lens = ch.userData.lens;
-        });
-      }
     }
     this._placeWrist();
   }
@@ -417,7 +405,7 @@ export class VRInput {
   setReloadPose(arsenal, hint) {
     for (let i = 0; i < this.gripWeapons.length; i++) {
       const holder = this.gripWeapons[i];
-      if (holder.userData.shown === 'glove') continue;
+      if (holder.userData.shown === 'light') continue;   // the torch does not reload
       let roll = 0, drop = 0;
       if (arsenal.reloading && arsenal.reloadTotal > 0) {
         const p = 1 - arsenal.reloadT / arsenal.reloadTotal;

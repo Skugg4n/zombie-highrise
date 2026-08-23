@@ -680,7 +680,19 @@ export function validateSpec(spec) {
 // level unwinnable. This is a spec error, identical on every peer, so it
 // stops the build loudly rather than shipping a level that cannot be won.
 const RING_BANDS = { near: [11, 17], mid: [22, 30], far: [38, 999] };
-const MIN_BEYOND = 3.5;      // metres past the blocker's centre
+
+// How far a prop reaches from the point that names it. A spawn has to
+// clear the whole prop, not its centre: burnt-out cars are a nine metre
+// group and a ruined house is fourteen across, so a flat "a few metres
+// past the middle" puts the spawn inside them. Some of these props also
+// jitter with the level seed, which made the failure appear on some seeds
+// and not others.
+const PROP_SPREAD = {
+  loneTree: 1.0, pipeMound: 3.2, container: 3.5, bigRock: 5.5,
+  burntCars: 6.5, busWreck: 5.5, ruinedHouse: 8.0, ridge: 5.0,
+  crashBarrier: 4.0, pylons: 2.0,
+};
+const CLEARANCE = 2.5;       // metres of open ground past the prop's edge
 
 export function validateSpawns(spec) {
   const err = [];
@@ -698,12 +710,17 @@ export function validateSpawns(spec) {
       continue;
     }
     const bd = Math.hypot(s.behind[0] - ax, s.behind[1] - az);
+    const blocker = props.find((p) => typeof p.x === 'number'
+      && Math.hypot(p.x - s.behind[0], p.z - s.behind[1]) < 0.6);
+    const spread = blocker ? (PROP_SPREAD[blocker.prop] || 3.0) : 3.0;
+    const need = bd + spread + CLEARANCE;
     if (typeof s.dist !== 'number') {
       err.push(`${at} has behind[] but no dist`);
-    } else if (s.dist < bd + MIN_BEYOND) {
-      err.push(`${at} sits ${(s.dist - bd).toFixed(1)} m past its blocker, `
-        + `which is inside it. Blocker is ${bd.toFixed(1)} m out, so dist must be `
-        + `at least ${(bd + MIN_BEYOND).toFixed(1)}.`);
+    } else if (s.dist < need) {
+      err.push(`${at} sits ${(s.dist - bd).toFixed(1)} m past the middle of its `
+        + `blocker, but that prop reaches ${spread} m from its centre, so the spawn `
+        + `is inside it. Blocker is ${bd.toFixed(1)} m out: dist must be at least `
+        + `${need.toFixed(1)}.`);
     }
     if (s.ring) {
       const band = RING_BANDS[s.ring];
@@ -775,8 +792,6 @@ export function buildFromSpec(level, spec, { rng, quality, makeElevator }) {
 
   // ---- 2. Identity ----
   level.archetype = spec.archetype;
-  level.name = spec.name;
-  level.note = spec.note || null;
   level.waveLabel = w.waveLabel || 'WAVE';
   level.nextLabel = w.nextLabel || null;
   level.mapExtent = w.mapExtent !== undefined ? w.mapExtent : w.size * 0.62;

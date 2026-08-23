@@ -1,6 +1,6 @@
 // Central configuration and constants. Version is bumped on every change
 // and shown in the UI corner (see ui/hud.js -> #version).
-export const VERSION = '0.14.1';
+export const VERSION = '0.14.2';
 
 export const CONFIG = {
   // Networking
@@ -13,22 +13,13 @@ export const CONFIG = {
 
   // Player
   PLAYER_HEIGHT: 1.6,     // eye height for flat modes
-  PLAYER_SPEED: 4.0,      // m/s
-  PLAYER_HP: 100,
 
-  // Weapon (Phase 0: one pistol)
-  PISTOL_DAMAGE: 1,
-  PISTOL_MAG: 12,
-  PISTOL_RELOAD_S: 1.0,
-  PISTOL_COOLDOWN_S: 0.22,
-
-  // Zombie (Phase 0: one walker)
-  ZOMBIE_HP: 3,
-  ZOMBIE_SPEED: 1.1,      // m/s
-  ZOMBIE_ATTACK_RANGE: 1.1,
-  ZOMBIE_DPS: 10,
-  ZOMBIE_RESPAWN_S: 3.0,
-  ZOMBIE_HIT_RADIUS: 0.55,
+  // NOTE: the Phase 0 weapon and zombie constants used to live here and
+  // were deleted in v0.14.2. Nothing read them, and two of them had drifted
+  // into disagreeing with the values that actually run: they said the
+  // pistol held 12 rounds and reloaded in 1.0 s, while the live pistol
+  // holds 8 and reloads in 1.7. Balance lives in ONE place, src/game/
+  // tuning.js: TUNING.player, TUNING.weapons and TUNING.enemies.
 
   // VR locomotion
   SNAP_TURN_DEG: 45,
