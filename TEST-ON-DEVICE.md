@@ -4,7 +4,75 @@ Live build: https://skugg4n.github.io/zombie-highrise/
 Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw".
 
-## v0.16.0 - LEVEL 2 IS IN (START HERE)
+## v0.19.0 - THE STRATEGY VIEW, THE HOLSTER, THE TORCH (START HERE, VR)
+
+Everything in this block is new since your last headset session. The
+first two answer "the drone is unusable in VR" and the rest are your
+v0.15.x bug list.
+
+**The wrist, one more time.** Open the debug menu (Y on the left
+controller) and use "Wrist: move AROUND the arm" and "Wrist: change the
+ANGLE". A bracelet appears on your forearm with 12 numbered pips and
+letters A to E, and the display prints its own position on itself, like
+POSITION 7C. Step it until it sits where a watch sits and reads right,
+then pick "Wrist: done, hide the bracelet". Tell me the two characters
+and I will make that the default. It is saved on your headset meanwhile.
+
+- [ ] The bracelet is readable and stepping it actually moves the display.
+- [ ] Report the coordinate that works, e.g. "9B".
+
+**The strategy view.** This is the panel you asked for.
+
+- [ ] Raise your forearm and LOOK at the wrist display for about half a
+      second. A large panel should unfold in front of you, showing the
+      level from above.
+- [ ] Look away from the panel for a second. It should fold itself.
+- [ ] Point at the map with the pistol barrel. A crosshair should follow
+      where you point, and a line at the bottom should say what the
+      trigger will do and what it costs.
+- [ ] Pull the trigger on a spot. The drone should launch and fly to
+      THAT spot. This is the one to watch closely: tell me if it goes
+      somewhere else, especially if it goes to the mirror-image spot.
+- [ ] Y on the left controller cycles the payload while the panel is
+      open: MINE, TAR, SPIKES, FLARE, FETCH.
+- [ ] The panel should stay where it appeared when you move your head.
+      If it follows your face, say so.
+
+**The holster.**
+
+- [ ] There is a visible loop on your right hip.
+- [ ] Move your right hand to it and squeeze. The pistol should move from
+      your hand to the loop, visibly.
+- [ ] With it stowed, your now-free hand points at the map instead.
+- [ ] Squeeze at the hip again to draw it back.
+- [ ] Squeeze anywhere ELSE and it should still reload, not stow.
+
+**The torch and the headlamp.**
+
+- [ ] The empty hand's trigger now turns the flashlight on and off.
+- [ ] Underground it starts lit and the trigger can turn it OFF.
+- [ ] Nothing should be shining from your face any more. If you still see
+      light coming from your viewpoint in VR, say so.
+
+**Mines.** (Anywhere, VR or flat.)
+
+- [ ] Shoot a mine you laid: it should go off.
+- [ ] Lay two or three in a row and shoot one: the whole row should go.
+- [ ] Lay one next to an explosive barrel and shoot the barrel: the mine
+      should go with it.
+- [ ] Stand next to your own mine and shoot it. It should hurt YOU. This
+      is deliberate; tell me if it hurts too much.
+- [ ] Underground on floor 2, you can now lay mines at all. You could not
+      before.
+
+**Desktop only.**
+
+- [ ] Make the browser window narrow, phone-shaped. Nothing at the top of
+      the screen should sit on top of anything else.
+- [ ] The tactical map has only PING and DRONE now. The old MINE button
+      is gone: it did the same thing as the drone for more scrap.
+
+## v0.16.0 - LEVEL 2 IS IN
 
 Floor 2 is THE UNDERWORKS, the traverse level from your L2 sketch. Clear
 floor 1, ride the lift, and you land in it.
