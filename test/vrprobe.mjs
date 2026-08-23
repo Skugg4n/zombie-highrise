@@ -88,8 +88,19 @@ check(!!downPanel && downPanel.actions.length > 0,
 await page.evaluate(() => window.__zhr.debugSetDowned(false));
 
 // ---- 5. Game over is legible AND actionable ----
-await page.evaluate(() => window.__zhr.debugEndRun());
-await page.waitForTimeout(500);
+// DIED FOR REAL, not ended with a debug shortcut. Ola reports that A and
+// B leave him dead in the headset while this test was green, which means
+// the test was reaching game over by a route no player can take.
+await page.evaluate(async () => {
+  const D = window.__zhr;
+  for (let i = 0; i < 40 && D.hp() > 0; i++) {
+    D.debugHurt(20);
+    await new Promise((r) => setTimeout(r, 60));
+  }
+});
+await page.waitForFunction(() => window.__zhr.wave()?.ph === 'gameover',
+  null, { timeout: 12000 }).catch(() => {});
+await page.waitForTimeout(600);
 const overPanel = await page.evaluate(() => window.__zhr.debugVrPanel());
 check(!!overPanel && overPanel.open, 'a panel appears on game over');
 check(!!overPanel && /GAME OVER/.test(overPanel.title), 'it says the run is over',
@@ -107,7 +118,10 @@ check(acts.some((a) => /QUIT/i.test(a)), 'you can quit from inside the headset')
 // player. What follows is what a person would actually check.
 const acted = await page.evaluate(async () => {
   const before = window.__zhr.wave()?.ph;
-  const consumed = window.__zhr.debugVrPress('A');
+  // Pressed through the GAMEPAD LOOP, the only route a player has. The
+  // previous version called the panel handler directly and so proved
+  // nothing about whether the button reaches it.
+  const consumed = window.__zhr.debugVrButtonA();
   await new Promise((r) => setTimeout(r, 900));
   const play = await window.__zhr.debugCanPlay();
   return { consumed, before, after: window.__zhr.wave()?.ph, play };
@@ -120,6 +134,33 @@ check(acted.play.canShoot, 'and can shoot',
   `ammo ${acted.play.ammoBefore} -> ${acted.play.ammoAfter}`);
 check(acted.after !== 'gameover', 'and the run is running again',
   `${acted.before} -> ${acted.after}`);
+
+// ---- 6. The debug menu, reachable from inside the headset ----
+// Ola asked for it so he can reach everything the game has. It is also the
+// diagnostic: it prints live state, so a fault in a headset can be read
+// out loud instead of guessed at.
+const menu = await page.evaluate(async () => {
+  const D = window.__zhr;
+  const opened = D.debugMenuState().open;
+  D.debugVrButtonY();                       // Y opens it
+  const afterOpen = D.debugMenuState();
+  return { before: opened, after: afterOpen };
+});
+check(!menu.before && menu.after.open, 'Y opens the debug menu in VR');
+check(menu.after.actions > 10, 'and it offers everything the game has',
+  `${menu.after.actions} actions`);
+check(menu.after.status.length > 3, 'and it prints live state to read out loud',
+  JSON.stringify(menu.after.status));
+
+const gave = await page.evaluate(async () => {
+  const D = window.__zhr;
+  const before = D.weapon();
+  D.debugMenuPickLabel('Give SHOTGUN');
+  await new Promise((r) => setTimeout(r, 300));
+  return { before, after: D.weapon() };
+});
+check(gave.after !== gave.before, 'and picking an action actually does it',
+  `${gave.before} -> ${gave.after}`);
 
 console.log(fails === 0 ? '\nVR PARITY GREEN' : `\nVR PARITY: ${fails} FAILURES`);
 console.log('errors:', errors.length ? errors.slice(0, 3).join(' | ') : 'none');

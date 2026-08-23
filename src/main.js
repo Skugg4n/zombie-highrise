@@ -13,9 +13,11 @@ import { CharacterController, BODY } from './game/controller.js';
 import { NavGrid } from './game/navgrid.js';
 import { voidBlocker } from './world/levelkit.js';
 import { InteractionLayer } from './world/interact.js';
+import { DebugMenu } from './world/debugmenu.js';
 import { setDoorOpen } from './world/traverse.js';
 import { makeAvatarMesh, makeNameTag, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
+import { applyLevelPreview } from './views/levelpreview.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
@@ -177,7 +179,12 @@ function updateDayNight(force = false) {
 const PHOTO_LEVEL = { 2: 2, 6: 3, 7: 5 };
 let runSeed = (PHOTOMODE || UISTATE) ? 1337
   : (parseInt(PARAMS.get('seed') || '0', 10) || ((Math.random() * 1e9) >>> 0));
-let levelIndex = PHOTOMODE ? (PHOTO_LEVEL[PHOTOMODE] || 1) : 1;
+// ?levelpreview=N boots straight into a labelled top-down view of that
+// level, without playing it. Ola: "five seconds instead of five minutes
+// changes how many sketches I can try."
+const LEVELPREVIEW = PARAMS.get('levelpreview')
+  ? Math.max(1, parseInt(PARAMS.get('levelpreview'), 10) || 1) : 0;
+let levelIndex = LEVELPREVIEW || (PHOTOMODE ? (PHOTO_LEVEL[PHOTOMODE] || 1) : 1);
 let level = buildLevel(scene, QUALITY, runSeed, levelIndex);
 let doorT = 0;   // elevator doors 0 closed .. 1 open (visual)
 
@@ -225,6 +232,7 @@ const playerVel = new THREE.Vector3();   // legacy scratch, probes only
 // ONE controller. Everything that moves the local player goes through it.
 const controller = new CharacterController();
 let probeDrivesMovement = false;   // a movement probe has taken the wheel
+let preview = null;                // ?levelpreview=N: a diagram, not a game
 camera.position.set(0, CONFIG.PLAYER_HEIGHT, 0);
 rig.group.add(camera);
 rig.group.position.copy(level.playerSpawns[0] || new THREE.Vector3());
@@ -1150,13 +1158,35 @@ const $ = (id) => document.getElementById(id);
 // reachable from a face button inside the headset.
 function actRetryLevel() {
   $('panel-gameover').classList.add('hidden');
-  if (sim) sim.restartLevel();
-  else leaveToMenu();          // clients cannot restart; the host does
+  if (!sim) { leaveToMenu(); return; }   // clients cannot restart; the host does
+  sim.restartLevel();
+  // AND PUT THE LOCAL PLAYER BACK ON THEIR FEET, HERE. The simulation
+  // already did it and announced it, but Ola reports pressing A in the
+  // headset and staying dead, and a restart that depends on an event
+  // arriving is a restart that can fail silently. This cannot.
+  forceLocalRevive();
+}
+
+// Everything that makes the local player playable again, in one place and
+// depending on nothing being delivered.
+function forceLocalRevive() {
+  setDowned(false);
+  myHp = TUNING.player.maxHp;
+  hud.setHealth(myHp);
+  updateLowHpVignette();
+  arsenal.cancelReload();
+  const spawn = (level.playerSpawns && level.playerSpawns[0]) || { x: 0, z: 0 };
+  placePlayer(spawn.x, spawn.z);
+  if (sim) {
+    const p = sim.players.get('H');
+    if (p) { p.down = false; p.hp = TUNING.player.maxHp; p.reviveT = 0; }
+  }
 }
 function actNewRun() {
   $('panel-victory').classList.add('hidden');
   $('panel-gameover').classList.add('hidden');
   if (!sim) { leaveToMenu(); return; }
+  forceLocalRevive();
   clearFinale();
   runSeed = ((Math.random() * 1e9) >>> 0);
   loadLevel(1);
@@ -1411,6 +1441,10 @@ const actions = {
   throwCycle: () => { if (canAct()) arsenal.cycleThrowable(); },
   nightVision: () => toggleNightVision(),
   map: () => toggleMap(),
+  debugMenu: () => toggleDebugMenu(),
+  debugMenuOpen: () => !!(debugMenu && debugMenu.open),
+  debugMenuMove: (d) => { if (debugMenu) debugMenu.move(d); },
+  debugMenuPick: () => { if (debugMenu) debugMenu.activate(); },
   // Repair the nearest damaged wall segment. Prep only, cheap, and meant
   // to be spammed: patching the base every morning is the routine that
   // makes the day phase worth having.
@@ -2558,6 +2592,15 @@ function buildPose() {
 }
 
 // ---- Special boots ------------------------------------------------------
+if (LEVELPREVIEW) {
+  // A diagram of the level, not a view of the game. The HUD, the lobby
+  // and the player are all out of the way.
+  $('hud').classList.add('hidden');
+  for (const el of document.querySelectorAll('.panel')) el.classList.add('hidden');
+  viewmodel.visible = false;
+  rig.group.visible = false;
+  preview = applyLevelPreview(level, { scene, camera, renderer });
+}
 if (PHOTOMODE) {
   // Dressed zombies render through the same instanced horde as live play.
   const photoEntries = [];
@@ -2667,6 +2710,86 @@ function presentPhase(ph) {
   }
 }
 
+// ---- The debug menu -----------------------------------------------------
+// Everything the game has, reachable in one place, on every platform.
+let debugMenu = null;
+function getDebugMenu() {
+  if (debugMenu) return debugMenu;
+  const give = (w) => () => {
+    if (!sim) return;
+    const p = sim.players.get('H');
+    if (!p) return;
+    if (!p.inv.w.includes(w)) p.inv.w.push(w);
+    p.inv.active = w;
+    const def = TUNING.weapons[w];
+    if (def && def.magazine) {
+      p.inv.a[w] = [def.magazine, def.reserveMax === Infinity ? -1 : def.reserveMax];
+    }
+    arsenal.syncFromInv && arsenal.syncFromInv(p.inv);
+    arsenal.active = w;
+    arsenal.onHudChange();
+    showToast(`Given: ${def ? def.name : w}`, 1400);
+  };
+  const actions = [
+    { label: 'Give SHOTGUN', run: give('shotgun') },
+    { label: 'Give SMG', run: give('smg') },
+    { label: 'Give AK', run: give('ak') },
+    { label: 'Give DUAL PISTOLS', run: give('akimbo') },
+    { label: '+500 scrap', run: () => {
+      if (!sim) return;
+      const p = sim.players.get('H');
+      if (p) p.inv.s += 500;
+      showToast('+500 scrap', 1200);
+    } },
+    { label: 'Fill ammo and kit', run: () => {
+      if (!sim) return;
+      const p = sim.players.get('H');
+      if (!p) return;
+      p.inv.k = 2; p.inv.m = 6; p.inv.g = 5; p.inv.gs = 3; p.inv.gm = 3;
+      arsenal.debugRefillAll && arsenal.debugRefillAll();
+      window.__zhr.debugRefill();
+      showToast('Ammo and kit filled', 1400);
+    } },
+    { label: 'Heal to full', run: () => { if (sim) sim.healPlayer && sim.healPlayer('H'); forceLocalRevive(); } },
+    { label: 'REVIVE ME', run: () => { forceLocalRevive(); showToast('Back on your feet.', 1400); } },
+    { label: 'Kill everything', run: () => { if (sim) sim.debugKillAllNow ? sim.debugKillAllNow() : window.__zhr.debugKillAll(); } },
+    { label: 'Skip to the next wave', run: () => { if (sim) sim.forceNight(); } },
+    { label: 'Floor 1: THE FIELD (holdout)', run: () => window.__zhr.debugGotoLevel(1) },
+    { label: 'Floor 2: THE UNDERWORKS (traverse)', run: () => window.__zhr.debugGotoLevel(2) },
+    { label: 'Floor 4: the old yard', run: () => window.__zhr.debugGotoLevel(4) },
+    { label: 'Floor 5: the trench', run: () => window.__zhr.debugGotoLevel(5) },
+    { label: 'Floor 6: the wagon', run: () => window.__zhr.debugGotoLevel(6) },
+    { label: 'Floor 12: THE BUTCHER', run: () => window.__zhr.debugGotoFinal() },
+    { label: 'Repair the base', run: () => { window.__zhr.debugRepairAll(); showToast('Base repaired', 1200); } },
+    { label: 'Close', run: () => getDebugMenu().toggle() },
+  ];
+  const status = () => {
+    const w = lastWave || {};
+    return [
+      ['level', `${levelIndex} ${level.archetype || level.type || ''}`],
+      ['phase', w.ph || '-'],
+      ['hp', String(myHp)],
+      ['downed', myDown ? 'YES' : 'no'],
+      ['left', w.left === undefined ? '-' : String(w.left)],
+      ['scrap', String(scrap)],
+    ];
+  };
+  debugMenu = new DebugMenu(actions, status);
+  debugMenu.hint = 'VR: left stick up/down to move, TRIGGER to pick, Y to close.'
+    + '   Desktop: arrows and Enter, F8 to close.';
+  return debugMenu;
+}
+
+function toggleDebugMenu() {
+  const m = getDebugMenu();
+  // In VR it hangs in front of the player; flat, it hangs off the camera
+  // the same way, so there is exactly one implementation.
+  m.attachTo(camera);
+  const open = m.toggle();
+  if (open) m.draw();
+  return open;
+}
+
 // ---- VR readouts --------------------------------------------------------
 // RULE (Ola's VR playtest): nothing important may exist only as flat HUD
 // text. Everything a flat player reads off the screen has to reach a VR
@@ -2760,10 +2883,17 @@ function updateVrPanel(w) {
     return;
   }
   if (myDown) {
+    // A player alone has nobody to revive them, so "wait for help" is not
+    // a state, it is a trap. There is always a way back to playing.
     panel.show('YOU ARE DOWN', role === 'solo'
-      ? ['You cannot get up on your own.', 'The run ends when the timer does.']
+      ? ['Nobody is coming. Start this floor again.']
       : ['A teammate has to reach you and hold to revive.', 'Call out where you are.'],
-      [{ key: 'B', label: 'QUIT TO MENU', run: actQuitToMenu }], 'danger');
+      role === 'solo'
+        ? [
+          { key: 'A', label: 'START THIS FLOOR AGAIN', run: actRetryLevel },
+          { key: 'B', label: 'QUIT TO MENU', run: actQuitToMenu },
+        ]
+        : [{ key: 'B', label: 'QUIT TO MENU', run: actQuitToMenu }], 'danger');
     return;
   }
   panel.hide();
@@ -3097,6 +3227,7 @@ renderer.setAnimationLoop(() => {
       updateBaseHud();
       updateInteractions(dt);
       stepPickupFlash(dt);
+      if (debugMenu && debugMenu.open) debugMenu.draw();
       updateVrReadouts();
     }
     updateDayNight();
@@ -3165,6 +3296,7 @@ renderer.setAnimationLoop(() => {
   updateCasings(dt);
   updateShotVfx(dt);
 
+  if (preview) { preview.render(); return; }
   renderer.render(scene, mapActive && !(vrInput && vrInput.active) ? mapCam : camera);
 });
 
@@ -3513,6 +3645,28 @@ window.__zhr = {
     };
   },
   debugVrPress: (key) => (vrInput && vrInput.panel ? vrInput.panel.press(key) : false),
+  // Press it the way a controller does: through the gamepad loop, which
+  // is the only route a player has.
+  debugVrButtonA: () => (vrInput ? vrInput.debugPressButton('right', 4) : false),
+  debugVrButtonB: () => (vrInput ? vrInput.debugPressButton('right', 5) : false),
+  debugVrButtonY: () => (vrInput ? vrInput.debugPressButton('left', 5) : false),
+  debugMenuState: () => {
+    const m = debugMenu;
+    return {
+      open: !!(m && m.open),
+      actions: m ? m.actions.length : 0,
+      status: m && m.status ? m.status() : [],
+    };
+  },
+  debugMenuPickLabel: (label) => {
+    const m = getDebugMenu();
+    const i = m.actions.findIndex((a) => a.label === label);
+    if (i < 0) return false;
+    m.index = i;
+    m.open = true;
+    m.activate();
+    return true;
+  },
   debugVrWrist: () => {
     if (!vrInput || !vrInput.wrist) return null;
     return { key: vrInput.wrist._key, attached: !!vrInput.wrist.group.parent };
@@ -3636,6 +3790,8 @@ window.__zhr = {
   // client flag alone no longer works, and should not: the client derives
   // that state now, so a faked flag is corrected on the next frame. A
   // probe that fakes the wrong layer proves nothing.
+  // Take damage the way the game deals it, so a test can die for real.
+  debugHurt: (n) => { if (sim) sim.damagePlayer('H', n); },
   debugSetDowned: (v) => {
     if (!sim) { setDowned(v); return; }
     const p = sim.players.get('H');

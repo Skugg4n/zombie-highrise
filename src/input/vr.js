@@ -22,6 +22,12 @@ const BTN_STICK = 3, BTN_AX = 4, BTN_BY = 5;
 // How long the gun must point at the floor before it reloads.
 const RELOAD_HOLD = 0.35;
 
+// Six buttons in the xr-standard layout, all released. Used only by the
+// test seam below.
+function fakeButtons() {
+  return Array.from({ length: 6 }, () => ({ pressed: false }));
+}
+
 // How far the slide travels back on a shot. Small: this is a 3 cm part
 // on a weapon held at arm's length, and overdoing it reads as a toy.
 const SLIDE_TRAVEL = 0.032;
@@ -239,9 +245,33 @@ export class VRInput {
     // the per-frame VR logic. A session with no input sources lets every
     // pose-driven path run (alignment, the reload gesture, recoil) while
     // the gamepad loop simply finds nothing to read.
-    this._fakeSession = on ? { inputSources: [] } : null;
+    // A fake input source with a gamepad, so the BUTTON PATH runs. With an
+    // empty inputSources list the whole per-controller loop is skipped,
+    // which meant every face-button binding, including the one that
+    // restarts a lost run, was never exercised by any test.
+    this._fakeSession = on ? {
+      inputSources: [
+        { handedness: 'right', gamepad: { buttons: fakeButtons(), axes: [0, 0, 0, 0] } },
+        { handedness: 'left', gamepad: { buttons: fakeButtons(), axes: [0, 0, 0, 0] } },
+      ],
+    } : null;
     this._dressHands();
     this.ctx.onSessionChange(on);
+  }
+
+  // TEST SEAM: press a face button the way a controller does, through the
+  // real gamepad loop, rather than calling the handler directly. The panel
+  // that restarts a lost run is reached ONLY through that loop, so calling
+  // its handler proves nothing about whether a player can reach it.
+  debugPressButton(hand, index) {
+    if (!this._fakeSession) return false;
+    const src = this._fakeSession.inputSources.find((s) => s.handedness === hand);
+    if (!src) return false;
+    src.gamepad.buttons[index] = { pressed: true };
+    this.update(1 / 60);                    // the frame that sees the press
+    src.gamepad.buttons[index] = { pressed: false };
+    this.update(1 / 60);                    // and the frame that sees release
+    return true;
   }
 
   // Called every frame from the game with everything a flat player can
@@ -551,13 +581,34 @@ export class VRInput {
         if (name && this.panel.press(name)) continue;
         if (name) continue;              // swallow it either way while open
       }
+      // THE DEBUG MENU owns its own inputs while it is open, so nothing
+      // else fires underneath it.
+      if (this.ctx.actions.debugMenuOpen && this.ctx.actions.debugMenuOpen()) {
+        if (src.handedness === 'left' && pressed(BTN_BY)) {
+          this.ctx.actions.debugMenu();                          // Y closes
+          continue;
+        }
+        if (src.handedness === 'left' && gp.axes.length >= 4) {
+          const ay = gp.axes[3];
+          if (Math.abs(ay) > 0.6 && !this._menuStickHeld) {
+            this._menuStickHeld = true;
+            this.ctx.actions.debugMenuMove(ay > 0 ? 1 : -1);
+          } else if (Math.abs(ay) < 0.3) {
+            this._menuStickHeld = false;
+          }
+        }
+        if (now[0] && !prev[0]) this.ctx.actions.debugMenuPick();  // trigger
+        continue;
+      }
       if (src.handedness === 'right') {
         if (pressed(BTN_AX)) this.ctx.actions.cycle();          // A
         if (pressed(BTN_BY)) this._grenadeFrom(src);            // B
         if (pressed(BTN_STICK)) this.ctx.actions.throwCycle();  // R-stick press
       } else if (src.handedness === 'left') {
         if (pressed(BTN_AX)) this.ctx.actions.pack();           // X
-        if (pressed(BTN_BY)) this.ctx.actions.flashlight();     // Y
+        // Y opens the debug menu. It was the flashlight toggle, which is
+        // moving to the trigger anyway (see docs/TODO.md).
+        if (pressed(BTN_BY)) this.ctx.actions.debugMenu();       // Y
         if (pressed(BTN_STICK)) this.ctx.actions.nightVision(); // L-stick press
       }
 

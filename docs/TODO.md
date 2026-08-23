@@ -73,10 +73,6 @@ doing the bookkeeping. That is my job.
       audited yet.)
 
 ### Tooling to make future levels fast
-- [ ] `?levelpreview=N`: render any level from above with labels on the
-      base, spawn rings, sight blockers and the exit, without playing it.
-      Five seconds instead of five minutes changes how many sketches Ola
-      can try.
 - [ ] Hot reload of level data files in dev, so changing a number rebuilds
       the level without restarting the run.
 - [ ] Write the practical version of cheap-versus-expensive: which kinds of
@@ -101,6 +97,22 @@ doing the bookkeeping. That is my job.
 ## Done
 
 Ticked with the version that shipped it.
+
+### Dying in VR, and a debug menu (Ola, 2026-08-23)
+- [x] (v0.18.0) Recovery from death no longer depends on an event being
+      delivered: pressing A puts the local player back on their feet
+      directly, and a downed solo player is always offered a way back
+      rather than only a way out. The probe now dies the way a player
+      dies, and presses the button through the real gamepad loop instead
+      of calling the handler.
+- [x] (v0.18.0) A debug menu on every platform: give weapons, scrap, ammo
+      and kit, revive, jump to any floor, skip a wave, repair the base.
+      Y in VR, F8 on desktop. It also prints live state, so a fault in a
+      headset can be read out loud instead of guessed at.
+- [x] (v0.18.0) `?levelpreview=N`: any level from above, labelled with the
+      base, every spawn coloured by ring and tagged with what it hides
+      behind and how far out it is, the exit, the chasm, the doors, a
+      scale bar and a legend.
 
 ### Archetype parity (Ola, 2026-08-23)
 - [x] (v0.17.1) `docs/archetype-parity.md`: 23 behaviours, status per

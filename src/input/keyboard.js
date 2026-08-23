@@ -27,6 +27,13 @@ export class KeyboardInput {
       else if (e.code === 'KeyM') act.map();
       else if (e.code === 'KeyT') act.mine();
       else if (e.code === 'KeyE') act.repairHold(true);
+      else if (e.code === 'F8') { e.preventDefault(); act.debugMenu(); }
+      else if (act.debugMenuOpen && act.debugMenuOpen()) {
+        // While the debug menu is up it owns the arrows and Enter.
+        if (e.code === 'ArrowUp') act.debugMenuMove(-1);
+        else if (e.code === 'ArrowDown') act.debugMenuMove(1);
+        else if (e.code === 'Enter') act.debugMenuPick();
+      }
       else if (e.code === 'KeyV') act.throwCycle();
       else if (e.code === 'KeyN') act.nightVision();
       else if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') act.setAds(true);

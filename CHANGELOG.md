@@ -1,5 +1,46 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.18.0 - 2026-08-23 - a way back, a debug menu, and a level preview
+
+**Dying in VR left you dead.** Ola: "a box appears where you can press A
+or B, neither gives me a new chance, it just changes level or not, but I
+am still dead." The probe asserted this worked and was green, which is the
+second time a test has measured the wrong thing here. Two causes, both
+addressed:
+
+- The test reached game over with a debug shortcut and pressed the button
+  by calling its handler directly. It now dies the way a player dies, and
+  presses A through the real gamepad loop. The fake XR session grew input
+  sources, because with an empty list the entire per-controller loop was
+  skipped and every face-button binding in the game was untested.
+- Recovery no longer depends on an event arriving. Pressing A restarts the
+  level AND puts the local player back on their feet directly. A restart
+  that can fail silently is not a restart.
+
+A downed solo player is also always offered a way back, not only a way
+out. Nobody is coming to revive you when you are alone, so "wait for help"
+was not a state, it was a trap.
+
+**A debug menu, on every platform.** Ola asked for one so that everything
+built can actually be reached: weapons, scrap, ammo and kit, revive, jump
+to any floor, skip a wave, repair the base. Y in VR, F8 on desktop, and it
+is world-space so there is exactly one implementation.
+
+It also prints live state at the top: level, archetype, phase, health,
+downed, enemies left, scrap. That is deliberate. When something goes wrong
+inside a headset the only evidence available is what Ola can read out
+loud, and "I am still dead" is much easier to act on when it arrives as
+"phase day, downed yes".
+
+**`?levelpreview=N`.** Ola: "the only way for me to see a new layout is to
+play through it, which is the slowest possible loop. Five seconds instead
+of five minutes changes how many sketches I can try." Any level from
+above, without playing it: the base with its footprint, every spawn
+coloured by ring and labelled with what it hides behind and how far out it
+sits, the exit, the chasm, the doors, a scale bar and a legend. It is a
+READ of the built level, not a second implementation: if the preview shows
+it, the game has it.
+
 ## v0.17.1 - 2026-08-23 - archetype parity
 
 Ola named the pattern: "something built for the first variant is only
