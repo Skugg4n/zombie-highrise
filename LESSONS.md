@@ -105,3 +105,72 @@ new entries in the same format: Symptom, Cause, Solution.
   **Cause:** the PeerJS broker is unreachable from the test environment.
   **Solution:** longer timeout, log peer events; if the broker is down,
   rerun later.
+
+## The rebuild (v0.10.x - v0.11.0)
+
+- **Symptom:** The player climbs a ramp but stops one step short and can
+  never get onto the platform. **Cause:** the platform's own collider
+  ejects the player horizontally at the exact moment they arrive at its
+  edge. **Solution:** a mover may not be blocked by a collider whose top
+  it can already step onto (`blockingFor()` in locomotion.js). Anything
+  with a `top` at or below `LOCO.stepUp` above you is furniture, not wall.
+
+- **Symptom:** The player gets pinned somewhere and cannot move at all,
+  in any direction. **Cause:** two solids with a gap between them
+  narrower than the player's diameter. Both push, the pushes cancel, and
+  the player is stuck forever. It happened twice here: the player-only
+  boundary ring overlapping the base wall, and a snipe ramp running
+  through the elevator cab. **Solution:** never leave a gap between 0 and
+  about 0.8 m. Verify behaviourally, not geometrically: `debugPockets()`
+  stands at every point in the base and walks toward the middle; anything
+  that cannot get there is a trap. Pairwise geometry checks over-report,
+  because a tiled wall run looks like it is full of gaps.
+
+- **Symptom:** Zombies walk straight through low walls and sandbag
+  stacks. **Cause:** the nav grid skipped every collider with a `top`,
+  calling it "a walkable platform". A low wall has a top too.
+  **Solution:** only colliders explicitly marked `walkable` (platforms,
+  which have a ramp) are passable; anything taller than step-up blocks.
+
+- **Symptom:** The horde reaches a walled base and mills about; the wall
+  never takes damage. **Cause:** pressing against a wall reads as being
+  stuck, and the stuck escalation relocated them after four seconds.
+  **Solution:** attacking is not being stuck. Reset `stuckT` while the
+  attack is happening. Also make the attack reach generous: the nav grid
+  inflates obstacles by the agent radius, so a path ends about a metre
+  short of the thing it leads to.
+
+- **Symptom:** A rotated prop's sub-parts sit beside the body rather than
+  on it (wheels next to the car, container ribs poking out as spikes).
+  **Cause:** the naive 2D rotation `(x*cos - z*sin, x*sin + z*cos)` has
+  the opposite sign to three's Y rotation. **Solution:** for
+  `rotation.y = t`, local (lx, lz) maps to world
+  `(lx*cos + lz*sin, -lx*sin + lz*cos)`. Use one shared helper.
+
+- **Symptom:** `Failed to set the 'value' property on 'AudioParam': the
+  provided float value is non-finite.` **Cause:** `audio.play(name, pos)`
+  was given `[x, y, z]` where the panner expected `{x, y, z}`, so every
+  component read as `undefined`. **Solution:** accept both forms and bail
+  to the master bus if any component is not finite.
+
+- **Symptom:** A shared material suddenly renders black on unrelated
+  meshes. **Cause:** attaching `instanceColor` to a material shared with
+  non-instanced meshes makes three compile it with
+  `USE_INSTANCING_COLOR`. **Solution:** clone the material for the
+  InstancedMesh. (Not the cause of the drab base floor here, but it is a
+  real trap and the clone is correct either way.)
+
+- **Symptom:** A probe reports a feature is broken when it is not.
+  **Cause:** the probe still points at old level geometry after a level
+  was replaced (the ground probe was climbing a ramp that no longer
+  existed on floor 1). **Solution:** when a level changes, re-target its
+  probes in the same commit.
+
+- **Symptom:** WebXR weapon points about 45 degrees away from where shots
+  go. **Cause:** the model hangs off the GRIP pose (the hand) while shots
+  fire along the TARGET RAY pose (the pointing direction); on Oculus
+  Touch those differ by a lot. **Solution:** read the live rotation
+  between the two poses each frame and cancel it, rather than hardcoding
+  an angle. Note that three sets `matrixAutoUpdate = false` on XR
+  controller groups, so a fake pose in a test must write `.matrix` and
+  decompose it, exactly as a real XR frame does.
