@@ -15,7 +15,9 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeRng } from '../util/rng.js';
-import { noiseTexture, plankTexture, metalTexture, sandbagTexture, facadeTexture } from './textures.js';
+import { PALETTE, MATS, mat, matT } from './materials.js';
+import { buildHoldout } from './holdout.js';
+export { PALETTE, MATS };
 import { mergeStaticMeshes } from './merge.js';
 import {
   LEVEL_SIZE, scaleBoxUVs, box, wall, cover, platform, railing,
@@ -25,24 +27,17 @@ import {
 
 export { LEVEL_SIZE };
 
-export const PALETTE = {
-  daySky: 0xa8c8e0, dayHaze: 0xd6c9a8,
-  nightSky: 0x101a2e, nightHaze: 0x18223a,
-  sand: 0xc9b088, concrete: 0x9a938a, sandbag: 0xb0a070,
-  wood: 0x8a6f4d, hills: 0xb8a583, road: 0x6f6a62,
-  basementWall: 0x6e6a63, basementFloor: 0x55524c,
-  interiorWall: 0x8f8274, interiorFloor: 0x7a6f5e,
-  metal: 0x5a5d63, metalDark: 0x3a3d42, rust: 0x7d5636,
-};
-
 // Six-level cycle keeps "ground roughly every 3rd" while weaving in the
 // Phase 2 set pieces: 1 ground, 2 basement, 3 upper, 4 ground, 5 trench
 // (tight, night, flashlight), 6 wagon (moving platform), then repeat.
 // 12-level supercycle: two runs of the 6-type rotation, with the second
 // wagon slot replaced by the BOSS arena (floors 12, 24, ...). Peaks and
 // breathers by construction: wagon = breather, boss = peak.
+// THE REBUILD (docs/level-design.md): floor 1 is the first HOLDOUT level,
+// built to Ola's L1 sketch. The rest of the cycle is the old high-rise
+// rotation and stays until L1 is proven fun and the traverse level lands.
 export const LEVEL_TYPES = [
-  'ground', 'basement', 'upper', 'ground', 'trench', 'wagon',
+  'holdout', 'basement', 'upper', 'ground', 'trench', 'wagon',
   'ground', 'basement', 'upper', 'ground', 'trench', 'boss',
 ];
 // A run is exactly FINAL_LEVEL floors long: floor 12 is the Butcher's
@@ -51,28 +46,6 @@ export const FINAL_LEVEL = LEVEL_TYPES.length;
 export function levelTypeFor(levelIndex) {
   return LEVEL_TYPES[(levelIndex - 1) % LEVEL_TYPES.length];
 }
-
-const mat = (color, rough = 0.9, metal = 0.0) =>
-  new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
-const matT = (map, rough = 0.9, metal = 0.0, color = 0xffffff) =>
-  new THREE.MeshStandardMaterial({ map, color, roughness: rough, metalness: metal });
-
-// Shared procedural materials (built once, reused by every level build).
-export const MATS = {
-  get sandGround() { return this._sg || (this._sg = matT(noiseTexture('sand-ground', 0xc9b088, [0xb89e76, 0xd8c29a, 0xa8906a], { repeat: 90, density: 1200 }), 1.0)); },
-  get concrete() { return this._co || (this._co = matT(noiseTexture('concrete', 0x9a938a, [0x8a847c, 0xa8a29a, 0x7e7870], { repeat: 5, density: 1400, alpha: 0.2 }), 0.95)); },
-  get sandbag() { return this._sb || (this._sb = matT(sandbagTexture('sandbag', 0xb0a070), 1.0)); },
-  get crate() { return this._cr || (this._cr = matT(plankTexture('crate', 0x8a6f4d, 0x5c4630), 0.95)); },
-  get basementWall() { return this._bw || (this._bw = matT(noiseTexture('bwall', 0x6e6a63, [0x5c584f, 0x7c786f, 0x4c4841], { repeat: 3, density: 1600, alpha: 0.22 }), 1.0)); },
-  get basementFloor() { return this._bf || (this._bf = matT(noiseTexture('bfloor', 0x55524c, [0x45423c, 0x63605a, 0x39362f], { repeat: 8, density: 1600, alpha: 0.25 }), 1.0)); },
-  get plaster() { return this._pl || (this._pl = matT(noiseTexture('plaster', 0x8f8274, [0x7f7264, 0x9f9284, 0x6f6254], { repeat: 3, density: 900, alpha: 0.15 }), 0.95)); },
-  get parquet() { return this._pq || (this._pq = matT(plankTexture('parquet', 0x7a6a52, 0x54462f, { planks: 8, repeat: 1 }), 0.9)); },
-  get metalShell() { return this._ms || (this._ms = matT(metalTexture('elev', 0x5a5d63, { repeat: 2 }), 0.55, 0.5)); },
-  get metalDoor() { return this._md || (this._md = matT(metalTexture('door', 0x42454b, { repeat: 2 }), 0.6, 0.4)); },
-  get dirt() { return this._di || (this._di = matT(noiseTexture('dirt', 0x4e4436, [0x3e3628, 0x5e5244, 0x2f2a1f], { repeat: 4, density: 1800, alpha: 0.25 }), 1.0)); },
-  get planksOld() { return this._po || (this._po = matT(plankTexture('oldplanks', 0x6e5a40, 0x463a26, { planks: 6, repeat: 2 }), 1.0)); },
-  get facade() { return this._fa || (this._fa = new THREE.MeshStandardMaterial({ map: facadeTexture('tower', 0x5c554c), roughness: 0.9, emissive: 0xffffff, emissiveIntensity: 0.0, emissiveMap: facadeTexture('tower', 0x5c554c, { emissiveOnly: true }) })); },
-};
 
 // The game's namesake: a tall high-rise silhouette with a lit window grid
 // and a broken roofline. The whole run happens inside this building; it
@@ -1055,9 +1028,11 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
     spawnSources: [],   // VISIBLE fiction for each entry (never thin air)
     barrels: [],        // explosive barrels: {x, z} seeded by the generator
     elevator: null, elevatorZone: null, roomZone: null,
+    baseWall: null, baseCentre: null, archetype: null,
     floorY: 0, baseY: 0, heightAt: () => 0, lighting: null,
   };
-  if (type === 'ground') buildGround(level, rng, quality);
+  if (type === 'holdout') buildHoldout(level, rng, quality, makeElevator);
+  else if (type === 'ground') buildGround(level, rng, quality);
   else if (type === 'basement') buildBasement(level, rng);
   else if (type === 'upper') buildUpper(level, rng, quality);
   else if (type === 'trench') buildTrench(level, rng);

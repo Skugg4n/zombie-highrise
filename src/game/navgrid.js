@@ -1,3 +1,4 @@
+import { LOCO } from './locomotion.js';
 // Navigation grid + pathfinding for the horde.
 //
 // PLAYTEST ROOT CAUSE (Ola, v0.9.3): zombies got stuck, jittered in place,
@@ -50,7 +51,13 @@ export class NavGrid {
     this.blocked.fill(0);
     for (const c of colliders) {
       if (c.playerOnly) continue;       // horde walks through those
-      if (c.top) continue;              // walkable platform top, not an obstacle
+      if (c.dead) continue;             // destroyed base wall: a real breach
+      // A `top` is only passable if the horde can actually get up there.
+      // Platforms are marked walkable (they have a ramp); a low wall or a
+      // stack of sandbags has a top too and must still block, or the
+      // pathfinder happily routes zombies straight through the base wall.
+      if (c.walkable) continue;
+      if (c.top !== undefined && c.top <= LOCO.stepUp) continue;
       const hx = c.hx + agentRadius, hz = c.hz + agentRadius;
       const x0 = this.toCellX(c.x - hx), x1 = this.toCellX(c.x + hx);
       const z0 = this.toCellZ(c.z - hz), z1 = this.toCellZ(c.z + hz);

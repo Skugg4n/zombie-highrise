@@ -14,7 +14,7 @@ import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
 import { Net } from './net/net.js';
 import { msg } from './net/protocol.js';
-import { HostSim, ZOMBIE_TYPES, ITEM_KINDS } from './game/state.js';
+import { HostSim, ZOMBIE_TYPES, ITEM_KINDS, TRAP_KINDS } from './game/state.js';
 import { TUNING } from './game/tuning.js';
 import { Arsenal } from './game/arsenal.js';
 import { makeWeaponMesh, makeItemMesh } from './world/weapons3d.js';
@@ -697,16 +697,112 @@ function makeDroneMesh() {
     new THREE.MeshStandardMaterial({ color: 0x001100, emissive: 0x30ff60, emissiveIntensity: 1.5 }));
   eye.position.set(0, -0.06, 0.12);
   g.add(eye);
+  // The payload hangs visibly under the frame. "Did my drone do anything"
+  // is answered by watching the thing it is carrying leave.
+  const sling = new THREE.Group();
+  sling.position.set(0, -0.14, 0);
+  g.add(sling);
   g.userData.rotors = rotors;
+  g.userData.sling = sling;
+  g.userData.payload = null;
   return g;
+}
+
+// Ground traps the drone drops. Each reads instantly from the base at
+// 40 m, because you will never stand next to one.
+const TRAP_COLOURS = { tar: 0x141118, spike: 0x8d8578, lure: 0xff7a1a };
+function makeTrapMesh(kind) {
+  const g = new THREE.Group();
+  if (kind === 'tar') {
+    const cfg = TUNING.traps.tar;
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(cfg.radius, 18).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({
+        color: TRAP_COLOURS.tar, roughness: 0.12, metalness: 0.3,
+        transparent: true, opacity: 0.9,
+      }));
+    disc.position.y = 0.04;
+    g.add(disc);
+    // Lumps so it is not a flat decal from an angle.
+    for (let i = 0; i < 7; i++) {
+      const a = i * 0.92, r = cfg.radius * (0.25 + (i % 3) * 0.22);
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.3 + (i % 2) * 0.16, 6, 4),
+        new THREE.MeshStandardMaterial({ color: TRAP_COLOURS.tar, roughness: 0.15, metalness: 0.3 }));
+      b.position.set(Math.cos(a) * r, 0.06, Math.sin(a) * r);
+      b.scale.y = 0.3;
+      g.add(b);
+    }
+  } else if (kind === 'spike') {
+    const cfg = TUNING.traps.spike;
+    const mat = new THREE.MeshStandardMaterial({ color: TRAP_COLOURS.spike, roughness: 0.5, metalness: 0.6 });
+    for (let i = 0; i < 22; i++) {
+      const a = i * 2.39, r = cfg.radius * Math.sqrt((i + 0.5) / 22);
+      const sp = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.5 + (i % 3) * 0.12, 4), mat);
+      sp.position.set(Math.cos(a) * r, 0.25, Math.sin(a) * r);
+      sp.rotation.set((i % 5) * 0.06, a, (i % 3) * 0.08);
+      g.add(sp);
+    }
+  } else {
+    // Lure: a burning flare. Bright, loud in the dark, and the thing the
+    // horde walks toward.
+    const core = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.55, 6),
+      new THREE.MeshStandardMaterial({
+        color: 0x2a1a10, emissive: TRAP_COLOURS.lure, emissiveIntensity: 2.4,
+      }));
+    core.position.y = 0.28;
+    g.add(core);
+    const glow = new THREE.PointLight(0xff8a30, 6, 20);
+    glow.position.y = 0.6;
+    g.add(glow);
+    g.userData.glow = glow;
+  }
+  return g;
+}
+
+const trapVisuals = new Map();
+function updateTrapVisuals(rows, dt) {
+  const keep = new Set();
+  for (const [id, kindIdx, x, y, z, left] of rows || []) {
+    const kind = TRAP_KINDS[kindIdx] || 'tar';
+    keep.add(id);
+    let g = trapVisuals.get(id);
+    if (!g) { g = makeTrapMesh(kind); trapVisuals.set(id, g); scene.add(g); }
+    g.position.set(x, y, z);
+    // A flare visibly burns down, so its remaining time is readable
+    // without opening the map.
+    if (g.userData.glow) {
+      const cfg = TUNING.traps.lure;
+      const f = Math.max(0, left / cfg.duration);
+      g.userData.glow.intensity = (3 + 5 * f) * (0.85 + 0.15 * Math.sin(performance.now() / 90));
+    }
+  }
+  for (const [id, g] of trapVisuals) {
+    if (!keep.has(id)) { removeAndDispose(g); trapVisuals.delete(id); }
+  }
 }
 
 function updateDroneVisuals(rows, dt) {
   const keep = new Set();
-  for (const [id, x, y, z] of rows) {
+  for (const [id, x, y, z, kindIdx, empty] of rows) {
     keep.add(id);
     let g = droneVisuals.get(id);
     if (!g) { g = makeDroneMesh(); droneVisuals.set(id, g); scene.add(g); }
+    const kind = TRAP_KINDS[kindIdx ?? 0] || 'mine';
+    const want = empty ? null : kind;
+    if (g.userData.payload !== want) {
+      g.userData.payload = want;
+      g.userData.sling.clear();
+      if (want) {
+        const c = want === 'mine' ? 0x9a3020 : (TRAP_COLOURS[want] || 0x666666);
+        const pk = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.2),
+          new THREE.MeshStandardMaterial({
+            color: c, roughness: 0.6,
+            emissive: want === 'lure' ? 0xff7a1a : 0x000000,
+            emissiveIntensity: want === 'lure' ? 1.4 : 0,
+          }));
+        g.userData.sling.add(pk);
+      }
+    }
     g.position.set(x, y + Math.sin(performance.now() / 300) * 0.08, z);
     g.userData.rotors.rotation.y += dt * 30;
   }
@@ -903,6 +999,8 @@ function clearTransientVisuals() {
   grenadeVisuals.clear();
   for (const g of mineVisuals.values()) removeAndDispose(g);
   mineVisuals.clear();
+  for (const g of trapVisuals.values()) removeAndDispose(g);
+  trapVisuals.clear();
   for (const ping of pings) removeAndDispose(ping.group);
   pings.length = 0;
   for (const s of smokeVisuals) removeAndDispose(s.mesh);
@@ -1168,7 +1266,64 @@ const actions = {
   throwCycle: () => { if (canAct()) arsenal.cycleThrowable(); },
   nightVision: () => toggleNightVision(),
   map: () => toggleMap(),
+  // Repair the nearest damaged wall segment. Prep only, cheap, and meant
+  // to be spammed: patching the base every morning is the routine that
+  // makes the day phase worth having.
+  // Returns true when it actually repaired something, so VR can fall back
+  // to dropping a mine on the same button.
+  repair: () => {
+    if (!canAct()) return false;
+    const seg = nearestRepairTarget();
+    if (!seg) return false;
+    if (scrap < TUNING.base.repairCost) { showToast('Not enough scrap.', 1200); return true; }
+    dispatchAction({ t: 'repair', i: seg.index });
+    audio.play('repair', [seg.x, 1, seg.z]);
+    return true;
+  },
 };
+
+// The wall segment the repair prompt is pointing at, or null.
+function nearestRepairTarget() {
+  const wall = level && level.baseWall;
+  if (!wall) return null;
+  const w = lastWave;
+  if (!w || (w.ph !== 'day' && w.ph !== 'countdown')) return null;
+  const p = rig.group.position;
+  let best = null, bd = 2.2 * 2.2;
+  for (const seg of wall.segments) {
+    if (seg.hp >= seg.maxHp) continue;
+    const dx = p.x - seg.x, dz = p.z - seg.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < bd) { bd = d2; best = seg; }
+  }
+  return best;
+}
+
+// Adopt the host's wall state wholesale (snapshot join / resync).
+function applyWallState(hps) {
+  const wall = level.baseWall;
+  if (!wall) return;
+  let changed = false;
+  for (let i = 0; i < wall.segments.length && i < hps.length; i++) {
+    const seg = wall.segments[i];
+    if (seg.hp === hps[i]) continue;
+    seg.hp = hps[i];
+    seg.dead = hps[i] <= 0;
+    if (seg.collider) seg.collider.dead = seg.dead;
+    wall.refresh(i);
+    changed = true;
+  }
+  if (changed) updateBaseHud();
+}
+
+// Base integrity readout + the repair prompt, refreshed on wall events and
+// once per frame while the prompt could change.
+function updateBaseHud() {
+  const wall = level && level.baseWall;
+  if (!wall) { hud.setBase(null); hud.setRepairPrompt(false); return; }
+  hud.setBase(wall.integrity());
+  hud.setRepairPrompt(!!nearestRepairTarget(), TUNING.base.repairCost);
+}
 
 // ---- Night vision -------------------------------------------------------
 // Grainy green view, limited battery, recharges during the day.
@@ -1212,15 +1367,36 @@ let mapActive = false;
 let mapMode = 'ping';
 let mapSavedFog = null;
 
+// The drone button doubles as the payload selector: click it again to
+// cycle what it will carry. One button, no submenu, and the price is
+// always on the label.
+const DRONE_PAYLOADS = ['mine', 'tar', 'spike', 'lure'];
+const PAYLOAD_LABEL = {
+  mine: 'MINE', tar: 'TAR', spike: 'SPIKES', lure: 'FLARE',
+};
+let dronePayload = 'mine';
+
+function refreshDroneButton() {
+  const cost = TUNING.economy.dronePayload[dronePayload];
+  $('btn-map-drone').textContent = `DRONE: ${PAYLOAD_LABEL[dronePayload]} - ${cost}`;
+  $('btn-map-mine').textContent = `MINE - ${TUNING.economy.minePlacementFromMap}`;
+}
+
 function setMapMode(mode) {
   mapMode = mode;
   $('btn-map-ping').classList.toggle('on', mode === 'ping');
   $('btn-map-mine').classList.toggle('on', mode === 'mine');
   $('btn-map-drone').classList.toggle('on', mode === 'drone');
+  refreshDroneButton();
 }
 $('btn-map-ping').addEventListener('click', () => setMapMode('ping'));
 $('btn-map-mine').addEventListener('click', () => setMapMode('mine'));
-$('btn-map-drone').addEventListener('click', () => setMapMode('drone'));
+$('btn-map-drone').addEventListener('click', () => {
+  if (mapMode === 'drone') {
+    dronePayload = DRONE_PAYLOADS[(DRONE_PAYLOADS.indexOf(dronePayload) + 1) % DRONE_PAYLOADS.length];
+  }
+  setMapMode('drone');
+});
 $('btn-map-close').addEventListener('click', () => toggleMap(false));
 
 function toggleMap(force) {
@@ -1249,7 +1425,13 @@ function toggleMap(force) {
   if (mapActive) {
     setMapMode('ping');
     if (document.pointerLockElement) document.exitPointerLock();
-    const ext = LEVEL_SIZE * 0.62;
+    // Frame the level being played, not a fixed box: a holdout field is
+    // more than twice the size of an interior floor, and centring on the
+    // world origin would put the base in a corner.
+    const c = level.baseCentre || { x: 0, z: 0 };
+    mapCam.position.set(c.x, 60, c.z);
+    mapCam.lookAt(c.x, 0, c.z);
+    const ext = level.mapExtent || LEVEL_SIZE * 0.62;
     const aspect = innerWidth / innerHeight;
     if (aspect >= 1) {
       mapCam.top = ext; mapCam.bottom = -ext;
@@ -1291,8 +1473,9 @@ function rebuildEntryArrows() {
   for (const e of level.entries) {
     const a = new THREE.Mesh(arrowGeo,
       new THREE.MeshBasicMaterial({ color: 0xe0722c, transparent: true, opacity: 0.85 }));
+    const c = level.baseCentre || { x: 0, z: 0 };
     a.position.set(e.x, 12, e.z);
-    a.lookAt(0, 12, 0);   // points toward the base centre
+    a.lookAt(c.x, 12, c.z);   // points toward the base
     entryArrows.add(a);
   }
 }
@@ -1349,7 +1532,9 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
       showToast('Not enough scrap (' + TUNING.economy.droneDeploy + ' needed)', 2000);
       return;
     }
-    dispatchAction({ t: 'drone', p: p.toArray() });
+    dispatchAction({ t: 'drone', p: p.toArray(), k: dronePayload });
+    audio.play('dronefly');
+    showToast(`Drone away: ${PAYLOAD_LABEL[dronePayload]}`, 1400);
   }
 });
 
@@ -1615,6 +1800,31 @@ function handleEvents(evs) {
         if (v) v.lungeT = 0.35;
         break;
       }
+      case 'wall': {
+        // The host owns the damage; every peer replays it onto its own
+        // identical geometry, so the holes match on all screens.
+        const wall = level.baseWall;
+        if (!wall) break;
+        const seg = wall.segments[ev.i];
+        if (seg) {
+          seg.hp = ev.hp;
+          seg.dead = ev.hp <= 0;
+          if (seg.collider) seg.collider.dead = seg.dead;
+          wall.refresh(ev.i);
+        }
+        if (ev.broke) {
+          audio.play('wallbreak', [seg ? seg.x : 0, 1, seg ? seg.z : 0]);
+          showToast('BREACH! The wall is down.', 2200);
+          if (!(vrInput && vrInput.active)) addShake(0.03);
+        } else if (!ev.fix) {
+          audio.play('wallhit', [seg ? seg.x : 0, 1, seg ? seg.z : 0]);
+        }
+        updateBaseHud();
+        break;
+      }
+      case 'baselost':
+        showToast('THE BASE IS LOST', 3200);
+        break;
       case 'phit': {
         const me = role === 'client' ? net?.myId : 'H';
         if (ev.id === me) {
@@ -2197,9 +2407,15 @@ renderer.setAnimationLoop(() => {
       updateMineVisuals(mrows);
       const drows = [];
       for (const d of sim.drones.values()) {
-        drows.push([d.id, d.pos.x, d.pos.y, d.pos.z]);
+        drows.push([d.id, d.pos.x, d.pos.y, d.pos.z,
+          TRAP_KINDS.indexOf(d.payload || 'mine'), d.phase === 'home' ? 1 : 0]);
       }
       updateDroneVisuals(drows, dt);
+      const trows = [];
+      for (const t of sim.traps.values()) {
+        trows.push([t.id, TRAP_KINDS.indexOf(t.kind), t.pos.x, t.pos.y, t.pos.z, t.t]);
+      }
+      updateTrapVisuals(trows, dt);
       const brows = [];
       for (const b of sim.barrels.values()) {
         brows.push([b.id, b.pos.x, b.pos.y, b.pos.z]);
@@ -2238,7 +2454,11 @@ renderer.setAnimationLoop(() => {
         updateGrenadeVisuals(latest.gs || []);
         updateMineVisuals(latest.ms || []);
         updateDroneVisuals(latest.ds || [], dt);
+        updateTrapVisuals(latest.tr || [], dt);
         updateBarrelVisuals(latest.bs || []);
+        // A joining client rebuilds the base wall from the snapshot, so
+        // it never shows an intact wall the host knows is full of holes.
+        if (latest.bw && level.baseWall) applyWallState(latest.bw);
       }
       // Stale-connection feedback (LESSONS.md).
       const stale = lastSnapAt > 0 && performance.now() - lastSnapAt > 4000;
@@ -2250,6 +2470,7 @@ renderer.setAnimationLoop(() => {
     if (isPlaying()) {
       if (lastWave && lastWave.ph !== presentedPhase) presentPhase(lastWave.ph);
       updateWaveHud(lastWave);
+      updateBaseHud();
     }
     updateDayNight();
     updateNightVision(dt);
@@ -2409,6 +2630,174 @@ window.__zhr = {
     for (const z of [...sim.zombies.values()]) sim.damageZombie(z, 9999, false, 'H');
   },
   levelType: () => level.type,
+
+  // Holdout probe surface: spawn geometry, base integrity and where the
+  // horde actually is relative to the base.
+  holdout: () => {
+    const wall = level.baseWall;
+    if (!wall || !level.baseCentre) return null;
+    const c = level.baseCentre;
+    const hb = 4;
+    const zs = sim ? [...sim.zombies.values()].filter((z) => z.alive) : [];
+    let nearest = Infinity, inside = 0;
+    for (const z of zs) {
+      nearest = Math.min(nearest, Math.hypot(z.pos.x - c.x, z.pos.z - c.z));
+      if (Math.abs(z.pos.x - c.x) < hb && Math.abs(z.pos.z - c.z) < hb) inside++;
+    }
+    return {
+      spawns: level.spawnSources.map((s) => ({
+        from: s.kind, dist: Math.hypot(s.x - c.x, s.z - c.z),
+      })),
+      state: {
+        integrity: wall.integrity(),
+        dead: wall.segments.filter((sg) => sg.dead).length,
+        nearest: Number.isFinite(nearest) ? nearest : -1,
+        inside, alive: zs.length,
+      },
+    };
+  },
+  // Drone probe: send one out with each payload and report what landed.
+  // Confinement check: try to walk out of the base in every direction and
+  // report how far you actually got from the base centre.
+  // Level validator: find gaps between solids that are wider than zero
+  // but narrower than a player can stand in. Those are traps: both boxes
+  // push the player and they end up pinned, unable to move at all. This
+  // is how the snipe ramp / elevator overlap was found.
+  debugGaps: (pad = 0.02) => {
+    const R = LOCO.radius;
+    const solids = level.colliders.filter((c) => !c.playerOnly && !c.dead
+      && (c.tall || (c.top !== undefined && c.top > LOCO.stepUp)));
+    const bad = [];
+    for (let i = 0; i < solids.length; i++) {
+      for (let j = i + 1; j < solids.length; j++) {
+        const a = solids[i], b = solids[j];
+        // Gap along X, only when they actually overlap in Z (and v.v.).
+        const zOverlap = Math.abs(a.z - b.z) < a.hz + b.hz - pad;
+        const xOverlap = Math.abs(a.x - b.x) < a.hx + b.hx - pad;
+        if (zOverlap) {
+          const gap = Math.abs(a.x - b.x) - a.hx - b.hx;
+          if (gap > pad && gap < R * 2 + 0.08) {
+            bad.push({ axis: 'x', gap: +gap.toFixed(2), at: [+((a.x + b.x) / 2).toFixed(1), +((a.z + b.z) / 2).toFixed(1)] });
+          }
+        }
+        if (xOverlap) {
+          const gap = Math.abs(a.z - b.z) - a.hz - b.hz;
+          if (gap > pad && gap < R * 2 + 0.08) {
+            bad.push({ axis: 'z', gap: +gap.toFixed(2), at: [+((a.x + b.x) / 2).toFixed(1), +((a.z + b.z) / 2).toFixed(1)] });
+          }
+        }
+      }
+    }
+    // Also flag solids that overlap the walkable ramp lane: a ramp you
+    // cannot use is worse than no ramp.
+    const onRamp = [];
+    for (const r of level.ramps || []) {
+      for (const c of solids) {
+        if (Math.abs(r.x - c.x) < r.hx + c.hx - 0.05 && Math.abs(r.z - c.z) < r.hz + c.hz - 0.05) {
+          onRamp.push({ at: [+r.x.toFixed(1), +r.z.toFixed(1)] });
+        }
+      }
+    }
+    return { gaps: bad, blockedRamp: onRamp, solids: solids.length };
+  },
+  // The behavioural version of the gap check, and the one that matters:
+  // stand at every point in the base and try to walk to the middle. Any
+  // start that cannot get there is a pocket the player can be pinned in.
+  // Pairwise geometry checks over-report (a tiled wall run looks full of
+  // gaps); this asks the actual question.
+  debugPockets: (step = 0.4) => {
+    const c = level.baseCentre;
+    if (!c) return null;
+    const hb = 4 - 0.4;
+    const stuck = [];
+    let tested = 0;
+    const save = rig.group.position.clone();
+    for (let x = c.x - hb; x <= c.x + hb; x += step) {
+      for (let z = c.z - hb; z <= c.z + hb; z += step) {
+        // Skip starts that are inside a solid: you can never be there.
+        rig.group.position.set(x, level.heightAt(x, z), z);
+        resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
+        if (Math.hypot(rig.group.position.x - x, rig.group.position.z - z) > 0.45) continue;
+        tested++;
+        playerVel.set(0, 0, 0);
+        // Walk toward the middle, and slide sideways when blocked: a real
+        // player goes AROUND a crate rather than pressing into it, and
+        // without this the test flags every obstacle as a pocket.
+        let slide = 0, slideDir = 1;
+        for (let i = 0; i < 160; i++) {
+          const dx = c.x - rig.group.position.x, dz = c.z - rig.group.position.z;
+          const d = Math.hypot(dx, dz);
+          if (d < 1.2) break;
+          let vx = dx / d, vz = dz / d;
+          if (slide > 0) { const t = vx; vx = -vz * slideDir; vz = t * slideDir; slide--; }
+          playerVel.set(vx * 5, playerVel.y, vz * 5);
+          const bx = rig.group.position.x, bz = rig.group.position.z;
+          moveAndCollide(level, rig.group.position, playerVel, 1 / 60, [], LOCO.radius);
+          resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
+          const moved = Math.hypot(rig.group.position.x - bx, rig.group.position.z - bz);
+          if (moved < 0.02 && slide === 0) { slide = 22; slideDir = -slideDir; }
+        }
+        const d = Math.hypot(rig.group.position.x - c.x, rig.group.position.z - c.z);
+        if (d > 1.6) stuck.push({ from: [+x.toFixed(1), +z.toFixed(1)], endedAt: +d.toFixed(1) });
+      }
+    }
+    rig.group.position.copy(save);
+    return { tested, stuck };
+  },
+
+  debugRamps: () => (level.ramps || []).map((r) => ({
+    x: +r.x.toFixed(2), z: +r.z.toFixed(2), top: +r.top.toFixed(2),
+    hx: +r.hx.toFixed(2), hz: +r.hz.toFixed(2),
+  })),
+  debugHeightAt: (x, z) => level.heightAt(x, z),
+  debugEscape: (dirIdx, steps = 60) => {
+    const c = level.baseCentre;
+    if (!c) return null;
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+    const [dx, dz] = dirs[dirIdx % dirs.length];
+    rig.group.position.set(c.x, level.heightAt(c.x, c.z), c.z);
+    playerVel.set(0, 0, 0);
+    for (let i = 0; i < steps; i++) {
+      playerVel.set(dx * 6, playerVel.y, dz * 6);
+      moveAndCollide(level, rig.group.position, playerVel, 1 / 60, [], LOCO.radius);
+      resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
+    }
+    const p = rig.group.position;
+    return { dx, dz, out: Math.max(Math.abs(p.x - c.x), Math.abs(p.z - c.z)) };
+  },
+  debugDrone: (kind, x, z) => {
+    if (!sim) return null;
+    for (const p of sim.players.values()) p.inv.s = 9999;
+    dispatchAction({ t: 'drone', p: [x, 0, z], k: kind });
+    return true;
+  },
+  debugField: () => {
+    if (!sim) return null;
+    return {
+      drones: [...sim.drones.values()].map((d) => ({ k: d.payload, ph: d.phase })),
+      traps: [...sim.traps.values()].map((t) => ({
+        k: t.kind, x: +t.pos.x.toFixed(1), z: +t.pos.z.toFixed(1), left: +t.t.toFixed(0),
+      })),
+      mines: [...sim.mines.values()].map((m) => ({ x: +m.pos.x.toFixed(1), z: +m.pos.z.toFixed(1) })),
+      trapMeshes: trapVisuals.size,
+      scrap: sim.players.get('H')?.inv.s ?? -1,
+    };
+  },
+  debugRepairAll: () => {
+    const wall = level.baseWall;
+    if (!wall || !sim) return null;
+    const before = wall.integrity();
+    const deadBefore = wall.segments.filter((s) => s.dead).length;
+    for (const p of sim.players.values()) p.inv.s = 9999;
+    sim.wave.phase = 'day';
+    for (let pass = 0; pass < 3; pass++) {
+      for (const seg of wall.segments) sim.repairBaseWall('H', seg.index);
+    }
+    return {
+      before, after: wall.integrity(),
+      deadBefore, deadAfter: wall.segments.filter((s) => s.dead).length,
+    };
+  },
   debugMap: (on) => toggleMap(on),
   elevatorZone: () => (level.elevatorZone ? { x: level.elevatorZone.x, z: level.elevatorZone.z } : null),
   shopOpen: () => shopOpen,

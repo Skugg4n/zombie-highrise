@@ -43,4 +43,23 @@ export class Hud {
     }
   }
   setWave(text) { $('hud-wave').textContent = text; }
+
+  // Base integrity (holdout levels only). Hidden everywhere else, because
+  // a bar that never moves is noise.
+  setBase(fraction) {
+    const el = $('hud-base');
+    if (fraction === null) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const pct = Math.max(0, Math.round(fraction * 100));
+    el.querySelector('.bar > i').style.width = pct + '%';
+    $('hud-base-pct').textContent = pct + '%';
+    el.classList.toggle('warn', fraction < 0.45 && fraction >= 0.22);
+    el.classList.toggle('crit', fraction < 0.22);
+  }
+
+  setRepairPrompt(show, cost = 0) {
+    const el = $('repair-prompt');
+    el.classList.toggle('hidden', !show);
+    if (show) $('repair-cost').textContent = `(${cost} scrap)`;
+  }
 }

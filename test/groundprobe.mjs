@@ -22,19 +22,24 @@ await page.goto(`http://127.0.0.1:${server.address().port}/?seed=4`);
 await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
 await page.click('#btn-solo');
 await page.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
-// Ground level has the watchtower platform at (6,-9) height 2.4, ramp to the south.
-// Walk from south of the ramp northwards onto the platform, sampling Y.
-await page.evaluate(() => window.__zhr.debugTeleport(6, 2.5));
+// Floor 1 (HOLDOUT) has the snipe platform at (-11.06,-13.36), 1.4 m up, with
+// its ramp running south. Walk from the ramp's foot northwards onto the
+// platform, sampling Y: this is the "cannot step onto the last step" case.
+await page.evaluate(() => window.__zhr.debugTeleport(-11.06, -8.2));
 await page.waitForTimeout(300);
 const trace = [];
-for (let i = 0; i < 40; i++) {
+for (let i = 0; i < 22; i++) {
   await page.evaluate(() => window.__zhr.debugMove(0, -0.32));
   await page.waitForTimeout(70);
   const p = await page.evaluate(() => window.__zhr.myPos());
-  trace.push({ z: +p[2].toFixed(2), y: +p[1].toFixed(2) });
+  trace.push({ x: +p[0].toFixed(2), z: +p[2].toFixed(2), y: +p[1].toFixed(2) });
 }
 const ys = trace.map(t => t.y);
+console.log('path (x,z -> y):', trace.slice(0, 12).map(t => `${t.x},${t.z}->${t.y}`).join(' '));
 console.log('walking up the ramp, Y samples:', ys.join(' '));
-console.log('start Y', ys[0], '-> end Y', ys[ys.length-1], '| climbed:', (ys[ys.length-1]-ys[0]).toFixed(2), 'm');
+const peak = Math.max(...ys);
+console.log('start Y', ys[0], '-> highest reached', peak,
+  '| platform top is 1.4 m |', peak >= 1.39 ? 'OK: stepped onto the platform'
+    : 'FAIL: could not reach the top');
 console.log('errors:', errs.length ? errs.slice(0,3) : 'none');
 await browser.close(); server.close();

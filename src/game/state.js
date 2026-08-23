@@ -12,11 +12,14 @@ import { CONFIG } from '../config.js';
 import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
 import { levelTypeFor, FINAL_LEVEL, LEVEL_SIZE } from '../world/levelgen.js';
+import { BASE_SIZE } from '../world/holdout.js';
 import { NavGrid } from './navgrid.js';
 import { blockingFor, groundHeight } from './locomotion.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 'screamer', 'butcher'];
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
+// Drone payloads, indexed on the wire.
+export const TRAP_KINDS = ['mine', 'tar', 'spike', 'lure'];
 
 const AMMO_PICKUP = { ammo_shotgun: ['shotgun', 25], ammo_smg: ['smg', 120] };
 
@@ -28,6 +31,7 @@ export class HostSim {
     this.grenades = new Map();
     this.items = new Map();
     this.mines = new Map();
+    this.traps = new Map();      // drone-dropped field traps: tar, spikes, lures
     this.drones = new Map();
     this.barrels = new Map();
     this.clouds = [];          // smoke: {pos, t}
@@ -37,6 +41,7 @@ export class HostSim {
     this.nextIid = 1;
     this.nextMid = 1;
     this.nextDid = 1;
+    this.nextTid = 1;
     this.nextBid = 1;
     this.events = [];
     this.kills = 0;
@@ -55,8 +60,10 @@ export class HostSim {
     this.grenades.clear();
     this.items.clear();
     this.mines.clear();
+    this.traps.clear();
     this.drones.clear();
     this.clouds.length = 0;
+    this.traps.clear();
     this.fires.length = 0;
     this.level.nav = null;   // rebuild navigation for the new level
     this._seedBarrels();
@@ -152,6 +159,9 @@ export class HostSim {
         break;
       case 'buy': this._actBuy(id, p, m.item); break;
       case 'placeMine': this._actPlaceMine(id, p, m); break;
+      case 'repair':
+        if (typeof m.i === 'number') this.repairBaseWall(id, m.i);
+        break;
       case 'drone': this._actDrone(id, p, m); break;
       case 'ping':
         if (Array.isArray(m.p)) this.events.push({ e: 'ping', p: m.p, by: id });
@@ -189,20 +199,95 @@ export class HostSim {
     this.events.push({ e: 'mined', id: mid, by: id });
   }
 
-  // Scout drone from the tactical map: flies to the target, hovers 10 s,
-  // pings the nearest zombie every 2 s.
+  // THE DRONE is a delivery vehicle. It flies out over the field where the
+  // squad cannot go, drops the payload it was sent with, and comes home.
+  // Launching is free; you pay for what it carries.
   _actDrone(id, p, m) {
     if (!Array.isArray(m.p)) return;
-    if (p.inv.s < TUNING.economy.droneDeploy) return;
-    p.inv.s -= TUNING.economy.droneDeploy;
+    const kind = m.k || 'mine';
+    const cost = TUNING.economy.dronePayload[kind];
+    if (cost === undefined) return;
+    if (p.inv.s < cost) { this.events.push({ e: 'nofunds', by: id, need: cost }); return; }
+    p.inv.s -= cost;
     const did = this.nextDid++;
+    const home = p.pos.clone().add(new THREE.Vector3(0, 3.5, 0));
     this.drones.set(did, {
-      id: did, owner: id, phase: 'fly',
-      pos: p.pos.clone().add(new THREE.Vector3(0, 3.5, 0)),
-      target: new THREE.Vector3(m.p[0], this.level.heightAt(m.p[0], m.p[2]) + 3.5, m.p[2]),
-      hoverT: 0, pingT: 0,
+      id: did, owner: id, phase: 'fly', payload: kind,
+      pos: home.clone(), home,
+      target: new THREE.Vector3(m.p[0], this.level.heightAt(m.p[0], m.p[2]) + 4.0, m.p[2]),
+      dropT: 0,
     });
-    this.events.push({ e: 'droned', by: id });
+    this.events.push({ e: 'droned', by: id, k: kind });
+  }
+
+  // Payload hits the ground. Mines reuse the existing mine system so they
+  // trip and explode exactly like a hand-placed one.
+  _dropPayload(d) {
+    const pos = d.target.clone();
+    pos.y = this.level.heightAt(pos.x, pos.z);
+    if (d.payload === 'mine') {
+      const mid = this.nextMid++;
+      this.mines.set(mid, { id: mid, pos, armT: 1.0, owner: d.owner });
+      this.events.push({ e: 'mined', id: mid, by: d.owner });
+      return;
+    }
+    const cfg = TUNING.traps[d.payload];
+    if (!cfg) return;
+    const tid = this.nextTid++;
+    this.traps.set(tid, {
+      id: tid, kind: d.payload, pos, owner: d.owner,
+      t: cfg.duration, tickT: 0,
+    });
+    this.events.push({ e: 'trap', id: tid, kind: d.payload, p: pos.toArray() });
+  }
+
+  // Field traps: tar slows, spikes grind, a lure decides where the fight
+  // happens. Only the lure touches targeting, and it does so by pretending
+  // to be a player the horde wants more than you.
+  _stepTraps(dt) {
+    for (const tr of [...this.traps.values()]) {
+      tr.t -= dt;
+      const cfg = TUNING.traps[tr.kind];
+      if (tr.kind === 'spike') {
+        tr.tickT += dt;
+        if (tr.tickT >= 1) {
+          tr.tickT -= 1;
+          for (const z of [...this.zombies.values()]) {
+            if (z.alive && z.pos.distanceTo(tr.pos) <= cfg.radius) {
+              this.damageZombie(z, cfg.dps, false, tr.owner);
+            }
+          }
+        }
+      }
+      if (tr.t <= 0) {
+        this.traps.delete(tr.id);
+        this.events.push({ e: 'trapend', id: tr.id, kind: tr.kind });
+      }
+    }
+  }
+
+  // Slow from tar patches, multiplied into the existing smoke slow.
+  _tarSlowAt(pos) {
+    let mult = 1;
+    for (const tr of this.traps.values()) {
+      if (tr.kind !== 'tar') continue;
+      const cfg = TUNING.traps.tar;
+      if (pos.distanceToSquared(tr.pos) <= cfg.radius * cfg.radius) mult = Math.min(mult, cfg.slow);
+    }
+    return mult;
+  }
+
+  // The strongest lure within range, or null. Zombies walk to it instead
+  // of to a player, which is how you pull a wave into your minefield.
+  _lureFor(pos) {
+    const cfg = TUNING.traps.lure;
+    let best = null, bd = cfg.radius * cfg.radius;
+    for (const tr of this.traps.values()) {
+      if (tr.kind !== 'lure') continue;
+      const d2 = pos.distanceToSquared(tr.pos);
+      if (d2 < bd) { bd = d2; best = tr; }
+    }
+    return best;
   }
 
   _actBuy(id, p, item) {
@@ -381,6 +466,7 @@ export class HostSim {
     this.zombies.clear();
     this.grenades.clear();
     this.clouds.length = 0;
+    this.traps.clear();
     this.fires.length = 0;
     this.drones.clear();
     this.kills = 0;   // per-attempt stats; meta counts each attempt once
@@ -575,10 +661,12 @@ export class HostSim {
     this.zombies.clear();
     this.grenades.clear();
     this.clouds.length = 0;
+    this.traps.clear();
     this.fires.length = 0;
     this.drones.clear();
     this.items.clear();
     this.mines.clear();
+    this.traps.clear();
     this.kills = 0;
     this.mod = null;
     this.surge = false;
@@ -661,6 +749,98 @@ export class HostSim {
       daylight: !!opts.daylight,
     });
     this.events.push({ e: 'zspawn', id });
+  }
+
+  // ---- The base wall (HOLDOUT levels) ----------------------------------
+
+  // A zombie standing at an intact segment hits it on its bite timer.
+  // Returns true when it spent this frame attacking rather than walking.
+  _attackWall(z, stats, dt) {
+    const wall = this.level.baseWall;
+    // Generous on purpose: the nav grid inflates obstacles by the agent
+    // radius, so a zombie's path ends about a metre short of the wall. A
+    // tight reach left them milling just out of range, which read as the
+    // wall being invincible.
+    const reach = stats.radius + 1.25;
+    let best = null, bd = reach * reach;
+    for (const seg of wall.segments) {
+      if (seg.dead) continue;
+      const dx = z.pos.x - seg.x, dz = z.pos.z - seg.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = seg; }
+    }
+    if (!best) return false;
+    // Only from OUTSIDE. Anything that got in through a breach should be
+    // hunting players, not demolishing the wall from the wrong side.
+    const c = this.level.baseCentre;
+    if (c) {
+      const inside = Math.abs(z.pos.x - c.x) < BASE_SIZE / 2 - 0.2 && Math.abs(z.pos.z - c.z) < BASE_SIZE / 2 - 0.2;
+      if (inside) return false;
+    }
+    // Attacking is not being stuck. Without this the stuck escalation
+    // relocates them away from the wall after four seconds and the base
+    // never takes a scratch.
+    z.stuckT = 0;
+    z.path = null;
+    z.biteT += dt;
+    if (z.biteT >= stats.biteInterval) {
+      z.biteT = 0;
+      this.damageBaseWall(best.index, stats.biteDamage * TUNING.base.zombieWallMult, z.id);
+    }
+    return true;
+  }
+
+  // Host-authoritative. Clients apply the same change from the event, so
+  // both peers see the same holes in the same places.
+  damageBaseWall(index, amount, byZombie = null) {
+    const wall = this.level.baseWall;
+    if (!wall) return;
+    const broke = wall.damage(index, amount);
+    const seg = wall.segments[index];
+    this.events.push({ e: 'wall', i: index, hp: seg.hp, broke: broke ? 1 : 0, z: byZombie });
+    if (broke) {
+      this.level.nav = null;         // the breach is a real route now
+      this.level.collidersZ = null;
+    }
+    if (wall.integrity() <= TUNING.base.loseAt && this.wave.phase !== 'gameover') {
+      this._baseLost();
+    }
+  }
+
+  repairBaseWall(id, index) {
+    const wall = this.level.baseWall;
+    const p = this.players.get(id);
+    if (!wall || !p) return;
+    if (this.wave.phase !== 'day' && this.wave.phase !== 'countdown') return;
+    const seg = wall.segments[index];
+    if (!seg || seg.hp >= seg.maxHp) return;
+    if (p.inv.s < TUNING.base.repairCost) return;
+    p.inv.s -= TUNING.base.repairCost;
+    const wasBreach = seg.dead;
+    wall.repair(index, TUNING.base.repairAmount);
+    this.events.push({ e: 'wall', i: index, hp: seg.hp, broke: 0, fix: 1 });
+    if (wasBreach) { this.level.nav = null; this.level.collidersZ = null; }
+  }
+
+  // The nearest damaged segment to a point, for the repair prompt.
+  nearestDamagedSeg(pos, maxDist = 2.2) {
+    const wall = this.level.baseWall;
+    if (!wall) return null;
+    let best = null, bd = maxDist * maxDist;
+    for (const seg of wall.segments) {
+      if (seg.hp >= seg.maxHp) continue;
+      const dx = pos.x - seg.x, dz = pos.z - seg.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = seg; }
+    }
+    return best;
+  }
+
+  _baseLost() {
+    this.events.push({ e: 'baselost' });
+    this.wave.phase = 'gameover';
+    this.wave.t = 0;
+    for (const p of this.players.values()) { p.down = true; p.hp = 0; }
   }
 
   // Hitscan: ray vs every living zombie's torso sphere, nearest first,
@@ -923,6 +1103,7 @@ export class HostSim {
     this._stepGrenades(dt);
     this._stepEffects(dt);
     this._stepMines(dt);
+    this._stepTraps(dt);
     this._stepPickups();
 
     // Proximity revives.
@@ -992,10 +1173,15 @@ export class HostSim {
       }
       if (!target) continue;
 
+      // A lure outranks the player it was thrown for: this is how the
+      // squad decides WHERE the wave dies when they cannot go out there.
+      const lure = this._lureFor(z.pos);
+      const goal = lure ? lure.pos : target.pos;
+
       const dist = z.pos.distanceTo(target.pos);
       const losBlocked = segmentBlocked(z.pos.x, z.pos.z, target.pos.x, target.pos.z, this._tall());
 
-      let speedMult = this._cloudSlowAt(z.pos);
+      let speedMult = this._cloudSlowAt(z.pos) * this._tarSlowAt(z.pos);
       if (z.daylight) speedMult *= TUNING.pacing.dayRaid.speedMult;
       if (z.type === 'crawler' && dist < stats.lungeRange) {
         speedMult *= stats.lungeSpeed / stats.speed;
@@ -1017,9 +1203,16 @@ export class HostSim {
         }
         continue;
       }
+
+      // HOLDOUT: no player in reach, but the base wall might be. A walled
+      // base would otherwise be a permanent safe box; chewing through it
+      // IS the level. The pathfinder already walks them to the wall
+      // because a sealed perimeter leaves no route in, so this is simply
+      // "what do you do when you arrive".
+      if (this.level.baseWall && this._attackWall(z, stats, dt)) continue;
       z.biteT = 0;
 
-      const steer = this._navSteer(z, stats, target.pos, dt);
+      const steer = this._navSteer(z, stats, goal, dt);
       if (!steer) continue;
 
       // Separation: push apart from close neighbours so the horde spreads
@@ -1382,26 +1575,26 @@ export class HostSim {
       }
       if (f.t <= 0) this.fires.splice(i, 1);
     }
-    // Drones: fly to target, hover, ping the horde every 2 s.
+    // Drones: out to the drop point, release the payload, fly home.
+    // Three readable phases, because "did my drone actually do anything"
+    // was the old version's whole problem.
     for (const d of [...this.drones.values()]) {
       if (d.phase === 'fly') {
         const to = d.target.clone().sub(d.pos);
         const dist = to.length();
-        if (dist < 0.4) { d.phase = 'hover'; d.hoverT = 10; d.pingT = 0; }
-        else d.pos.addScaledVector(to.normalize(), Math.min(dist, 8 * dt));
-      } else {
-        d.hoverT -= dt;
-        d.pingT -= dt;
-        if (d.pingT <= 0) {
-          d.pingT = 2;
-          let best = null, bd = Infinity;
-          for (const z of this.zombies.values()) {
-            const dz = z.pos.distanceToSquared(d.pos);
-            if (dz < bd && dz < 81) { bd = dz; best = z; }
-          }
-          if (best) this.events.push({ e: 'ping', p: best.pos.toArray(), by: 'drone' });
+        if (dist < 0.5) { d.phase = 'drop'; d.dropT = 0.7; }
+        else d.pos.addScaledVector(to.normalize(), Math.min(dist, 13 * dt));
+      } else if (d.phase === 'drop') {
+        d.dropT -= dt;
+        if (d.dropT <= 0) {
+          this._dropPayload(d);
+          d.phase = 'home';
         }
-        if (d.hoverT <= 0) this.drones.delete(d.id);
+      } else {
+        const to = d.home.clone().sub(d.pos);
+        const dist = to.length();
+        if (dist < 0.6) this.drones.delete(d.id);
+        else d.pos.addScaledVector(to.normalize(), Math.min(dist, 13 * dt));
       }
     }
   }
@@ -1495,7 +1688,8 @@ export class HostSim {
     }
     const ds = [];
     for (const d of this.drones.values()) {
-      ds.push([d.id, +d.pos.x.toFixed(2), +d.pos.y.toFixed(2), +d.pos.z.toFixed(2)]);
+      ds.push([d.id, +d.pos.x.toFixed(2), +d.pos.y.toFixed(2), +d.pos.z.toFixed(2),
+        TRAP_KINDS.indexOf(d.payload || 'mine'), d.phase === 'home' ? 1 : 0]);
     }
     const is = [];
     for (const item of this.items.values()) {
@@ -1506,10 +1700,19 @@ export class HostSim {
     for (const mine of this.mines.values()) {
       ms.push([mine.id, +mine.pos.x.toFixed(2), +mine.pos.y.toFixed(2), +mine.pos.z.toFixed(2)]);
     }
+    const tr = [];
+    for (const t of this.traps.values()) {
+      tr.push([t.id, TRAP_KINDS.indexOf(t.kind),
+        +t.pos.x.toFixed(2), +t.pos.y.toFixed(2), +t.pos.z.toFixed(2), +t.t.toFixed(1)]);
+    }
+    // Base wall integrity rides the snapshot so a late joiner sees the
+    // same holes as everyone else without replaying every damage event.
+    const bw = this.level.baseWall
+      ? this.level.baseWall.segments.map((sg) => Math.round(sg.hp)) : null;
     const ev = this.events; this.events = [];
     const w = this.wave;
     return {
-      t: 'snap', ts, players, zs, gs, is, ms, ds, bs,
+      t: 'snap', ts, players, zs, gs, is, ms, ds, bs, tr, bw,
       wave: { ph: w.phase, n: w.night, lv: w.level, t: Math.max(0, Math.ceil(w.t)), left: w.left, mod: this.mod || null },
       ev,
     };

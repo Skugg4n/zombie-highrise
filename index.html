@@ -150,6 +150,16 @@
   #hud-room { left: max(14px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); font-size: 12px; opacity: 0.8; }
   #hud-scrap { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 18px); font-size: 12px; color: var(--accent); }
   #hud-nv { right: max(6px, env(safe-area-inset-right)); top: calc(max(4px, env(safe-area-inset-top)) + 52px); font-size: 12px; }
+  /* Base integrity: the holdout level's real health bar. */
+  #hud-base { left: 50%; transform: translateX(-50%); top: calc(max(10px, env(safe-area-inset-top)) + 30px); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+  #hud-base .bar { width: 96px; height: 6px; background: rgba(255,255,255,0.16); border-radius: 3px; overflow: hidden; }
+  #hud-base .bar > i { display: block; height: 100%; background: var(--accent2); transition: width 0.25s linear, background 0.25s linear; }
+  #hud-base.warn .bar > i { background: var(--accent); }
+  #hud-base.crit .bar > i { background: var(--danger); }
+  #hud-base.crit { animation: basepulse 0.9s ease-in-out infinite; }
+  @keyframes basepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  /* Repair prompt: only up during prep, only when you are next to damage. */
+  #repair-prompt { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); font-size: 13px; text-align: center; }
 
   /* One-frame white flash on nearby explosions */
   #boom-flash {
@@ -292,8 +302,8 @@
       <div id="crit-text">HEADSHOT</div>
       <div id="map-ui" class="hidden">
         <button id="btn-map-ping" class="small on">PING</button>
-        <button id="btn-map-mine" class="small">MINE - 65</button>
-        <button id="btn-map-drone" class="small">DRONE - 40</button>
+        <button id="btn-map-mine" class="small">MINE - 12</button>
+        <button id="btn-map-drone" class="small">DRONE: MINE - 10</button>
         <button id="btn-map-close" class="small">CLOSE MAP</button>
       </div>
       <div id="boom-flash"></div>
@@ -310,6 +320,8 @@
       <div id="hud-items" class="hud-box" data-smoke>FRAG x1  PACK 0  MINE 0</div>
       <div id="hud-scrap" class="hud-box" data-smoke>SCRAP 25</div>
       <div id="hud-nv" class="hud-box hidden">NV 30s</div>
+      <div id="hud-base" class="hud-box hidden" data-smoke>BASE <span class="bar"><i style="width:100%"></i></span> <span id="hud-base-pct">100%</span></div>
+      <div id="repair-prompt" class="hud-box hidden">Hold <b>E</b> to repair the wall <span id="repair-cost">(5 scrap)</span></div>
       <div id="touch-ui" class="hidden">
         <div id="stick-zone"><div id="stick-base"></div><div id="stick-nub"></div></div>
         <div id="look-zone"></div>

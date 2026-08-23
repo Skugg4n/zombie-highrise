@@ -26,14 +26,14 @@ export const TUNING = {
     surgeEvery: 3,
     surgeBudgetMult: 1.35,
     maxAlive: 24,           // Quest 2 cap; instanced horde has headroom
-    levelTypeModifier: { ground: 1.15, basement: 0.90, upper: 1.00, trench: 0.95, wagon: 0.85, boss: 1.0 },
+    levelTypeModifier: { holdout: 1.15, ground: 1.15, basement: 0.90, upper: 1.00, trench: 0.95, wagon: 0.85, boss: 1.0 },
   },
 
   // FLOOR HOOKS (playtest: "give each floor a distinct hook so floor 7
   // does not feel like floor 2"). One sentence of identity per floor,
   // announced on arrival, plus the mechanical twist that backs it up.
   floorHooks: {
-    1: { name: 'THE YARD', note: 'Three gates. Hold the compound.' },
+    1: { name: 'THE FIELD', note: 'Nowhere to run. Hold the base and watch the haze.' },
     2: { name: 'BOILER LEVEL', note: 'Tight corridors. They come up the stairwell.', mod: 'blackout' },
     3: { name: 'OFFICES', note: 'They climb the facade and ride the shaft.' },
     4: { name: 'THE YARD AGAIN', note: 'Same ground, worse odds.', mod: 'fog' },
@@ -45,6 +45,26 @@ export const TUNING = {
     10: { name: 'LAST YARD', note: 'Everything at once.', mod: 'loot' },
     11: { name: 'DEEP TRENCH', note: 'The long walk to the lift.', mod: 'blackout' },
     12: { name: "THE BUTCHER'S ROOF", note: 'Kill it and you go home.' },
+  },
+
+  // Drone-dropped field traps. Each one answers a different problem:
+  // TAR buys time, SPIKES grind a lane down, LURE decides WHERE the fight
+  // happens, which is the whole point of a level you cannot walk out into.
+  traps: {
+    tar:   { radius: 3.4, duration: 100, slow: 0.38 },
+    spike: { radius: 2.7, duration: 130, dps: 9 },
+    lure:  { radius: 24, duration: 26, pull: 1.0 },
+  },
+
+  // THE BASE (holdout levels). The wall is the level's real health bar:
+  // players are safe behind it until the horde chews a hole, and losing
+  // it entirely ends the run.
+  base: {
+    zombieWallMult: 1.6,     // a bite does more to concrete than to a person
+    repairCost: 5,           // scrap per repair action: cheap, do it every day
+    repairAmount: 60,        // half a segment, so a ruined one takes two goes
+    loseAt: 0.12,            // average integrity at which the base is overrun
+    warnAt: 0.45,            // HUD starts shouting about it here
   },
 
   // Night modifiers: rolled per night, announced at the countdown. They
@@ -134,8 +154,13 @@ export const TUNING = {
       molotovPack: 70,             // 2 molotovs
       nightVision: 500,            // permanent device, battery per night
     },
-    droneDeploy: 40,               // tactical map: scout drone, one flight
-    minePlacementFromMap: 26,      // remote placement pays a small premium
+    // THE DRONE is a delivery vehicle, not a weapon. On holdout levels the
+    // squad cannot leave the base, so the drone is the ONLY way to touch
+    // the field. It is therefore free to launch: you pay for the payload
+    // it drops, and every payload is priced as a staple.
+    droneDeploy: 0,
+    dronePayload: { mine: 10, tar: 8, spike: 12, lure: 14 },
+    minePlacementFromMap: 12,      // hand-placed mines are a staple, not a luxury      // remote placement pays a small premium
     mine: { triggerRadius: 0.6, blastRadius: 2.5, damage: 12 },
     // Explosive barrels: level furniture, free damage if you aim well and
     // a liability if the horde reaches you while standing next to one.

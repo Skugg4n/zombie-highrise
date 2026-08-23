@@ -39,13 +39,19 @@ function out(pos) {
   // Returns the node new sounds should connect to: a panner at pos, or
   // the master bus for non-positional (own weapon, UI) sounds.
   if (!pos) return master;
+  // Callers pass either a Vector3-like or a plain [x, y, z]. A mismatch
+  // used to reach the panner as undefined and throw "non-finite value".
+  const px = Array.isArray(pos) ? pos[0] : pos.x;
+  const py = Array.isArray(pos) ? pos[1] : pos.y;
+  const pz = Array.isArray(pos) ? pos[2] : pos.z;
+  if (!Number.isFinite(px) || !Number.isFinite(py) || !Number.isFinite(pz)) return master;
   const p = ctx.createPanner();
   p.panningModel = 'equalpower';   // HRTF is heavy on Quest; equalpower is fine
   p.distanceModel = 'inverse';
   p.refDistance = 2;
   p.maxDistance = 80;
   p.rolloffFactor = 1.2;
-  p.positionX.value = pos.x; p.positionY.value = pos.y; p.positionZ.value = pos.z;
+  p.positionX.value = px; p.positionY.value = py; p.positionZ.value = pz;
   p.connect(master);
   return p;
 }
@@ -118,6 +124,14 @@ const RECIPES = {
   roar: (d) => { tone(d, { freq: 95, endFreq: 55, type: 'sawtooth', peak: 0.4, attack: 0.08, decay: 1.1, detune: -25 }); noiseBurst(d, { peak: 0.25, attack: 0.1, decay: 0.9, freq: 260, q: 0.6, type: 'lowpass' }); },
   crit: (d) => { tone(d, { freq: 1750, endFreq: 2300, type: 'square', peak: 0.2, attack: 0.004, decay: 0.1 }); tone(d, { freq: 900, endFreq: 1400, type: 'sine', peak: 0.16, decay: 0.12 }); },
   acid: (d) => noiseBurst(d, { peak: 0.3, attack: 0.01, decay: 0.35, freq: 800, q: 1.2, type: 'lowpass' }),
+  // Base wall: a dull concrete thud while it holds, a heavy collapse when
+  // a segment finally goes. The break has to carry across the whole field
+  // because it is the worst thing that can happen to you on a holdout.
+  wallhit: (d) => { noiseBurst(d, { peak: 0.3, attack: 0.005, decay: 0.16, freq: 340, q: 1.1, type: 'lowpass' }); tone(d, { freq: 120, endFreq: 80, type: 'square', peak: 0.16, decay: 0.12 }); },
+  wallbreak: (d) => { noiseBurst(d, { peak: 0.8, attack: 0.01, decay: 0.9, freq: 240, q: 0.5, type: 'lowpass' }); tone(d, { freq: 70, endFreq: 34, type: 'sine', peak: 0.5, decay: 0.7 }); },
+  repair: (d) => { noiseBurst(d, { peak: 0.22, decay: 0.06, freq: 2400, q: 3 }); setTimeout(() => ctx && noiseBurst(d, { peak: 0.2, decay: 0.07, freq: 1600, q: 2.5 }), 130); },
+  dronefly: (d) => tone(d, { freq: 320, endFreq: 300, type: 'sawtooth', peak: 0.12, attack: 0.15, decay: 0.9, detune: 12 }),
+  dronedrop: (d) => { tone(d, { freq: 420, endFreq: 180, type: 'square', peak: 0.16, decay: 0.14 }); noiseBurst(d, { peak: 0.2, attack: 0.01, decay: 0.2, freq: 600, q: 1.2 }); },
 };
 
 // Night stinger and day chime: little synth phrases.

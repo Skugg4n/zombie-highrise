@@ -53,6 +53,7 @@ export function blockingFor(level, y, colliders = null) {
   const list = colliders || level.colliders || [];
   const out = [];
   for (const c of list) {
+    if (c.dead) continue;                                            // breached
     if (c.top !== undefined && c.top <= y + LOCO.stepUp) continue;   // steppable
     out.push(c);
   }

@@ -9,9 +9,10 @@ import * as THREE from 'three';
 import { applyDebugAtlas } from '../world/debugatlas.js';
 
 const STATIC_PRESETS = {
-  1: { pos: [10, 1.7, 12], look: [0, 1.2, 0] },
-  4: { pos: [0, 26, 0.01], look: [0, 0, 0] },
-  5: { pos: [-4, 1.6, -5], look: [-20, 1.0, 18] },   // looking out at the approach
+  // Floor 1 is the HOLDOUT field now; its base sits at (-13, -11).
+  1: { pos: [-12.6, 1.7, -11.5], look: [20, 1.1, -6] },  // in the base, out east
+  4: { pos: [-13, 42, -10.99], look: [-13, 0, -11] },    // tactical, over the base
+  5: { pos: [-15.4, 3.3, -13.0], look: [10, 0.6, -30] },  // snipe platform, north
   7: { pos: [3, 1.4, -4], look: [-8, 0.6, -4] },   // down a trench lane, flare-lit
   8: { pos: [1, 1.7, 5], look: [-8, 1.0, -6] },
   9: { pos: [8, 3.5, 10], look: [0, 0.8, 0] },

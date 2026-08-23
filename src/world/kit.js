@@ -57,7 +57,9 @@ export function cover(level, mat, x, z, w, d, h = 1.05) {
 // Returns the platform top height.
 export function platform(level, mat, x, z, w, d, height, rampDir = 'south') {
   box(level.group, w, height, d, mat, x, height / 2, z);
-  level.colliders.push({ x, z, hx: w / 2, hz: d / 2, tall: false, top: height });
+  // walkable: the horde may stand up here, but only by using the ramp;
+  // the step-up rule keeps them from scaling the side.
+  level.colliders.push({ x, z, hx: w / 2, hz: d / 2, tall: false, top: height, walkable: true });
   // Ramp: a shallow wedge of stacked slabs (cheap, walkable via heightAt).
   const rampLen = height * 3.2;
   const steps = 6;

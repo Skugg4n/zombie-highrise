@@ -4,7 +4,54 @@ Live build: https://skugg4n.github.io/zombie-highrise/
 Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw".
 
-## v0.9.3 - Ola's playtest fixes (START HERE)
+## v0.11.0 - THE FIRST HOLDOUT LEVEL (START HERE, THIS IS THE ONE)
+
+This is the level to judge. Everything else in the build is the old
+high-rise content still sitting further up the cycle. Play floor 1 and
+tell me whether it is fun on its own; nothing else gets built until it is.
+
+### Desktop, solo, floor 1 only
+- [ ] You start inside a small base in a big open daylight field. You can
+      see a long way. The far ground dissolves into haze.
+- [ ] Walk the whole base. You cannot get out, in any direction. That is
+      deliberate. Tell me if it feels like a cage rather than a position.
+- [ ] Walk up the ramp in the north-east corner onto the snipe platform.
+      From there you shoot out over the wall into the field.
+- [ ] Watch where they come from: the ridge, behind the lone tree, the
+      burnt-out cars, the rock field, the ruined houses. Nothing should
+      ever appear in the open. Tell me if anything does.
+- [ ] They walk 30 to 45 m to reach you. Is that approach interesting or
+      is it waiting? This is the question I most want answered.
+- [ ] Let them reach the wall without shooting. They attack it: segments
+      go red and sink, then break. The BASE bar at the top drops. Losing
+      the wall entirely ends the run.
+- [ ] During the DAY, stand next to a damaged bit of wall. Press E to
+      repair for 5 scrap. Is patching the base every morning worth doing,
+      or busywork?
+- [ ] Open the tactical map (M). It now frames the whole field. Click
+      DRONE to cycle its payload: MINE / TAR / SPIKES / FLARE, price on
+      the button. Click a spot in the field and watch the drone fly out
+      with the payload slung underneath, drop it, and come home.
+- [ ] Drop a FLARE out on an approach lane during a night. The horde
+      should visibly walk toward it instead of you. Then mine that lane.
+- [ ] Explosive barrels sit inside the base and out on the approaches.
+
+### Quest 2
+- [ ] The base IS your roomscale play area now. Walking it physically
+      should line up with the dashed amber square.
+- [ ] VR AIM: the gun now points exactly where the shot goes. This was
+      about 45 degrees off. Point at a zombie and confirm you hit it.
+- [ ] Left grip is contextual: it repairs a damaged wall you are standing
+      at during the day, and drops a mine otherwise.
+
+### Everywhere
+- [ ] GRAVITY AND GROUND: walk up and down the ramp. You should step up
+      cleanly, walk down cleanly, and be unable to scale the platform's
+      side. Nothing should feel flat or weightless.
+- [ ] NAVIGATION: no zombie should freeze, jitter, or grind against
+      geometry. They should route around cover and pour through breaches.
+
+## v0.9.3 - Ola's playtest fixes (older, still worth a look)
 
 Everything below came from your last session. Please check these first.
 

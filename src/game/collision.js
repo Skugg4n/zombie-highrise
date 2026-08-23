@@ -6,6 +6,7 @@
 // Push `pos` (THREE.Vector3, mutated) out of every collider it overlaps.
 export function resolveCircle(pos, radius, colliders) {
   for (const c of colliders) {
+    if (c.dead) continue;          // destroyed base wall segment: a breach
     // Closest point on the box to the circle centre.
     const cx = Math.max(c.x - c.hx, Math.min(pos.x, c.x + c.hx));
     const cz = Math.max(c.z - c.hz, Math.min(pos.z, c.z + c.hz));
@@ -29,6 +30,7 @@ export function resolveCircle(pos, radius, colliders) {
 // hitscan wall occlusion and simple line-of-sight checks.
 export function segmentBlocked(ax, az, bx, bz, colliders) {
   for (const c of colliders) {
+    if (c.dead) continue;
     if (segmentVsAabb(ax, az, bx, bz, c)) return true;
   }
   return false;

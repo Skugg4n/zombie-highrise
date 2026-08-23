@@ -56,8 +56,10 @@ export class VRInput {
       // Right squeeze reloads; left squeeze drops a mine at the hand.
       controller.addEventListener('squeezestart', () => {
         if (this.hands.left === grip) {
+          // Left squeeze is contextual: patch the base wall if you are
+          // standing at a damaged bit during prep, otherwise drop a mine.
           const pos = grip.getWorldPosition(new THREE.Vector3());
-          ctx.actions.mineAt(pos);
+          if (!ctx.actions.repair()) ctx.actions.mineAt(pos);
         } else {
           ctx.actions.reload();
         }

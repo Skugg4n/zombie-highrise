@@ -1,5 +1,81 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.11.0 - 2026-08-23 - THE FIRST HOLDOUT LEVEL
+
+Floor 1 is now the holdout level from Ola's L1 sketch. The old high-rise
+"ground" floor still exists further up the cycle; this is the one to play.
+
+**The field.** An 80 m open daylight field with haze that hides the far
+ground. Sight blockers laid out to the sketch: a ridge to the north, a
+lone dead tree east, burnt-out cars south-east, a rock field south-west,
+two ruined houses. Between them, mid-ground the horde actually crosses:
+crash barriers along the road, shipping containers, telegraph poles
+marching into the haze, a burnt-out bus. A low ring of city silhouettes
+sits inside the horizon haze band for depth.
+
+**Nothing spawns in the open.** All seven spawn points sit behind a sight
+blocker, 28 to 46 m out. The horde emerges from the haze and walks the
+whole way in, which is the entire tension of the archetype.
+
+**The base.** 8x8 m, off-centre to the north-west as sketched. A low wall
+you see and shoot over, sandbags along the threat side, crates inside, a
+ramp up to a snipe platform, and the elevator plate in the south-west
+corner with its doors facing the middle of the base (foundation bug 5:
+the lift derives from the base, it is never placed independently).
+
+**Players cannot leave the base.** Verified from the centre in eight
+directions: the wall holds every time.
+
+**The base can be destroyed.** Every wall segment has hit points and its
+own collider. Zombies that cannot reach a player attack the wall instead;
+segments visibly sink and redden as they are chewed, and a broken one
+becomes a real breach the pathfinder routes through. Losing the wall
+loses the run. Repair costs 5 scrap a go during the day (E, or the left
+grip in VR), which finally gives the prep phase a job. The whole
+perimeter is one InstancedMesh, so breaking it costs zero draw calls.
+
+**The drone is a real tool.** It is no longer a scout that hovers and
+pings: it is a delivery vehicle. Launching is free, you pay for what it
+carries, and you watch the payload fly out and drop.
+- MINE (10) - the proximity mine, now placeable anywhere in the field
+- TAR (8) - a slick that cuts them to 38% speed for 100 s
+- SPIKES (12) - a caltrop field grinding 9 damage a second
+- FLARE (14) - a burning lure the horde walks toward instead of you,
+  which is how a squad that cannot leave the base decides WHERE the
+  wave dies
+The drone button on the tactical map cycles the payload and shows the
+price. Mines dropped from the map fell 26 -> 12: a staple, not a luxury.
+
+**Fixes found while building it**
+- Local-to-world rotation used the wrong sign, so every rotated prop had
+  its sub-parts scattered off the body (wheels beside the car, ribs
+  poking out of containers as spikes).
+- The pathfinder treated ANY collider with a top as walkable, so it
+  routed the horde straight through low walls and sandbag stacks. Only
+  ramped platforms are walkable now; anything above step-up blocks.
+- Zombies attacking the wall no longer count as stuck, which used to
+  teleport them away after four seconds and left the base untouchable.
+- The player-only boundary ring overlapped the wall. The two pushed
+  against each other and pinned the player in place, unable to move.
+- The snipe ramp ran straight through the elevator cab. The firing
+  position moved to the north-east corner, above the sandbags on the
+  threat side, and the lift keeps the west side to itself.
+- `audio.play(name, pos)` threw on array positions ("non-finite value").
+- Tactical map framed a fixed box at the world origin, which put an 80 m
+  field mostly off screen. It now frames the level it is looking at.
+
+**New verification**
+- `test/holdoutprobe.mjs` - spawn distance, base pockets, ramp clearance,
+  confinement in eight directions, wall damage, breaching, and repair.
+- `test/droneprobe.mjs` - every payload delivered, drones fly home, and
+  the flare measurably pulls the horde off the base.
+- `window.__zhr.debugPockets()` - stand everywhere in the base and try to
+  walk back to the middle. Any start that cannot is a trap. This is what
+  found both pinning bugs above; run it on every new level.
+
+Performance on the new field: 50 draw calls, 4.5k triangles with 22
+zombies, against budgets of ~100 and ~250k.
+
 ## v0.10.2 - 2026-08-23
 
 **Foundation bug 3: VR weapon aim was 45 degrees off.** The pistol pointed up

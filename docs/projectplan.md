@@ -110,27 +110,31 @@ the rebuild. What changes is the LEVELS.
       from the controller forward axis. Fix the weapon-to-controller
       transform and verify in headset.
 - [x] Reload needs a readable animation (done in v0.9.2)
-- [ ] The elevator sometimes faces the wrong way. It becomes the base's
+- [x] The elevator sometimes faces the wrong way. (v0.11.0: on holdout
+      levels position AND facing derive from the base centre.)
+      ORIGINAL: It becomes the base's
       lift plate, so orientation derives from the base, never placed
       independently.
 
 ### Step 2 - ONE holdout level, proven fun
 
-- [ ] Build L1 exactly to the sketch (docs/sketches/L1-holdout.jpg):
+- [x] Build L1 to the sketch (v0.11.0). One deviation, noted: the snipe
+      platform moved from the north-west to the north-east corner because
+      its ramp ran through the elevator cab there. ORIGINAL: (docs/sketches/L1-holdout.jpg):
       open daylight field 60-80 m, small base in it, low wall + sandbags,
       interior crates, a ramp to a snipe platform, the elevator plate with
       its control panel, 4 player spawns.
-- [ ] Field: fog/haze hiding the far ground, sight blockers (ridge, lone
+- [x] Field: fog/haze hiding the far ground, sight blockers (ridge, lone
       tree, burnt-out cars, rock/house, a building), zombie spawns ALWAYS
       behind a sight blocker and never in view of the base.
-- [ ] Players cannot leave the base; the low wall is the boundary.
-- [ ] The base takes damage: zombies attack the wall and sandbags,
+- [x] Players cannot leave the base (verified in 8 directions); the low wall is the boundary.
+- [x] The base takes damage: zombies attack the wall and sandbags,
       breaches open, repairable during the day, losing the base is a fail
       state.
-- [ ] The drone becomes a real tool: affordable, obvious effect, and it
+- [x] The drone becomes a real tool (4 payloads, free to launch): affordable, obvious effect, and it
       flies OUT to place traps where players cannot reach. More trap
       types for it to drop.
-- [ ] Mines priced as a staple, not a luxury.
+- [x] Mines priced as a staple: 12 from the map, 10 by drone.
 - [ ] **STOP. Ola plays it. Iterate until this single level is genuinely
       fun on its own before building anything else.**
 
