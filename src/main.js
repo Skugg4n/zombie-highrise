@@ -1384,9 +1384,12 @@ function makeArsenal() {
       reload: () => audio.play('reload'),
       magSeated: () => {
         audio.play('magseat');
-        // Visual confirmation too: the flat viewmodel snaps up and the VR
-        // weapon's charge light goes green (handled in vr.js).
+        // Visual confirmation on every screen there is: the flat
+        // viewmodel snaps up, the ammo readout flashes READY, and the VR
+        // weapon's charge light goes green (handled in vr.js). A sound
+        // and a small kick are easy to miss with a horde in front of you.
         viewmodelKick = 0.045;
+        hud.flashReady();
       },
       dry: () => audio.play('dryfire'),
     },
@@ -1594,6 +1597,7 @@ function updateInteractions(dt) {
   // Reviving beats repairing: a teammate on the floor is always the more
   // urgent of the two.
   let target = null;
+  let actVerb = null;              // what the touch ACT button should say
   const mate = downed.find((d) => Math.hypot(d.x - here.x, d.z - here.z) < 1.9);
   if (mate) {
     target = {
@@ -1630,9 +1634,10 @@ function updateInteractions(dt) {
       } else {
         repairHoldT = Math.max(0, repairHoldT - dt * 2.5);
       }
+      actVerb = 'OPEN';
       target = {
         x: door.buttonX, y: 0, z: door.buttonZ,
-        label: inVRNow() ? 'HOLD GRIP TO OPEN' : 'HOLD E TO OPEN',
+        label: holdLabel('OPEN'),
         sub: 'the door',
         progress: repairHoldT / TUNING.pacing.route.doorHoldTime,
       };
@@ -1653,9 +1658,10 @@ function updateInteractions(dt) {
       } else {
         repairHoldT = Math.max(0, repairHoldT - dt * 2.5);
       }
+      actVerb = afford ? 'REPAIR' : 'NEED SCRAP';
       target = {
         x: seg.x, y: 0, z: seg.z,
-        label: afford ? (inVRNow() ? 'HOLD GRIP TO REPAIR' : 'HOLD E TO REPAIR') : 'NOT ENOUGH SCRAP',
+        label: afford ? holdLabel('REPAIR') : 'NOT ENOUGH SCRAP',
         sub: afford ? `${TUNING.base.repairCost} scrap` : `${TUNING.base.repairCost} needed`,
         progress: repairHoldT / TUNING.base.repairHoldTime,
       };
@@ -1664,9 +1670,31 @@ function updateInteractions(dt) {
     }
   }
   interact.show(target, camera);
+  setActButton(actVerb);
 }
 
 function inVRNow() { return !!(vrInput && vrInput.active); }
+
+// WHAT TO PRESS depends on what you are playing on, and the prompt used
+// to name a key that half the players do not have. A phone player was
+// told to "HOLD E" and had no E, no grip, and no button: repairing the
+// wall and opening a door were simply unavailable on mobile, which is
+// the flat-mode version of the VR parity rule.
+function holdLabel(verb) {
+  if (inVRNow()) return `HOLD GRIP TO ${verb}`;
+  if (touchInput) return `HOLD THE BUTTON TO ${verb}`;
+  return `HOLD E TO ${verb}`;
+}
+
+// The touch ACT button appears only when there is something to hold, and
+// says which of the two it is.
+function setActButton(verb) {
+  const el = $('btn-act');
+  if (!el) return;
+  const want = !!verb && !!touchInput;
+  el.classList.toggle('hidden', !want);
+  if (want) el.textContent = verb;
+}
 
 // "+1 HEALTH PACK", floating in front of you for a moment. In a headset
 // the toast that carries this on a monitor simply does not exist, so a
@@ -2581,6 +2609,22 @@ function handleEvents(evs) {
         audio.play('minebeep', ev.p || null);
         break;
       }
+      // The mine is live. Placement and arming used to sound identical
+      // (they were the same beep) and only one of them was true.
+      case 'armed': {
+        audio.play('minearmed', ev.p || null);
+        break;
+      }
+      // The drone has the crate. Nothing announced the one moment of the
+      // fetch errand worth watching, so from inside the base it flew out,
+      // hovered, and came back, and you learned whether it worked when it
+      // landed.
+      case 'grabbed': {
+        const me = role === 'client' ? net?.myId : 'H';
+        audio.play('grab', ev.p || null);
+        if (ev.by === me) showToast('Drone has the crate.', 1400);
+        break;
+      }
       case 'bought': {
         const me = role === 'client' ? net?.myId : 'H';
         if (ev.id === me) {
@@ -2714,9 +2758,13 @@ const inputCtx = {
 };
 let inputs = [];
 let vrInput = null;
+let touchInput = null;             // set when the touch layer is in use
 if (!PHOTOMODE && !UISTATE) {
   if (PLATFORM === 'desktop') inputs.push(new KeyboardInput(inputCtx));
-  if (PLATFORM !== 'desktop') inputs.push(new TouchInput(inputCtx));
+  if (PLATFORM !== 'desktop') {
+    touchInput = new TouchInput(inputCtx);
+    inputs.push(touchInput);
+  }
   vrInput = new VRInput(inputCtx);
   inputs.push(vrInput);
 }

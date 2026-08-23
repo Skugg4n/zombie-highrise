@@ -43,6 +43,24 @@ export class TouchInput {
     bind('btn-nv', () => ctx.actions.nightVision());
     bind('btn-map', () => ctx.actions.map());
 
+    // ACT is a HOLD, not a tap: repairing a wall and opening a door both
+    // fill a ring you watch. Everything else on this row is a tap, so it
+    // gets its own wiring rather than going through bind().
+    const actBtn = document.getElementById('btn-act');
+    const actDown = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (this.ctx.isPlaying()) ctx.actions.repairHold(true);
+    };
+    const actUp = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      ctx.actions.repairHold(false);
+    };
+    actBtn.addEventListener('touchstart', actDown, { passive: false });
+    actBtn.addEventListener('touchend', actUp, { passive: false });
+    // A finger dragged off the button must release the hold, or the ring
+    // keeps filling with nothing pressing it.
+    actBtn.addEventListener('touchcancel', actUp, { passive: false });
+
     stickZone.addEventListener('touchstart', (e) => {
       e.preventDefault();
       if (this.stickId !== null) return;

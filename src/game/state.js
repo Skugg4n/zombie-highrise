@@ -284,6 +284,11 @@ export class HostSim {
       if (best) {
         d.carrying = best.id;
         best.carried = true;
+        // The one moment of the fetch errand that is worth watching: the
+        // crate leaving the ground. Nothing announced it, so from the
+        // base the drone flew out, hovered, and flew back, and you found
+        // out whether it had worked when it landed.
+        this.events.push({ e: 'grabbed', by: d.owner, p: best.pos.toArray() });
       } else {
         this.events.push({ e: 'fetchmiss', by: d.owner });
       }
@@ -2182,7 +2187,15 @@ export class HostSim {
   _stepMines(dt) {
     const M = TUNING.economy.mine;
     for (const mine of [...this.mines.values()]) {
-      if (mine.armT > 0) { mine.armT -= dt; continue; }
+      if (mine.armT > 0) {
+        mine.armT -= dt;
+        // ARMED. A mine is inert for its first second and there was no
+        // way to tell, so "why did that not go off" had no answer. The
+        // arming countdown is host-only sim state and emitted nothing,
+        // hence a new event rather than a rewiring.
+        if (mine.armT <= 0) this.events.push({ e: 'armed', id: mine.id, p: mine.pos.toArray() });
+        continue;
+      }
       let tripped = false;
       for (const z of this.zombies.values()) {
         if (z.pos.distanceToSquared(mine.pos) < M.triggerRadius * M.triggerRadius) { tripped = true; break; }

@@ -119,15 +119,23 @@ doing the bookkeeping. That is my job.
 
 ## Open: from the dead-code audit (v0.14.2)
 
-- [ ] Mobile has no repair control. `TouchInput` binds seven buttons and
-      repair is not one of them, while index.html hardcodes "Hold E to
-      repair the wall". Add a touch button and name the right control per
-      platform.
-- [ ] A mine proximity beep during its one-second arming window. The
-      countdown is host-only sim state and emits no event, so this needs a
-      new event rather than a rewiring.
-- [ ] A flat-screen READY flash on magazine seat.
-- [ ] A grab cue when the drone picks up a field crate.
+- [x] (v0.19.2) Mobile has no repair control. `TouchInput` binds seven
+      buttons and repair is not one of them, while index.html hardcodes
+      "Hold E to repair the wall". There is a HOLD button now, which
+      appears only when there is something to hold and says which of the
+      two it is, and the prompt names the right control per platform.
+      Checked in `interactprobe` on a real touch device profile, through
+      the real button.
+- [x] (v0.19.2) A mine proximity beep during its one-second arming
+      window. There is an `armed` event now, with its own two-chirp cue:
+      placement and arming used to be the same beep, and only one of them
+      was true.
+- [x] (v0.19.2) A flat-screen READY flash on magazine seat. The ammo
+      readout itself pulses, because that is where you look to find out
+      whether you can shoot.
+- [x] (v0.19.2) A grab cue when the drone picks up a field crate. A claw
+      clack and a servo whine, plus a line for the owner. It was the one
+      moment of the fetch errand worth watching and nothing announced it.
 
 ---
 

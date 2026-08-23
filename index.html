@@ -144,6 +144,15 @@
      edge belongs to ENTER VR + the touch action buttons. */
   #hud-health { left: max(14px, env(safe-area-inset-left)); bottom: max(14px, env(safe-area-inset-bottom)); color: var(--accent2); }
   #hud-ammo { left: max(14px, env(safe-area-inset-left)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 46px); }
+  /* READY: one bright pulse on the ammo readout the moment a fresh
+     magazine seats. Short and bright rather than long and gentle: it is
+     answering "can I shoot yet", which stops mattering the instant you
+     have the answer. */
+  #hud-ammo.ready { animation: ammoready 0.34s ease-out; }
+  @keyframes ammoready {
+    0% { background: rgba(224,163,60,0.85); color: #17140f; transform: scale(1.12); }
+    100% { background: rgba(23,20,15,0.62); color: inherit; transform: scale(1); }
+  }
   #hud-weapon { left: max(14px, env(safe-area-inset-left)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 92px); font-size: 12px; opacity: 0.85; }
   #hud-items { left: max(14px, env(safe-area-inset-left)); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 128px); font-size: 12px; opacity: 0.85; }
   /* THE TOP OF THE SCREEN IS A BAR, NOT A PILE.
@@ -363,6 +372,11 @@
           <button id="btn-pack">PACK</button>
           <button id="btn-swap">SWAP</button>
           <button id="btn-nv" class="hidden">NV</button>
+          <!-- HOLD TO ACT. Repairing the wall and opening a door are both
+               holds, bound to E on a keyboard and the grip in VR, and a
+               phone had neither. Hidden until there is something to act
+               on, so it does not sit there meaning nothing. -->
+          <button id="btn-act" class="hidden">HOLD</button>
           <button id="btn-map">MAP</button>
         </div>
       </div>

@@ -1,5 +1,34 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.19.2 - 2026-08-24 - a phone can repair the wall, and three things that happened silently
+
+**Mobile could not repair or open doors at all.** `TouchInput` bound seven
+buttons and neither of the two HOLD interactions was among them, while the
+prompt cheerfully told a phone player to "HOLD E". There is a HOLD button
+now, at the end of the action row, which appears only when there is
+something to hold and says which of the two it is, and the prompt names
+the control you actually have: E, the grip, or the button. This is the
+flat-mode version of the VR parity rule and it had the same shape: built
+for the first platform, never ported to the second.
+
+`interactprobe` checks it on a real touch device profile, dispatching a
+touch on the real button, because the whole claim is that the button is
+reachable.
+
+**Three things the game did without telling you:**
+
+- A mine is inert for its first second and nothing said so, so "why did
+  that not go off" had no answer. Arming now has its own event and its own
+  two-chirp cue. Placement and arming used to be the same beep.
+- The drone closing its claw on a field crate. It was the one moment of
+  the fetch errand worth watching, and from inside the base the drone flew
+  out, hovered, and came back, and you learned whether it had worked when
+  it landed. It now clacks, whines, and says so.
+- Magazine seated on a flat screen. There was a sound and a small
+  viewmodel kick, both easy to miss with a horde in front of you. The ammo
+  readout itself pulses now, because that is where you look to find out
+  whether you can shoot.
+
 ## v0.19.1 - 2026-08-24 - two animations that were not saying anything
 
 **The reload was a gun tipping over, not a reload.** Ola: "the reload

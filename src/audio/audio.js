@@ -138,6 +138,12 @@ const RECIPES = {
   buy: (d) => { tone(d, { freq: 880, peak: 0.15, decay: 0.07 }); setTimeout(() => ctx && tone(d, { freq: 1320, peak: 0.13, decay: 0.12 }), 90); },
   ping: (d) => tone(d, { freq: 1150, endFreq: 1100, type: 'sine', peak: 0.22, attack: 0.01, decay: 0.35 }),
   minebeep: (d) => tone(d, { freq: 1500, peak: 0.15, decay: 0.05, type: 'square' }),
+  // ARMED: two rising chirps, distinct from the single placement beep, so
+  // "it is down" and "it is live" do not sound the same.
+  minearmed: (d) => { tone(d, { freq: 1700, peak: 0.16, decay: 0.05, type: 'square' }); setTimeout(() => ctx && tone(d, { freq: 2300, peak: 0.14, decay: 0.07, type: 'square' }), 80); },
+  // The drone closing its claw on a crate: a short mechanical clack plus
+  // the servo whine of it taking the weight.
+  grab: (d) => { noiseBurst(d, { peak: 0.22, attack: 0.004, decay: 0.07, freq: 2200, q: 2 }); tone(d, { freq: 380, endFreq: 620, type: 'sawtooth', peak: 0.12, attack: 0.02, decay: 0.3 }); },
   smoke: (d) => noiseBurst(d, { peak: 0.3, attack: 0.05, decay: 1.2, freq: 900, q: 0.4, type: 'lowpass' }),
   ignite: (d) => { noiseBurst(d, { peak: 0.5, attack: 0.02, decay: 0.5, freq: 700, q: 0.5, type: 'lowpass' }); tone(d, { freq: 110, endFreq: 70, type: 'sawtooth', peak: 0.2, decay: 0.4 }); },
   doors: (d) => noiseBurst(d, { peak: 0.2, attack: 0.1, decay: 0.6, freq: 220, q: 1, type: 'lowpass' }),

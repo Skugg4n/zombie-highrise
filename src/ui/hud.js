@@ -14,6 +14,17 @@ export class Hud {
   }
   // info: { name, mag, reserve (-1 = infinite, null = melee), reloading,
   //         grenades, packs }
+  // READY. Ola's list: a flat player got a sound and a small viewmodel
+  // kick when the magazine seated, and both are easy to miss with a horde
+  // on screen. The ammo readout itself flashes now, because that is where
+  // you look to find out whether you can shoot.
+  flashReady() {
+    const el = $('hud-ammo');
+    el.classList.remove('ready');
+    void el.offsetWidth;                 // restart the animation
+    el.classList.add('ready');
+  }
+
   setWeapon(info) {
     $('hud-weapon').textContent = info.name;
     const ammoEl = $('hud-ammo');

@@ -75,6 +75,24 @@ and I will make that the default. It is saved on your headset meanwhile.
 - [ ] Underground on floor 2, you can now lay mines at all. You could not
       before.
 
+**On a phone.**
+
+- [ ] Stand at a damaged bit of wall during the day. A HOLD button should
+      appear at the end of the action row, and the prompt should say
+      "HOLD THE BUTTON", not "HOLD E".
+- [ ] Hold it. The ring fills and the wall repairs.
+- [ ] Walk away. The button should disappear again.
+- [ ] Same for the door button on floor 2.
+
+**Three things that used to happen silently.**
+
+- [ ] Lay a mine and listen: a beep when it lands, then two rising chirps
+      a second later when it goes live.
+- [ ] Send the drone to FETCH a crate outside the wall. You should hear
+      the claw take it and get a line saying so, rather than finding out
+      when it lands.
+- [ ] Reload on a flat screen: the ammo readout should flash.
+
 **Desktop only.**
 
 - [ ] Make the browser window narrow, phone-shaped. Nothing at the top of
