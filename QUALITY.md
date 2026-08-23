@@ -24,6 +24,7 @@ A probe is done when it satisfies three rules:
 | `smoke` HUD layout | No layout check existed; the overlap was found by eye in a headset. | Every visible HUD box checked against every other at five window sizes, with normally-hidden boxes forced visible first. The first version passed on a screen the base bar was not even on, which found nothing; with the boxes visible it immediately found two unreported collisions. |
 | `vrprobe` game over | Reached game over by a debug shortcut and pressed A by calling the handler. | Dies the way a player dies and presses A through the real gamepad loop. (v0.18.0) |
 | `gymprobe` | Written this way from the start: asserts arrival, not intent. | Found 7 real movement bugs on its first run. (v0.17.0) |
+| `vrprobe` torch | No check existed; Ola found the dead switch in the headset. | Pulls the real trigger through the real listener, on a dark level, and watches the beam rather than the flag. Both new checks first ran on the WRONG LEVEL (see LESSONS.md) and now assert they arrived before asserting anything else. |
 
 Still to convert: `holdoutprobe`, `traverseprobe`, `interactprobe`,
 `droneprobe`, `navprobe`, `rampprobe`, `groundprobe`, `recoilprobe`,

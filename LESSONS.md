@@ -213,3 +213,28 @@ new entries in the same format: Symptom, Cause, Solution.
   panel) be driven and asserted. Poses must be written to `.matrix` and
   decomposed, because three sets `matrixAutoUpdate = false` on those
   groups.
+
+## A probe can go to the wrong place and still say GREEN (v0.18.3)
+
+**Symptom.** Two probes reported that a feature worked "underground" and
+"on a traverse level". Both were on floor 1, in daylight, the whole time.
+
+**Cause.** They opened the game with `?level=2`. There is no `level` URL
+parameter. An unknown query parameter is not an error, it is just
+ignored, so the page loaded floor 1 and every assertion after it was
+about the wrong level. The real way in is `debugGotoLevel(2)`.
+
+**Solution.** Two parts, and the second is the one that generalises:
+
+1. Use `debugGotoLevel(n)`.
+2. **Assert that you arrived.** Both probes now check the level they are
+   standing on before checking anything about it: `debugArchetype() ===
+   'traverse'`, `debugTorch().dark === true`. A setup step that can fail
+   silently will eventually fail silently, and a green test on the wrong
+   level is worse than no test, because it is evidence for a claim it
+   never examined.
+
+Related: the reload gesture that was changelogged as shipped and never
+wired up, and the HUD overlap check that passed on a screen the
+overlapping box was not on. Same family: the test ran, the test was
+green, the test never looked at the thing.

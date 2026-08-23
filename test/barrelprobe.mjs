@@ -159,7 +159,13 @@ console.log('MINES');
 // half the campaign, which is exactly what the phase gate used to do.
 console.log('MINES UNDERGROUND');
 {
-  const page = await open('?seed=11&level=2');
+  const page = await open('?seed=11');
+  // No ?level= parameter exists. The first version of this asked for one,
+  // got floor 1, and cheerfully reported that mines work underground.
+  await page.evaluate(() => window.__zhr.debugGotoLevel(2));
+  await page.waitForTimeout(600);
+  const arch = await page.evaluate(() => window.__zhr.debugArchetype());
+  note(arch === 'traverse', `this check is on a traverse level (${arch})`);
   await page.evaluate(() => {
     window.__zhr.debugGiveMines(3);
     const p = window.__zhr.playerPos();

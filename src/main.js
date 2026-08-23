@@ -87,7 +87,9 @@ if (QUALITY === 'DESKTOP') {
   sun.shadow.camera.top = s; sun.shadow.camera.bottom = -s;
   sun.shadow.camera.far = 150;
 }
-// Headlamp-style flashlight (auto-on in dark levels, F toggles on desktop).
+// The FLAT player's torch: an eye-mounted cone, because a flat player has
+// no hand to carry one from. Auto-on in dark levels, F toggles it. Never
+// lit in VR, where the light comes from the off hand instead.
 const flashlight = new THREE.SpotLight(0xd8e8ff, 0, 26, 0.62, 0.7, 1.0);
 const flashlightTarget = new THREE.Object3D();
 flashlightTarget.position.set(0, 0, -6);
@@ -2932,7 +2934,13 @@ function updateVrReadouts() {
   vrInput.setAmmoTag(info.mag, info.magMax, info.reloading);
   // A lit torch in bright daylight is absurd. On surface levels the hand
   // simply carries the tool; underground it actually lights the way.
-  vrInput.setHandLight(!level.daylight && (flashlightOn || !!level.lighting.dark));
+  //
+  // The toggle is the authority. This used to read `flashlightOn ||
+  // level.lighting.dark`, which meant that underground the lamp was
+  // permanently on and the switch did nothing, on exactly the levels
+  // where you would want to turn it off. The level's darkness decides the
+  // DEFAULT (set on arrival), not the current state.
+  vrInput.setHandLight(!level.daylight && flashlightOn);
 }
 
 // ---- HUD phase text -----------------------------------------------------
@@ -3295,7 +3303,16 @@ renderer.setAnimationLoop(() => {
   }
 
   // Flashlight follows its toggle.
-  flashlight.intensity += ((flashlightOn ? 15 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
+  //
+  // NO HEADLAMP IN VR. Ola: "there is also a headlamp that should not
+  // exist yet. Remove it." In a headset this light is mounted on your
+  // face, which is both wrong and a spoiler for gear that has not been
+  // earned: light comes from the hand that carries the torch. On a flat
+  // screen there is no hand to carry it from, so the eye-mounted cone
+  // stays and F is still its switch. A real headlamp is parked in
+  // docs/TODO.md as a scrap unlock.
+  const headLampAllowed = !(vrInput && vrInput.active);
+  flashlight.intensity += (((flashlightOn && headLampAllowed) ? 15 : 0) - flashlight.intensity) * Math.min(1, dt * 10);
   beamMesh.material.opacity = (flashlight.intensity / 15) * (level.lighting.dark ? 0.055 : 0);
 
   updateMapMarkers();
@@ -3662,6 +3679,16 @@ window.__zhr = {
   debugVrButtonA: () => (vrInput ? vrInput.debugPressButton('right', 4) : false),
   debugVrButtonB: () => (vrInput ? vrInput.debugPressButton('right', 5) : false),
   debugVrButtonY: () => (vrInput ? vrInput.debugPressButton('left', 5) : false),
+  // The torch: is it lit, and does the empty hand's trigger work it?
+  debugVrTrigger: (hand) => (vrInput ? vrInput.debugPullTrigger(hand) : null),
+  debugArchetype: () => level.archetype || level.type || null,
+  debugTorch: () => ({
+    dark: !!level.lighting.dark,
+    // What is actually shining, not what a flag says.
+    hand: !!(vrInput && vrInput.handLightOn),
+    head: flashlight.intensity > 1,
+    toggle: flashlightOn,
+  }),
   debugMenuState: () => {
     const m = debugMenu;
     return {

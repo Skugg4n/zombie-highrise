@@ -1,5 +1,38 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.18.3 - 2026-08-24 - the torch gets a switch, the headlamp goes away
+
+**The flashlight had no switch in VR.** Ola: "the flashlight in the hand
+does not toggle on the trigger. It should." The only switch was the F
+key, which does not exist in a headset, so the lamp could only ever be
+turned on by the level being dark. The empty hand's trigger is the
+torch's switch now, which was the missing half of a fix already in the
+file: the hand that is not holding a gun does not shoot, and it took
+until now to say what it does instead.
+
+The toggle is also authoritative. It used to read "lit if you switched it
+on OR the level is dark", which meant that underground the lamp was
+permanently on and the switch did nothing, on exactly the levels where
+you would want to turn it off. Darkness now sets the DEFAULT on arrival
+and the switch owns it from there.
+
+**No more headlamp.** Ola: "there is also a headlamp that should not
+exist yet. Remove it." In a headset that light was mounted on your face,
+which is both wrong and a spoiler for gear that has not been earned.
+Nothing shines from the camera in VR. The flat screen keeps its
+eye-mounted cone, because a flat player has no hand to carry a torch
+from. A real headlamp is parked in docs/TODO.md as a scrap unlock beside
+the laser and the holo sight.
+
+**Two probes were testing floor 1 while claiming to test floor 2.** Both
+opened the game with `?level=2`. There is no `level` URL parameter, and an
+unknown query parameter is silently ignored, so every "underground"
+assertion was made in daylight. Fixed, and both probes now assert they
+arrived before asserting anything about where they are. Written up in
+LESSONS.md, because this is the same family as the reload gesture that
+was never wired up and the HUD check that ran on a screen the box was
+not on: the test ran, the test was green, the test never looked.
+
 ## v0.18.2 - 2026-08-24 - explosives that talk to each other
 
 **The two MINE buttons were worse than duplicates.** Ola: "MINE and

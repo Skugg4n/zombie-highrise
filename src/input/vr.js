@@ -67,7 +67,18 @@ export class VRInput {
         // BUG (Ola): "the flashlight fires bullets." Since the off hand
         // started carrying a torch, its trigger was still wired to the
         // gun. Only a hand actually holding a weapon can shoot.
-        if (!this._holdsGun(controller)) return;
+        //
+        // And the other half of the same thought, which was missing:
+        // if the hand is NOT holding a gun it is holding the torch, so
+        // its trigger is the torch's switch. Ola: "the flashlight in the
+        // hand does not toggle on the trigger. It should." Before this
+        // the only switch was the F key, which does not exist in a
+        // headset, so the lamp could only ever be turned on by the level
+        // being dark.
+        if (!this._holdsGun(controller)) {
+          if (this.ctx.actions.flashlight) this.ctx.actions.flashlight();
+          return;
+        }
         this.firingController = controller;
         this.fireHeld = true;
         this._fireFrom(controller);
@@ -227,7 +238,7 @@ export class VRInput {
       })();
       if (saved) this.wrist.setCalibration(saved.pip, saved.tilt);
     }
-    const left = this.hands.left || this.grips[1] || this.grips[0];
+    const left = this.gripFor('left');
     if (left) {
       this.wrist.attachTo(left);
       if (this.wrist.bracelet) left.add(this.wrist.bracelet);
@@ -303,6 +314,30 @@ export class VRInput {
     src.gamepad.buttons[index] = { pressed: false };
     this.update(1 / 60);                    // and the frame that sees release
     return true;
+  }
+
+  // Which grip is which hand. `this.hands` is filled in by the controller
+  // `connected` event, which does not fire for every runtime and does not
+  // fire at all in a test, so every caller needs the same fallback: the
+  // main hand is grip 0 and the off hand is grip 1. That fallback was
+  // written out by hand in four places and now lives here once.
+  gripFor(hand) {
+    if (hand === 'right') return this.hands.right || this.grips[0];
+    return this.hands.left || this.grips[1] || this.grips[0];
+  }
+
+  // TEST SEAM: pull a trigger, through the listener the runtime calls.
+  // Returns whether that hand was holding a gun, which is the thing that
+  // decides whether the trigger shoots or works the torch.
+  debugPullTrigger(hand) {
+    const grip = this.gripFor(hand);
+    const i = this.grips.indexOf(grip);
+    const controller = this.controllers[i];
+    if (!controller) return null;
+    const armed = this._holdsGun(controller);
+    controller.dispatchEvent({ type: 'selectstart' });
+    controller.dispatchEvent({ type: 'selectend' });
+    return { armed };
   }
 
   // Called every frame from the game with everything a flat player can

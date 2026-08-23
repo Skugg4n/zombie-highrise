@@ -45,8 +45,16 @@ doing the bookkeeping. That is my job.
       character controller, and the gym has a station that reproduces it:
       "a ramp cannot be entered from the side: you are stopped, not
       absorbed".
-- [ ] The hand flashlight does not toggle on the trigger. It should.
-- [ ] Remove the headlamp. It should not exist yet.
+- [x] (v0.18.3) The hand flashlight does not toggle on the trigger. It
+      should. The empty hand's trigger is the torch's switch now. The
+      toggle is also authoritative: it used to read "on if you toggled it
+      OR the level is dark", so underground the lamp was permanently lit
+      and the switch did nothing on exactly the levels where you want it.
+- [x] (v0.18.3) Remove the headlamp. It should not exist yet. Nothing
+      shines from the camera in VR any more; light comes from the hand
+      that carries the torch. The flat screen keeps its eye-mounted cone,
+      because a flat player has no hand to carry one from. A real headlamp
+      is parked below as a scrap unlock.
 - [x] (v0.18.1) Desktop HUD overlaps at the top: the objective banner and
       the base integrity bar collide and become unreadable. The top of the
       screen is one three-cell grid now, not five independent absolute
@@ -227,6 +235,11 @@ Ticked with the version that shipped it.
 ## Parked, with reasons
 
 Deliberately not being done now. Not forgotten, not silently open.
+
+- **The headlamp, as a scrap unlock.** Removed in v0.18.3 because it
+  existed without being earned. It belongs in the same shelf as the laser
+  and the holo sight: gear you buy, which frees your off hand from the
+  torch and is therefore a real decision rather than a free upgrade.
 
 - **Co-located VR mode** (several headsets in one physical room). Needs an
   alignment ritual because WebXR gives each headset its own origin AND

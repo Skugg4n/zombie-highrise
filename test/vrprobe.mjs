@@ -56,6 +56,82 @@ check(hands && hands.includes('light'), 'the off hand carries the flashlight',
 check(hands && hands.filter((h) => h === 'light').length === 1,
   'exactly one hand carries the flashlight');
 
+// ---- 2b. The torch has a switch, and it is not on your face ----
+// Ola in the headset: "the flashlight in the hand does not toggle on the
+// trigger" and "there is also a headlamp that should not exist yet."
+// Both are things you can SEE: whether the beam changes when you squeeze,
+// and whether a light is mounted on the camera.
+{
+  const torch = await page.evaluate(() => {
+    const D = window.__zhr;
+    // Whichever hand is actually carrying the torch. Grip 0 is the main
+    // hand, so a torch in slot 0 means the hands are swapped.
+    const which = D.debugHands().indexOf('light') === 0 ? 'right' : 'left';
+    const before = D.debugTorch();
+    const pull = D.debugVrTrigger(which);
+    const after = D.debugTorch();
+    const ammoBefore = D.ammo();
+    D.debugVrTrigger(which);              // and back again
+    return { which, before, after, pull, ammoBefore, ammoAfter: D.ammo(),
+      back: D.debugTorch() };
+  });
+  check(torch.pull && torch.pull.armed === false,
+    'the torch hand is not holding a gun');
+  check(torch.after.toggle !== torch.before.toggle,
+    'pulling the torch hand trigger changes the light',
+    JSON.stringify([torch.before, torch.after]));
+  check(torch.back.toggle === torch.before.toggle,
+    'pulling it again puts the light back');
+  check(torch.ammoAfter === torch.ammoBefore,
+    'the torch trigger never spends a round',
+    `${torch.ammoBefore} -> ${torch.ammoAfter}`);
+  check(torch.before.head === false && torch.after.head === false,
+    'no headlamp: nothing is shining from the camera in VR',
+    JSON.stringify([torch.before.head, torch.after.head]));
+
+  // Floor 1 is daylight, where a lit torch would be absurd, so the switch
+  // flipping there proves the wiring and nothing more. The thing a player
+  // actually cares about is the beam, and the only place a beam matters
+  // is underground. Same trigger, dark level, watch the light itself.
+  const dark = await browser.newPage();
+  dark.on('pageerror', (e) => errors.push(e.message));
+  await dark.goto(`http://localhost:${server.address().port}/index.html?seed=5`);
+  await dark.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
+  await dark.click('#btn-solo');
+  await dark.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 8000 });
+  // There is no ?level= URL parameter. Asking for one loads floor 1 and
+  // says nothing, which is how the first version of this check "passed"
+  // a daylight level while claiming to test a dark one.
+  await dark.evaluate(() => window.__zhr.debugGotoLevel(2));
+  await dark.waitForTimeout(500);
+  const isDark = await dark.evaluate(() => window.__zhr.debugTorch().dark);
+  check(isDark === true, 'the underground check is actually underground');
+  await dark.evaluate(() => window.__zhr.debugEnterVR(true));
+  await dark.waitForTimeout(400);
+  const beam = await dark.evaluate(async () => {
+    const D = window.__zhr;
+    // The beam is set once per rendered frame from the toggle, so a read
+    // on the line after the trigger is a read of the previous frame.
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const which = D.debugHands().indexOf('light') === 0 ? 'right' : 'left';
+    const lit = D.debugTorch();
+    D.debugVrTrigger(which);
+    await frame();
+    const off = D.debugTorch();
+    D.debugVrTrigger(which);
+    await frame();
+    return { lit, off, back: D.debugTorch() };
+  });
+  check(beam.lit.hand === true,
+    'underground the torch is lit when you arrive', JSON.stringify(beam.lit));
+  check(beam.off.hand === false,
+    'and the trigger can turn it OFF down there', JSON.stringify(beam.off));
+  check(beam.back.hand === true, 'and on again');
+  check(beam.lit.head === false && beam.off.head === false,
+    'still no headlamp on a dark level');
+  await dark.close();
+}
+
 // ---- 3. Manual reload works in VR (regression guard) ----
 // Point the barrel at the floor and hold: this is the whole gesture, and
 // it silently stopped working once before.
