@@ -16,6 +16,14 @@ export const SPECS = {
   2: L2,
 };
 
+// The first spec of a given archetype, used by floors whose type is set
+// but whose own sketch has not arrived yet. Keeps the campaign playable
+// without inventing a layout nobody asked for.
+export function specForArchetype(archetype) {
+  for (const s of Object.values(SPECS)) if (s.archetype === archetype) return s;
+  return null;
+}
+
 export function specFor(levelIndex) {
   return SPECS[levelIndex] || null;
 }

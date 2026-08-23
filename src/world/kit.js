@@ -233,6 +233,13 @@ export function roomscaleZone(level, x, z) {
 export function makeHeightAt(level, baseY = 0) {
   return (x, z) => {
     let best = baseY;
+    // A PIT HAS A FLOOR. `lowered` regions replace the base floor with a
+    // lower one, which is the only way ground below baseY can be reached:
+    // the search below only ever takes HIGHER tops, so a floor under the
+    // main floor was invisible and every pit was bottomless.
+    for (const p of level.lowered || []) {
+      if (Math.abs(x - p.x) <= p.hx && Math.abs(z - p.z) <= p.hz) best = p.floorY;
+    }
     for (const p of level.ramps) {
       if (Math.abs(x - p.x) <= p.hx && Math.abs(z - p.z) <= p.hz && p.top > best) best = p.top;
     }

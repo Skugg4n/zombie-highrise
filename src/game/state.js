@@ -538,8 +538,30 @@ export class HostSim {
         p.inv.k = 0; p.inv.m = 0; p.inv.nv = false;
         p.inv.s = TUNING.economy.startingScrap;
       }
+      // THE ARRIVAL POINT IS VERIFIED CLEAR before anyone stands on it.
+      // Landing on a level and immediately taking damage from something
+      // you cannot see is the worst first impression a level can make.
+      this._clearArrival(p.pos);
       // TELL EVERYONE. A reset the client never hears about is the bug.
       this.events.push({ e: 'respawn', id, hp: p.hp, at: p.pos.toArray() });
+    }
+  }
+
+  // Push anything already standing on an arrival point away from it. This
+  // runs at placement time, when the horde may already exist: the spawn
+  // radius alone cannot help with a body that walked there first.
+  _clearArrival(pos) {
+    const safe = TUNING.pacing.spawnSafeRadius;
+    for (const z of this.zombies.values()) {
+      if (!z.alive) continue;
+      const dx = z.pos.x - pos.x, dz = z.pos.z - pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= safe * safe) continue;
+      const d = Math.sqrt(d2) || 1;
+      z.pos.x = pos.x + (dx / d) * (safe + 1.0);
+      z.pos.z = pos.z + (dz / d) * (safe + 1.0);
+      z.path = null;
+      this._placeOnGround(z);
     }
   }
 
@@ -1028,6 +1050,31 @@ export class HostSim {
       p.x = nav.worldX(cx);
       p.z = nav.worldZ(cz);
     }
+    // NOBODY SPAWNS IN YOUR LAP. Ola took damage every second at his
+    // arrival point and died without ever seeing what hit him, because
+    // something was born on top of him. A spawn inside the safe radius is
+    // pushed straight out along the line away from the nearest player, so
+    // whatever arrives is at least visible before it reaches you.
+    const safe = TUNING.pacing.spawnSafeRadius;
+    for (let tries = 0; tries < 4; tries++) {
+      let worst = null, wd = safe * safe;
+      for (const q of this.players.values()) {
+        if (q.down) continue;
+        const dx = p.x - q.pos.x, dz = p.z - q.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < wd) { wd = d2; worst = q; }
+      }
+      if (!worst) break;
+      const dx = p.x - worst.pos.x, dz = p.z - worst.pos.z;
+      const d = Math.hypot(dx, dz) || 1;
+      p.x = worst.pos.x + (dx / d) * (safe + 0.5);
+      p.z = worst.pos.z + (dz / d) * (safe + 0.5);
+      if (nav) {
+        const [cx, cz] = nav.nearestFree(p.x, p.z);
+        p.x = nav.worldX(cx);
+        p.z = nav.worldZ(cz);
+      }
+    }
     const gy = groundHeight(this.level, p.x, p.z, Infinity);
     p.y = Number.isFinite(gy) ? gy : (this.level.baseY || 0);
     return p;
@@ -1300,6 +1347,10 @@ export class HostSim {
         // jump, a level swap) must not strand the phase machine here:
         // without an exit zone there is nothing for this phase to do.
         if (!this.level.exitZone) { this._enterDay(false); break; }
+        // NO WAVE DIRECTOR HERE. A traverse is a route from A to B where
+        // you clear what stands in the way, not a siege you survive. The
+        // wave counter, the night number and the modifier all stay out of
+        // it: what is on the level is what you have to get past.
         const T = TUNING.pacing.route;
         // ADVANCING is what summons them. Cross a quarter of the room and
         // the holes answer; stand still and the pressure stays where you

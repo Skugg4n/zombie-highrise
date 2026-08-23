@@ -35,7 +35,7 @@ export const TUNING = {
   floorHooks: {
     1: { name: 'THE FIELD', note: 'Nowhere to run. Hold the base and watch the haze.' },
     2: { name: 'THE UNDERWORKS', note: 'Get to the far corner.', mod: 'blackout' },
-    3: { name: 'OFFICES', note: 'They climb the facade and ride the shaft.' },
+    3: { name: 'THE SECOND FIELD', note: 'Same drill. Worse odds.' },
     4: { name: 'THE YARD AGAIN', note: 'Same ground, worse odds.', mod: 'fog' },
     5: { name: 'THE TRENCH', note: 'Nowhere to run. Use the firing steps.' },
     6: { name: 'THE WAGON', note: 'Rolling. They board from both ends.' },
@@ -274,6 +274,10 @@ export const TUNING = {
   // create grenade/mine moments. Nights land at 45-90 s. Day 45 s,
   // skippable when everyone readies up.
   pacing: {
+    // Nothing may be born closer than this to a living player. Ola died at
+    // his own arrival point to something he never saw.
+    spawnSafeRadius: 6.0,
+
     // ROUTE LEVELS (traverse). No clock: pressure is a function of how
     // far the squad has pushed. Standing still is uncomfortable, not
     // fatal; advancing is what opens the holes.

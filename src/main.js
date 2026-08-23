@@ -9,6 +9,7 @@ import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
 import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
 import { LOCO, moveAndCollide, blockingFor } from './game/locomotion.js';
+import { CharacterController, BODY } from './game/controller.js';
 import { NavGrid } from './game/navgrid.js';
 import { voidBlocker } from './world/levelkit.js';
 import { InteractionLayer } from './world/interact.js';
@@ -191,7 +192,7 @@ function loadLevel(idx) {
   doorT = 0;
   toggleMap(false);
   const spawn = level.playerSpawns[0];
-  rig.group.position.copy(spawn);
+  placePlayer(spawn.x, spawn.z);
   rig.group.rotation.y = rig.yaw = 0;
   // VR re-center: put the HEAD on the level's marked ROOMSCALE ZONE, so a
   // roomscale player's real floor maps onto the patch of level that is
@@ -199,9 +200,11 @@ function loadLevel(idx) {
   // shoot far and walk near (the elevator trick from the vision doc).
   if (vrInput && vrInput.active) {
     const rz = level.roomZone;
-    if (rz) rig.group.position.set(rz.x, rig.group.position.y, rz.z);
+    if (rz) placePlayer(rz.x, rz.z);
     rig.group.position.x -= camera.position.x;
     rig.group.position.z -= camera.position.z;
+    controller.pos.x = rig.group.position.x;
+    controller.pos.z = rig.group.position.z;
   }
   if (sim) sim.setLevel(level);
   rebuildEntryArrows();
@@ -209,10 +212,23 @@ function loadLevel(idx) {
 
 // ---- Player rig ---------------------------------------------------------
 const rig = { group: new THREE.Group(), yaw: 0, pitch: 0, camera };
-const playerVel = new THREE.Vector3();   // vertical velocity for gravity
+
+// THE ONE WAY THE PLAYER IS PLACED. Setting the rig position by hand left
+// the controller believing the player was still somewhere else, which is
+// how a body ends up half inside geometry with no way out.
+function placePlayer(x, z, y = null) {
+  controller.place(level, x, z, y);
+  rig.group.position.copy(controller.pos);
+  playerVel.set(0, 0, 0);
+}
+const playerVel = new THREE.Vector3();   // legacy scratch, probes only
+// ONE controller. Everything that moves the local player goes through it.
+const controller = new CharacterController();
+let probeDrivesMovement = false;   // a movement probe has taken the wheel
 camera.position.set(0, CONFIG.PLAYER_HEIGHT, 0);
 rig.group.add(camera);
 rig.group.position.copy(level.playerSpawns[0] || new THREE.Vector3());
+controller.pos.copy(rig.group.position);
 scene.add(rig.group);
 applyLevelLighting(level);
 
@@ -2246,7 +2262,7 @@ function handleEvents(evs) {
           setDowned(false);
           myHp = ev.hp;
           hud.setHealth(myHp);
-          if (ev.at) rig.group.position.fromArray(ev.at);
+          if (ev.at) placePlayer(ev.at[0], ev.at[2]);
           playerVel.set(0, 0, 0);
           arsenal.cancelReload && arsenal.cancelReload();
           updateLowHpVignette();
@@ -2846,50 +2862,55 @@ renderer.setAnimationLoop(() => {
         if (shakeT <= 0) shakeAmp = 0;
       }
       // Downed players sink to the floor with a sideways slump.
-      const eyeTarget = myDown ? 0.55 : CONFIG.PLAYER_HEIGHT;
+      // DERIVED from state every frame. Ola stayed permanently short after
+      // a fall because this was mutated once and left stale.
+      const eyeTarget = controller.eyeHeight(myDown);
       camera.position.y += (eyeTarget - camera.position.y) * Math.min(1, dt * 2.4);
       const rollTarget = myDown ? 0.16 : 0;
       camera.rotation.z += (rollTarget - camera.rotation.z) * Math.min(1, dt * 2.4);
     }
-    // ---- Ground and collision (real, not teleport-to-height) ---------
-    // The input layers write into rig.group.position directly, so we treat
-    // the frame's horizontal displacement as this frame's velocity and run
-    // it through the character controller: step-up, slope, gravity, falls.
-    const ref = inVR ? camera.getWorldPosition(tmpV) : rig.group.position;
-    if (inVR) {
-      const before = tmpV.clone();
-      resolveCircle(tmpV, 0.3, blockingFor(level, rig.group.position.y));
-      rig.group.position.x += tmpV.x - before.x;
-      rig.group.position.z += tmpV.z - before.z;
-    } else {
-      resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
-    }
-    // Vertical is honest for everyone: you step up, you walk down, and if
-    // there is nothing under you, you fall.
-    //
-    // VR NOTE (Ola: "the ramp is wonky and the player sometimes falls
-    // through it"). In roomscale the player can be two metres from the
-    // rig's origin, so sampling the ground under the RIG samples the
-    // wrong place entirely: you stand on the ramp while the game decides
-    // your feet are on the floor beside it. The controller therefore runs
-    // at the CAMERA's ground position in VR, and the resulting height is
-    // carried back to the rig, which is what actually moves.
-    playerVel.x = 0; playerVel.z = 0;
-    let grounded;
-    if (inVR) {
+    // ---- MOVEMENT: one controller, every platform ---------------------
+    // Input reported where the player WANTS to go. The controller decides
+    // where they actually end up: swept so nothing is tunnelled through,
+    // ground taken from the feet, step-up and slope enforced, gravity and
+    // landing real, and never stuck.
+    let wishX = 0, wishZ = 0;
+    for (const i of inputs) { wishX += i.wishX || 0; wishZ += i.wishZ || 0; }
+    // A probe driving the controller directly owns it exclusively for the
+    // duration. Two things stepping the same body interleave, and the
+    // measurement stops meaning anything.
+    if (probeDrivesMovement) { wishX = 0; wishZ = 0; }
+
+    if (probeDrivesMovement) {
+      rig.group.position.copy(controller.pos);
+    } else if (inVR) {
+      // ROOMSCALE. The player's real steps move the camera, not the rig,
+      // so the body follows the CAMERA and any correction is applied back
+      // to the rig. Sampling the rig origin samples a place the player is
+      // not standing, which is what made ramps behave like ice.
       const cam = camera.getWorldPosition(tmpV2);
-      vrFeet.set(cam.x, rig.group.position.y, cam.z);
-      grounded = moveAndCollide(level, vrFeet, playerVel, dt, [], LOCO.radius);
-      rig.group.position.y = vrFeet.y;
+      const wantX = cam.x, wantZ = cam.z;
+      controller.pos.x = wantX;
+      controller.pos.z = wantZ;
+      controller.step(level, dt, wishX, wishZ);
+      // Whatever the controller refused, the rig gives back, so the
+      // player's head cannot end up inside a wall.
+      rig.group.position.x += controller.pos.x - wantX;
+      rig.group.position.z += controller.pos.z - wantZ;
+      rig.group.position.y = controller.pos.y;
     } else {
-      grounded = moveAndCollide(
-        level, rig.group.position, playerVel, dt, [], LOCO.radius);
+      controller.step(level, dt, wishX, wishZ);
+      rig.group.position.copy(controller.pos);
     }
-    // Falling out of the world (off a balcony, into a chasm) is a death,
-    // not an eternal descent.
-    if (!grounded && rig.group.position.y < (level.baseY || 0) - 25) {
-      rig.group.position.copy(level.playerSpawns[0]);
-      playerVel.set(0, 0, 0);
+
+    if (controller.landed > 6) addShake(Math.min(0.05, controller.landed * 0.004));
+
+    // Out of the world entirely. Put them back on their feet somewhere
+    // valid: no player may ever be unable to continue.
+    if (controller.fellOutOfWorld) {
+      const spawn = level.playerSpawns[0];
+      controller.place(level, spawn.x, spawn.z);
+      rig.group.position.copy(controller.pos);
       if (sim) sim.damagePlayer('H', 45);
       showToast('You fell.', 2200);
     }
@@ -3174,7 +3195,9 @@ window.__zhr = {
     return out;
   },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
-  debugTeleport: (x, z) => { rig.group.position.x = x; rig.group.position.z = z; },
+  // Teleports go through the same door, so a probe cannot put the player
+  // somewhere the controller does not know about.
+  debugTeleport: (x, z) => placePlayer(x, z),
   debugLook: (x, z) => {
     rig.yaw = Math.atan2(rig.group.position.x - x, rig.group.position.z - z);
     rig.pitch = 0;
@@ -3678,6 +3701,63 @@ window.__zhr = {
     playerVel.set(0, 0, 0);
     return out;
   },
+
+  // ---- Movement probe surface ----
+  // Walk the real controller, with real input intent, and report what a
+  // player would observe: where they ended up, whether they were stopped,
+  // whether they fell, whether they landed, whether they got stuck.
+  debugWalk: async (fromX, fromZ, toX, toZ, seconds = 2.5, speed = 4.0) => {
+    probeDrivesMovement = true;
+    placePlayer(fromX, fromZ);
+    const start = controller.pos.clone();
+    const dx = toX - fromX, dz = toZ - fromZ;
+    const d = Math.hypot(dx, dz) || 1;
+    const vx = (dx / d) * speed, vz = (dz / d) * speed;
+    let blocked = 0, recovered = 0, maxFall = 0, landedAt = 0;
+    let minY = Infinity, maxY = -Infinity;
+    // Step by REAL elapsed time, so `seconds` means seconds of movement.
+    // Stepping a fixed 1/60 per 16 ms of wall clock ran the simulation at
+    // roughly half speed, and every distance assertion silently meant half
+    // of what it said.
+    const t0 = performance.now();
+    let last = t0;
+    while ((performance.now() - t0) / 1000 < seconds) {
+      await new Promise((r) => setTimeout(r, 16));
+      const now = performance.now();
+      const step = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      controller.step(level, step, vx, vz);
+      rig.group.position.copy(controller.pos);
+      if (controller.blocked) blocked++;
+      if (controller.recovered) recovered++;
+      if (controller.landed > 0) landedAt = controller.landed;
+      maxFall = Math.max(maxFall, controller.airTime);
+      minY = Math.min(minY, controller.pos.y);
+      maxY = Math.max(maxY, controller.pos.y);
+      if (controller.fellOutOfWorld) break;
+    }
+    probeDrivesMovement = false;
+    return {
+      from: [+start.x.toFixed(2), +start.y.toFixed(2), +start.z.toFixed(2)],
+      to: [+controller.pos.x.toFixed(2), +controller.pos.y.toFixed(2), +controller.pos.z.toFixed(2)],
+      travelled: +Math.hypot(controller.pos.x - start.x, controller.pos.z - start.z).toFixed(2),
+      climbed: +(controller.pos.y - start.y).toFixed(2),
+      lowestY: +minY.toFixed(2),
+      // The HIGHEST point reached, which is what "did you get up there"
+      // actually means. End-minus-start reads zero for anyone who walks
+      // up something and off the far side.
+      peakY: +maxY.toFixed(2),
+      peakClimb: +(maxY - start.y).toFixed(2),
+      blockedFrames: blocked,
+      recoveredFrames: recovered,
+      airTime: +maxFall.toFixed(2),
+      landedAt: +landedAt.toFixed(1),
+      grounded: controller.grounded,
+      outOfWorld: controller.fellOutOfWorld,
+      eyeHeight: +controller.eyeHeight(myDown).toFixed(2),
+    };
+  },
+  debugStations: () => (level.gymStations || []),
 
   debugRamps: () => (level.ramps || []).map((r) => ({
     x: +r.x.toFixed(2), z: +r.z.toFixed(2), top: +r.top.toFixed(2),

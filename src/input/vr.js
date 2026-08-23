@@ -43,6 +43,8 @@ export class VRInput {
     this.fireHeld = false;
     this.firingController = null;
     this.prevButtons = new Map();               // inputSource -> [bool,...]
+    this.wishX = 0;
+    this.wishZ = 0;   // desired velocity, m/s; the controller applies it
     this.weaponKind = 'pistol';
     this._q = new THREE.Quaternion();           // scratch, avoid per-frame allocation
     this._fwd = new THREE.Vector3();
@@ -521,6 +523,8 @@ export class VRInput {
   }
 
   update(dt) {
+    this.wishX = 0;
+    this.wishZ = 0;
     if (!this.active) return;
     const session = this.ctx.renderer.xr.getSession() || this._fakeSession;
     if (!session) return;
@@ -561,10 +565,14 @@ export class VRInput {
       const x = gp.axes[2], y = gp.axes[3];
       if (src.handedness === 'left' && stationary) {
         if (Math.abs(x) > 0.12 || Math.abs(y) > 0.12) {
+          // Intent, not position. Stick locomotion goes through the same
+          // character controller as everything else, so a VR player is
+          // stopped by the same walls as a desktop one.
           const fwd = this._headForward();
           const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
           const move = fwd.multiplyScalar(-y).add(right.multiplyScalar(x));
-          this.ctx.rig.group.position.addScaledVector(move, CONFIG.VR_MOVE_SPEED * dt);
+          this.wishX = move.x * CONFIG.VR_MOVE_SPEED;
+          this.wishZ = move.z * CONFIG.VR_MOVE_SPEED;
         }
       }
       if (src.handedness === 'right' && stationary) {

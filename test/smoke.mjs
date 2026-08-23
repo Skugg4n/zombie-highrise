@@ -332,7 +332,7 @@ console.log('LEVEL TYPES');
   await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
   await page.click('#btn-solo');
   await page.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
-  for (const [n, expect] of [[2, 'traverse'], [3, 'upper'], [4, 'ground'], [5, 'trench'], [6, 'wagon']]) {
+  for (const [n, expect] of [[2, 'traverse'], [3, 'holdout'], [4, 'ground'], [5, 'trench'], [6, 'wagon']]) {
     await page.evaluate((lv) => window.__zhr.debugGotoLevel(lv), n);
     await page.waitForTimeout(250);
     const type = await page.evaluate(() => window.__zhr.levelType());

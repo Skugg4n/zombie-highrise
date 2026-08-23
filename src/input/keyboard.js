@@ -12,6 +12,8 @@ export class KeyboardInput {
     this.ctx = ctx;               // shared input context, see main.js
     this.keys = new Set();
     this.fireHeld = false;
+    this.wishX = 0;
+    this.wishZ = 0;   // desired velocity, m/s; the controller applies it
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
@@ -87,7 +89,12 @@ export class KeyboardInput {
     });
   }
 
+  // Reports WHERE THE PLAYER WANTS TO GO, in metres per second. It does
+  // not move anything: the character controller owns position, and it is
+  // the only thing that does.
   update(dt) {
+    this.wishX = 0;
+    this.wishZ = 0;
     if (!this.ctx.isPlaying()) return;
     const rig = this.ctx.rig;
     let fwd = 0, str = 0;
@@ -97,9 +104,10 @@ export class KeyboardInput {
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) str += 1;
     if (!fwd && !str) return;
     const len = Math.hypot(fwd, str) || 1;
-    const speed = TUNING.player.walkSpeed * dt / len;
+    const speed = TUNING.player.walkSpeed / len;
     const sin = Math.sin(rig.yaw), cos = Math.cos(rig.yaw);
-    rig.group.position.x += (str * cos - fwd * sin) * speed;
-    rig.group.position.z += (-str * sin - fwd * cos) * speed;
+    this.wishX = (str * cos - fwd * sin) * speed;
+    this.wishZ = (-str * sin - fwd * cos) * speed;
+    void dt;
   }
 }

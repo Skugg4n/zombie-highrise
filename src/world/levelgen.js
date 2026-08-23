@@ -13,11 +13,12 @@
 // (the VISIBLE fiction for each entry: stairwell, shaft, breach, gate),
 // player spawns, barrels, the elevator and per-level lighting.
 import * as THREE from 'three';
-import { CONFIG } from '../config.js';
+import { CONFIG, PARAMS } from '../config.js';
 import { makeRng } from '../util/rng.js';
 import { PALETTE, MATS, mat, matT } from './materials.js';
 import { buildFromSpec } from './levelkit.js';
-import { specFor } from './levels/index.js';
+import { buildGym } from './gym.js';
+import { specFor, specForArchetype } from './levels/index.js';
 export { PALETTE, MATS };
 import { mergeStaticMeshes } from './merge.js';
 import {
@@ -37,9 +38,20 @@ export { LEVEL_SIZE };
 // THE REBUILD (docs/level-design.md): floor 1 is the first HOLDOUT level,
 // built to Ola's L1 sketch. The rest of the cycle is the old high-rise
 // rotation and stays until L1 is proven fun and the traverse level lands.
+// L3 DECISION (2026-08-23): floor 3 was 'upper', a high-rise floor from
+// the concept docs/level-design.md replaced. It is REMOVED rather than
+// re-themed: an office floor with balconies has no place in a campaign
+// about crossing a landscape, and re-theming it would cost more than the
+// holdout variant that belongs there. Floor 3 is a holdout again until it
+// gets its own sketch, which docs/level-design.md already calls for ("you
+// emerge somewhere new: a rooftop, a walled yard, inside a house").
+//
+// The remaining 'upper', 'basement' and 'trench' entries are the last of
+// the old hand-written builders. They stay until each has a sketch, and
+// they are the reason levelgen still carries those functions.
 export const LEVEL_TYPES = [
-  'holdout', 'traverse', 'upper', 'ground', 'trench', 'wagon',
-  'ground', 'basement', 'upper', 'ground', 'trench', 'boss',
+  'holdout', 'traverse', 'holdout', 'ground', 'trench', 'wagon',
+  'holdout', 'traverse', 'upper', 'ground', 'trench', 'boss',
 ];
 // A run is exactly FINAL_LEVEL floors long: floor 12 is the Butcher's
 // arena, and beating it triggers the roof finale (the run's win state).
@@ -1079,7 +1091,18 @@ export function buildLevel(scene, quality, runSeed, levelIndex) {
   // A floor described by a data file is built from that file. Everything
   // else falls through to the legacy hand-written builders below, which are
   // being retired archetype by archetype.
-  const spec = specFor(levelIndex);
+  // ?gym=1 boots the physics gym instead of the campaign: every movement
+  // hazard in one room, for testing movement without playing a level.
+  if (PARAMS.get('gym')) {
+    buildGym(level, quality);
+    mergeStaticMeshes(level.group);
+    scene.add(level.group);
+    return level;
+  }
+  // A floor with its own data file is built from it. A floor whose TYPE is
+  // an archetype but which has no sketch yet reuses the first spec of that
+  // archetype, so the campaign is playable while sketches are pending.
+  const spec = specFor(levelIndex) || specForArchetype(type);
   if (spec) buildFromSpec(level, spec, { rng, quality, makeElevator });
   else if (type === 'ground') buildGround(level, rng, quality);
   else if (type === 'basement') buildBasement(level, rng);

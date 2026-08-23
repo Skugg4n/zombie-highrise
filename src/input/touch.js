@@ -9,6 +9,8 @@ const STICK_RADIUS = 45;
 
 export class TouchInput {
   constructor(ctx) {
+    this.wishX = 0;
+    this.wishZ = 0;   // desired velocity, m/s; the controller applies it
     this.ctx = ctx;
     this.move = { x: 0, y: 0 };
     this.stickId = null;
@@ -121,14 +123,18 @@ export class TouchInput {
     this.nub.style.left = nx + 'px'; this.nub.style.top = ny + 'px';
   }
 
+  // Desired velocity only. The character controller owns position.
   update(dt) {
+    this.wishX = 0;
+    this.wishZ = 0;
     if (!this.ctx.isPlaying()) return;
     const { x, y } = this.move;
     if (!x && !y) return;
     const rig = this.ctx.rig;
-    const speed = TUNING.player.walkSpeed * dt;
+    const speed = TUNING.player.walkSpeed;
     const sin = Math.sin(rig.yaw), cos = Math.cos(rig.yaw);
-    rig.group.position.x += (x * cos + y * sin) * speed;
-    rig.group.position.z += (-x * sin + y * cos) * speed;
+    this.wishX = (x * cos + y * sin) * speed;
+    this.wishZ = (-x * sin + y * cos) * speed;
+    void dt;
   }
 }

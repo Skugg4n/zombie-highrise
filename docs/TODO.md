@@ -37,10 +37,10 @@ doing the bookkeeping. That is my job.
       and press the hand button to stow or draw.
 
 ### Bugs
-- [ ] The ramp still clips: solid only when entered from the LOWEST end;
-      entering from the higher side clips straight through. Add a
-      side-entry case to `test/rampprobe.mjs` FIRST, watch it go red, then
-      fix. (The current probe walks from the foot, which is why it passes.)
+- [x] (v0.17.0) The ramp clipping when entered from the side. Fixed by the
+      character controller, and the gym has a station that reproduces it:
+      "a ramp cannot be entered from the side: you are stopped, not
+      absorbed".
 - [ ] The hand flashlight does not toggle on the trigger. It should.
 - [ ] Remove the headlamp. It should not exist yet.
 - [ ] Desktop HUD overlaps at the top: the objective banner and the base
@@ -113,6 +113,34 @@ doing the bookkeeping. That is my job.
 ## Done
 
 Ticked with the version that shipped it.
+
+### The movement foundation (Ola, 2026-08-23)
+- [x] (v0.17.0) ONE authoritative movement system, swept so nothing is
+      tunnelled through. `src/game/controller.js`. Input now reports
+      DESIRED VELOCITY; only the controller moves anything.
+- [x] (v0.17.0) Real gravity, a fall state and a landing, with impact
+      speed reported so the game can react to it.
+- [x] (v0.17.0) Ground detection from the feet, including in roomscale VR
+      where the body follows the CAMERA and corrections go back to the rig.
+- [x] (v0.17.0) Step-up limit, and a slope limit measured over a 0.7 m
+      window rather than per sub-step. A per-step rise-over-run is infinite
+      at every slab edge, which rejected every ramp and staircase.
+- [x] (v0.17.0) Eye height derived from state every frame. Proven by the
+      gym: identical before and after a fall.
+- [x] (v0.17.0) Stuck recovery every frame, plus recovery from under the
+      floor. The gym drops a player inside a wall and walks them out.
+- [x] (v0.17.0) THE PHYSICS GYM at `?gym=1` with eight stations, and
+      `test/gymprobe.mjs` asserting observable outcomes on all of them. It
+      found seven real problems on its first run.
+- [x] (v0.17.0) `level.lowered`: a pit has a FLOOR. Ground below the base
+      floor was unreachable, so every pit was bottomless.
+- [x] (v0.17.0) No enemy spawns within 6 m of a living player, and the
+      arrival point is cleared of anything already standing on it before
+      players are placed.
+- [x] (v0.17.0) A traverse level does not run the wave director.
+- [x] (v0.17.0) L3 DECIDED: the high-rise floor is REMOVED, not re-themed.
+      Floor 3 is a holdout until it gets its own sketch. An office floor
+      with balconies has no place in a campaign about crossing a landscape.
 
 ### L2 playtest bugs (Ola, 2026-08-23)
 - [x] (v0.16.1) **Zombies do not attack at all on L2.** Verified before

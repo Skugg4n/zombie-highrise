@@ -1,5 +1,74 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.17.0 - 2026-08-23 - a real character controller, and a gym to keep it honest
+
+Ola's diagnosis, and it was right: clipping through a ramp from the side,
+falling through it in places, walking up its flank as if the world were
+flat, ground sampled at the wrong position, getting stuck in the chasm,
+becoming permanently short after a fall. Not separate bugs. One missing
+system.
+
+**Input reports intent; the controller owns position.** Every input layer
+used to write straight into the player's position and collision was a
+push-out applied afterwards, which fails exactly as listed, because by the
+time anything is checked the player is already inside the wall. Keyboard,
+touch and VR stick now all report a DESIRED VELOCITY and nothing else.
+
+`src/game/controller.js` enforces, in order:
+- **Swept, not discrete.** A frame's motion is split into steps no larger
+  than half the body radius. A discrete check lets a fast player skip past
+  a thin wall or land inside a ramp.
+- **The feet decide.** Ground is sampled at the body's real position. In
+  roomscale VR the body follows the CAMERA and corrections are applied
+  back to the rig, so a player two metres from the play-space origin is
+  not judged by what is under the origin.
+- **Step up or be stopped**, per axis, so a glancing hit costs you one
+  direction rather than all movement.
+- **The slope limit is measured over a 0.7 m window**, not per sub-step.
+  This was the subtle one: a ramp is built from slabs, so at every slab
+  edge the rise-over-run is infinite, and the first version rejected every
+  ramp and every staircase in the gym.
+- **Nothing is ever stuck**, including recovery from under the floor.
+- **Height is derived, never stored.** Ola stayed short after a fall
+  because eye height was mutated once and left stale.
+
+**THE PHYSICS GYM, at `?gym=1`.** Eight stations in one room: ramps at 15,
+30 and 50 degrees, stairs at the step-up limit, a 6 cm wall, a pit with a
+climbable end, a ledge, a narrow gap, a moving platform and a low ceiling.
+Walk it yourself in VR or flat; `test/gymprobe.mjs` walks it headlessly on
+every change, asserting observable outcomes only ("can you get up there",
+"did it stop you", "did you land", "could you always continue").
+
+It found seven real problems on its first run, including two of mine: a
+pit with no bottom, because ground below the base floor was unreachable by
+construction (there is a `level.lowered` concept now), and a moving
+platform taller than the step-up limit, which was correctly refusing to be
+boarded. **This is the movement regression suite permanently: a movement
+bug is not fixed until the gym has a station that reproduces it.**
+
+### Two gameplay errors alongside
+
+**Nobody spawns in your lap.** Ola took damage every second at his arrival
+point and died without ever seeing what hit him. Nothing is now born
+within six metres of a living player, and the arrival point is cleared of
+anything already standing there before players are placed.
+
+**A traverse does not run the wave director.** It is a route from A to B
+where you clear what stands in the way, not a siege you survive.
+
+### L3, decided
+
+**Removed, not re-themed.** Floor 3 was a high-rise office floor from the
+concept `docs/level-design.md` replaced. An office with balconies has no
+place in a campaign about crossing a landscape, and re-theming it would
+cost more than the holdout variant that belongs there. Floor 3 is a
+holdout until it gets its own sketch, which the design doc already calls
+for: "you emerge somewhere new, a rooftop, a walled yard, inside a house".
+
+A floor whose TYPE is an archetype but which has no sketch yet reuses the
+first spec of that archetype, so the campaign stays playable without
+inventing a layout nobody asked for.
+
 ## v0.16.1 - 2026-08-23 - the L2 playtest, and the same mistake three times
 
 Ola's L2 playtest, plus the restart bug. Three of the four level bugs were
