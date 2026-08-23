@@ -32,6 +32,32 @@ export class NavGrid {
     this.defaultBudget = Math.min(30000, Math.max(4000, Math.round(this.w * this.h * 0.35)));
   }
 
+  // Every free cell reachable from (sx, sz), as a Uint8Array over the
+  // grid. This is the honest answer to "can the player get there from
+  // here": a bot walking toward a goal can be defeated by an L-shaped
+  // route, a flood fill cannot.
+  reachableFrom(sx, sz) {
+    const out = new Uint8Array(this.w * this.h);
+    const [scx, scz] = this.nearestFree(sx, sz);
+    const start = this.idx(scx, scz);
+    if (this.blocked[start]) return out;
+    out[start] = 1;
+    const queue = [start];
+    for (let head = 0; head < queue.length; head++) {
+      const i = queue[head];
+      const cx = i % this.w, cz = (i - cx) / this.w;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx, nz = cz + dz;
+        if (!this.inBounds(nx, nz)) continue;
+        const j = this.idx(nx, nz);
+        if (out[j] || this.blocked[j]) continue;
+        out[j] = 1;
+        queue.push(j);
+      }
+    }
+    return out;
+  }
+
   idx(cx, cz) { return cz * this.w + cx; }
   inBounds(cx, cz) { return cx >= 0 && cz >= 0 && cx < this.w && cz < this.h; }
   toCellX(x) { return Math.floor((x - this.minX) / this.cell); }
@@ -50,10 +76,10 @@ export class NavGrid {
 
   // Rasterise colliders. `agentRadius` inflates them so agents keep their
   // shoulders out of walls instead of grinding along them.
-  build(colliders, agentRadius = 0.45, extraBlocked = null) {
+  build(colliders, agentRadius = 0.45, extraBlocked = null, forPlayer = false) {
     this.blocked.fill(0);
     for (const c of colliders) {
-      if (c.playerOnly) continue;       // horde walks through those
+      if (c.playerOnly && !forPlayer) continue;   // the horde walks through those
       if (c.dead) continue;             // destroyed base wall: a real breach
       // A `top` is only passable if the horde can actually get up there.
       // Platforms are marked walkable (they have a ramp); a low wall or a

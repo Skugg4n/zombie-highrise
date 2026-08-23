@@ -29,6 +29,13 @@ export class Arsenal {
     this.nightVision = false;
     this.cooldown = 0;
     this.cooldownR = 0;      // dual pistols: the right hand has its own timer
+    // Recoil heat: 0 when settled, 1 when the weapon is as wild as it
+    // gets. Rises per shot, bleeds off when you stop pulling the trigger.
+    this.heat = 0;
+    // Where we are in the weapon's recoil pattern. Resets once the weapon
+    // has cooled, so a player who paces their shots always starts the
+    // pattern from the top and can learn one shape rather than many.
+    this.shotIndex = 0;
     this.lastHand = 'right'; // so single-click akimbo still alternates
     this.reloading = false;
     this.reloadT = 0;
@@ -110,8 +117,10 @@ export class Arsenal {
       this.lastHand = h;
       if (h === 'right') this.cooldownR = defA.fireCooldown;
       else this.cooldown = defA.fireCooldown;
+      const kickA = this.recoilKick();
       this.dispatch({ t: 'shoot', w, o: origin.toArray(), d: dir.toArray(), sp: this.spreadMult() });
-      this.effects.muzzle(origin, dir, w, h);
+      this.addHeat();
+      this.effects.muzzle(origin, dir, w, h, kickA);
       this.onHudChange();
       if (a.mag === 0) this.reload();
       return true;
@@ -127,8 +136,10 @@ export class Arsenal {
     }
     a.mag--;
     this.cooldown = def.fireCooldown;
+    const kick = this.recoilKick();
     this.dispatch({ t: 'shoot', w, o: origin.toArray(), d: dir.toArray(), sp: this.spreadMult() });
-    this.effects.muzzle(origin, dir, w);
+    this.addHeat();
+    this.effects.muzzle(origin, dir, w, null, kick);
     this.onHudChange();
     if (a.mag === 0) this.reload();   // auto-reload on empty
     return true;
@@ -202,6 +213,11 @@ export class Arsenal {
   // ---- Frame -----------------------------------------------------------
   // fireHeld: auto weapons keep firing while the trigger/button is held.
   update(dt, fireHeld, getAimRay, fireHeldR = false) {
+    const R = TUNING.weapons.recoil;
+    if (this.heat > 0) {
+      this.heat = Math.max(0, this.heat - R.decayPerSecond * dt);
+      if (this.heat <= R.resetHeat) { this.heat = 0; this.shotIndex = 0; }
+    }
     if (this.cooldown > 0) this.cooldown -= dt;
     if (this.cooldownR > 0) this.cooldownR -= dt;
     // Aim-down-sights easing (never instant: the transition IS the feel).
@@ -241,8 +257,45 @@ export class Arsenal {
   }
 
   // Spread shrinks hard while aiming: ADS is a real accuracy choice.
+  // It also grows with recoil heat, which is what makes fast fire cost
+  // something rather than being free damage.
   spreadMult() {
-    return 1 - this.adsT * (1 - TUNING.weapons.ads.spreadMult);
+    const ads = 1 - this.adsT * (1 - TUNING.weapons.ads.spreadMult);
+    const R = TUNING.weapons.recoil;
+    const perWeapon = R[this.active];
+    if (!perWeapon) return ads;
+    return ads * (1 + this.heat * perWeapon.spreadHeat);
+  }
+
+  // The kick this shot applies to the player's aim, as { up, side } in
+  // radians. `up` is always up and always the same for a given shot in
+  // the burst; `side` follows the weapon's fixed pattern with a small
+  // jitter on top. That is what makes it learnable: pull down and against
+  // the drift and your group stays tight even at ten shots a second.
+  //
+  // Called at the moment of firing, BEFORE heat is added, so the first
+  // shot of any burst is the clean one.
+  recoilKick() {
+    const R = TUNING.weapons.recoil;
+    const perWeapon = R[this.active];
+    if (!perWeapon) return { up: 0, side: 0 };
+    const hot = 1 + this.heat * R.growth;
+    const steadied = 1 - this.adsT * (1 - R.adsKickMult);
+    const up = perWeapon.kick * hot * steadied;
+    const pat = perWeapon.pattern || [0];
+    const drift = pat[this.shotIndex % pat.length];
+    const noise = (Math.random() - 0.5) * 2 * R.jitter;
+    return { up, side: up * (drift + noise) };
+  }
+
+  // Called once per shot, after the kick has been read.
+  addHeat() {
+    const R = TUNING.weapons.recoil;
+    const perWeapon = R[this.active];
+    if (!perWeapon) return;
+    const steadied = 1 - this.adsT * (1 - R.adsHeatMult);
+    this.heat = Math.min(R.maxHeat, this.heat + perWeapon.heat * steadied);
+    this.shotIndex++;
   }
 
   hudInfo() {

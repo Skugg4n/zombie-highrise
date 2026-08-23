@@ -224,6 +224,14 @@ export class VRInput {
       // Re-apply the reload cant on top of the aim alignment (the pose
       // pass writes rotation.z, which this copy would otherwise erase).
       if (holder.userData.reloadRoll) holder.rotateZ(holder.userData.reloadRoll);
+      // Muzzle rise from recoil, on top of the aim alignment.
+      const rec = holder.userData.recoil || 0;
+      if (rec > 0) {
+        holder.rotateX(rec);
+        holder.position.z = rec * 0.35;
+      } else if (holder.position.z !== 0) {
+        holder.position.z = 0;
+      }
     }
   }
 
@@ -254,6 +262,27 @@ export class VRInput {
     if (this.downT >= RELOAD_HOLD && this.downArmed) {
       this.downArmed = false;
       this.ctx.actions.reload();
+    }
+  }
+
+  // Recoil in VR: the weapon snaps back and up in the hand and settles.
+  // It cannot move the player's aim (their real hand IS the aim), so the
+  // accuracy cost of fast fire lands in spread instead. This is the part
+  // you can see and feel.
+  addRecoil(hand, amount) {
+    const grip = hand === 'left' ? (this.hands.left || this.grips[1])
+      : (this.hands.right || this.grips[0]);
+    const i = this.grips.indexOf(grip);
+    const holder = i >= 0 ? this.gripWeapons[i] : null;
+    if (!holder) return;
+    holder.userData.recoil = Math.min(0.09, (holder.userData.recoil || 0) + amount * 2.4);
+  }
+
+  _stepRecoil(dt) {
+    for (const holder of this.gripWeapons) {
+      const r = holder.userData.recoil || 0;
+      if (r <= 0) continue;
+      holder.userData.recoil = Math.max(0, r - dt * 0.55);
     }
   }
 

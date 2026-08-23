@@ -109,8 +109,17 @@ export const TUNING = {
   // walker/runner = a REAL ammo saver. Grenade centre 15 = exactly one
   // brute; edge 3 still one-shots walkers in the 4 m radius.
   weapons: {
-    pistol: { damage: 1, pellets: 1, magazine: 8, reserveMax: Infinity, fireCooldown: 0.40, reloadTime: 1.4, auto: false, spreadDeg: 0.8, name: 'PISTOL' },
-    shotgun: { damage: 1, pellets: 6, magazine: 5, reserveMax: 40, fireCooldown: 0.9, reloadTime: 2.2, auto: false, spreadDeg: 8, name: 'SHOTGUN' },
+    // FIRE RATE IS YOUR TRIGGER FINGER, NOT A TIMER (Ola, 2026-08-23:
+    // "you CAN shoot super quick but you will probably miss, as the recoil
+    // will offset your aim"). fireCooldown is now only the mechanical
+    // floor of the action: how fast the slide can cycle or the pump can be
+    // worked. Everything above that is the player's click speed, and the
+    // price of spamming is recoil that walks the muzzle off target.
+    //
+    // Sustained damage stays honest because the magazine does the
+    // balancing: a pistol emptied in 0.8 s then costs a 1.4 s reload.
+    pistol: { damage: 1, pellets: 1, magazine: 8, reserveMax: Infinity, fireCooldown: 0.10, reloadTime: 1.7, auto: false, spreadDeg: 0.7, name: 'PISTOL' },
+    shotgun: { damage: 1, pellets: 6, magazine: 5, reserveMax: 40, fireCooldown: 0.42, reloadTime: 2.2, auto: false, spreadDeg: 8, name: 'SHOTGUN' },
     smg: { damage: 1, pellets: 1, magazine: 30, reserveMax: 240, fireCooldown: 0.09, reloadTime: 2.0, auto: true, spreadDeg: 2.5, name: 'SMG' },
     machete: { damage: 3, range: 1.75, arcDegrees: 100, swingCooldown: 0.8, name: 'MACHETE' },
     fragGrenade: { fuseTime: 3.0, damageCenter: 15, falloffRadius: 4.0, damageAtEdge: 3, selfDamage: 25, friendlyFire: false, throwSpeed: 12 },
@@ -121,10 +130,85 @@ export const TUNING = {
     // upgrade. Smoke slows the horde (kiting/revive tool), molotov burns
     // an area over time (choke-point tool).
     ak: { damage: 1.5, pellets: 1, magazine: 30, reserveMax: 180, fireCooldown: 0.115, reloadTime: 2.4, auto: true, spreadDeg: 2.0, name: 'AK' },
-    akimbo: { damage: 1, pellets: 1, magazine: 16, reserveMax: Infinity, fireCooldown: 0.2, reloadTime: 2.0, auto: false, spreadDeg: 1.6, name: 'DUAL PISTOLS' },
+    akimbo: { damage: 1, pellets: 1, magazine: 16, reserveMax: Infinity, fireCooldown: 0.09, reloadTime: 2.0, auto: false, spreadDeg: 1.4, name: 'DUAL PISTOLS' },
     smokeGrenade: { fuseTime: 1.5, cloudRadius: 3.0, cloudDuration: 8, slowFactor: 0.4, throwSpeed: 11 },
     molotov: { fuseTime: 0.0, burnRadius: 2.2, burnDuration: 5, dps: 3, throwSpeed: 11 },
     nightVision: { batterySeconds: 30, rechargePerDaySecond: 1.0 },
+    // RECOIL. Each shot kicks the aim upward and heats the weapon; heat
+    // makes the NEXT kick bigger and the shot wider, and it bleeds off
+    // when you stop. So a controlled pair lands and a panicked mag dump
+    // climbs off the target, which is the whole point: the fire rate is
+    // yours, the accuracy is what you pay with.
+    //
+    // `recover` is the fraction of each kick that eases back down. It is
+    // deliberately below 1: the muzzle creeps up under sustained fire and
+    // you have to pull back down yourself, the way a real burst behaves.
+    // THE PATTERN IS LEARNABLE, NOT RANDOM (Ola: "a predictable rise with
+    // a small random horizontal component means a good player can
+    // compensate and feel skilled; pure random spread just feels
+    // unfair"). Each weapon has a fixed drift sequence indexed by the shot
+    // number in the burst. Vertical climb is always up and always the
+    // same; only a small jitter is random. Learn the pattern, pull against
+    // it, and you keep your group tight at ten shots a second.
+    //
+    // `heat` per shot vs `decayPerSecond` sets where control ends. Tap at
+    // a controlled rate and heat never accumulates; spam and it saturates
+    // in about half a second. That crossover IS the skill.
+    recoil: {
+      // pattern: horizontal drift per shot, in units of the vertical kick.
+      // It repeats once exhausted, so a long burst is still predictable.
+      pistol: {
+        kick: 0.021, heat: 0.26, spreadHeat: 3.2,
+        pattern: [0, 0.18, -0.26, 0.34, -0.30, 0.42, -0.46, 0.38],
+      },
+      akimbo: {
+        kick: 0.017, heat: 0.16, spreadHeat: 3.2,
+        pattern: [0, 0.3, -0.34, 0.42, -0.46, 0.5, -0.54, 0.46],
+      },
+      shotgun: {
+        // One big straight kick. A pump gun has nothing to drift with.
+        kick: 0.062, heat: 0.30, spreadHeat: 1.4,
+        pattern: [0, 0.06, -0.08, 0.05],
+      },
+      smg: {
+        // Classic: climbs first, then pulls right, then sweeps back left.
+        kick: 0.010, heat: 0.19, spreadHeat: 3.8,
+        pattern: [0, 0, 0.1, 0.22, 0.34, 0.42, 0.34, 0.12, -0.16, -0.38, -0.5, -0.42, -0.2, 0.08, 0.28],
+      },
+      ak: {
+        kick: 0.017, heat: 0.22, spreadHeat: 3.0,
+        pattern: [0, 0, 0.08, 0.18, 0.3, 0.36, 0.26, 0.02, -0.24, -0.4, -0.34, -0.12, 0.14, 0.3],
+      },
+      maxHeat: 1.0,
+      decayPerSecond: 1.6,     // a beat off the trigger settles it
+      growth: 1.0,             // how much hot kicks exceed cold ones
+      // How much of the horizontal pattern is honest and how much is
+      // noise. 0.18 is enough to stop a burst being a stencil, small
+      // enough that the pattern is still the thing you are learning.
+      jitter: 0.18,
+      // Recovery is COMPLETE. The sight returns exactly to where you were
+      // pointing once the trigger is still. Leaving a permanent residue
+      // per shot sounds realistic but compounds: a hundred rounds would
+      // drift your aim fourteen degrees up over the course of a fight and
+      // never give it back. The skill is holding the group together
+      // DURING the burst, not undoing damage afterwards.
+      recover: 1.0,
+      recoverRate: 9.0,
+      // Recovery does NOT start until the trigger has been still for this
+      // long. Without the delay the sight snaps back between shots and
+      // spamming costs nothing, which is exactly what the probe measured:
+      // eight rapid shots climbed LESS than five paced ones. With it,
+      // climb accumulates through a burst and settles the moment you
+      // stop, so restraint is the mechanic and not just a suggestion.
+      recoverDelay: 0.16,
+      // The burst resets when the weapon has cooled: the pattern always
+      // starts from the top for a player who paces their shots.
+      resetHeat: 0.02,
+      // Aiming down sights steadies the weapon: less climb, less heat.
+      adsKickMult: 0.55,
+      adsHeatMult: 0.6,
+    },
+
     // Aiming down sights: tighter spread, slower turn, narrower FOV.
     ads: { spreadMult: 0.25, fovMult: 0.72, sensMult: 0.55, enterTime: 0.14 },
     headshotMult: 2.5,   // headshots are worth going for

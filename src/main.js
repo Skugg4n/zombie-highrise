@@ -9,6 +9,7 @@ import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
 import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
 import { LOCO, moveAndCollide, groundHeight, blockingFor } from './game/locomotion.js';
+import { NavGrid } from './game/navgrid.js';
 import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
@@ -1158,6 +1159,7 @@ let viewmodelL = null;     // left-hand gun group when akimbo is equipped
 let viewmodelSwingT = 0;   // machete swing arc timer
 let lastActiveWeapon = null;
 let recoilRecover = 0;   // accumulated recoil that eases back down
+let recoilHoldT = 0;     // recovery waits until the trigger has been still
 
 function aimRay() {
   if (vrInput && vrInput.active) return vrInput.getAimRay();
@@ -1172,7 +1174,7 @@ function makeArsenal() {
     dispatch: dispatchAction,
     onHudChange: refreshWeaponHud,
     effects: {
-      muzzle: (o, d, w, hand) => {
+      muzzle: (o, d, w, hand, kick = null) => {
         // All shot VFX originate at the WEAPON muzzle, offset right/down
         // from the camera axis in flat modes (VFX on the center ray hide
         // behind the crosshair and render end-on; probe-verified).
@@ -1191,15 +1193,27 @@ function makeArsenal() {
         // Recoil (flat modes): a per-weapon upward kick, most of which
         // eases back down over the next frames (recovery). Auto weapons
         // also wander sideways slightly under sustained fire.
+        const kickUp = kick ? kick.up : 0.012;
+        const kickSide = kick ? kick.side : 0;
         if (!(vrInput && vrInput.active)) {
-          const kick = { pistol: 0.012, akimbo: 0.010, shotgun: 0.034, smg: 0.007, ak: 0.014 }[w] || 0.012;
-          rig.pitch += kick;
-          recoilRecover += kick * 0.7;
-          if (TUNING.weapons[w] && TUNING.weapons[w].auto) {
-            rig.yaw += (Math.random() - 0.5) * 0.006;
-            addShake(0.004);
-          }
-          if (w === 'shotgun') addShake(0.014);
+          // Mouse and stick: recoil moves the aim, and the player pulls
+          // back down. The vertical climb is identical every burst and the
+          // horizontal follows the weapon's fixed pattern, so it can be
+          // learned and compensated rather than merely endured.
+          rig.pitch += kickUp;
+          rig.yaw += kickSide;
+          recoilRecover += kickUp * TUNING.weapons.recoil.recover;
+          recoilHoldT = TUNING.weapons.recoil.recoverDelay;
+          const heat = arsenal.heat || 0;
+          if (TUNING.weapons[w] && TUNING.weapons[w].auto) addShake(0.004);
+          if (w === 'shotgun') addShake(0.014 + heat * 0.02);
+        } else if (vrInput) {
+          // VR: the controller IS the aim, so moving it would fight the
+          // player's own hand and feel broken. Recoil is a visible kick on
+          // the weapon model, and the accuracy cost lands entirely in
+          // spread, which has already grown with heat. Same skill curve
+          // (pace your shots), nothing wrestling your arm.
+          vrInput.addRecoil(hand, kickUp);
         }
         spawnCasing(o, d);
       },
@@ -2278,8 +2292,9 @@ renderer.setAnimationLoop(() => {
     if (!inVR) {
       if (!isPlaying()) rig.yaw += dt * 0.02;  // slow menu drift
       // Recoil recovery: the kick eases back toward the aim point.
-      if (recoilRecover > 0) {
-        const rec = Math.min(recoilRecover, dt * 0.22);
+      if (recoilHoldT > 0) recoilHoldT -= dt;
+      else if (recoilRecover > 0) {
+        const rec = Math.min(recoilRecover, dt * TUNING.weapons.recoil.recoverRate * 0.032);
         rig.pitch -= rec;
         recoilRecover -= rec;
       }
@@ -2736,13 +2751,6 @@ window.__zhr = {
     }
     return { gaps: bad, blockedRamp: onRamp, solids: solids.length };
   },
-  // The behavioural version of the gap check, and the one that matters:
-  // stand at every point in the base and try to walk to the middle. Any
-  // start that cannot get there is a pocket the player can be pinned in.
-  // Pairwise geometry checks over-report (a tiled wall run looks full of
-  // gaps); this asks the actual question.
-  // Every spawn point must have a real route to the base, or a night
-  // never ends: one zombie sits behind a wall and the counter sticks.
   baseCentre: () => (level.baseCentre ? [level.baseCentre.x, 0, level.baseCentre.z] : null),
 
   // Bodies must not occupy the same space. Reports the worst overlap in
@@ -2820,44 +2828,92 @@ window.__zhr = {
     return { blockers: blockers.length, walkedToWithin: +got.toFixed(2) };
   },
 
-  debugPockets: (step = 0.4) => {
-    const c = level.baseCentre;
-    if (!c) return null;
-    const hb = 4 - 0.4;
-    const stuck = [];
-    let tested = 0;
-    const save = rig.group.position.clone();
-    for (let x = c.x - hb; x <= c.x + hb; x += step) {
-      for (let z = c.z - hb; z <= c.z + hb; z += step) {
-        // Skip starts that are inside a solid: you can never be there.
-        rig.group.position.set(x, level.heightAt(x, z), z);
-        resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
-        if (Math.hypot(rig.group.position.x - x, rig.group.position.z - z) > 0.45) continue;
-        tested++;
-        playerVel.set(0, 0, 0);
-        // Walk toward the middle, and slide sideways when blocked: a real
-        // player goes AROUND a crate rather than pressing into it, and
-        // without this the test flags every obstacle as a pocket.
-        let slide = 0, slideDir = 1;
-        for (let i = 0; i < 160; i++) {
-          const dx = c.x - rig.group.position.x, dz = c.z - rig.group.position.z;
-          const d = Math.hypot(dx, dz);
-          if (d < 1.2) break;
-          let vx = dx / d, vz = dz / d;
-          if (slide > 0) { const t = vx; vx = -vz * slideDir; vz = t * slideDir; slide--; }
-          playerVel.set(vx * 5, playerVel.y, vz * 5);
-          const bx = rig.group.position.x, bz = rig.group.position.z;
-          moveAndCollide(level, rig.group.position, playerVel, 1 / 60, [], LOCO.radius);
-          resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
-          const moved = Math.hypot(rig.group.position.x - bx, rig.group.position.z - bz);
-          if (moved < 0.02 && slide === 0) { slide = 22; slideDir = -slideDir; }
+  // POCKET CHECK. Stand anywhere in the playable area: can you get back
+  // to the middle?
+  //
+  // A gap between two solids narrower than the player's diameter pins the
+  // player in place, because both colliders push and the pushes cancel.
+  // It has shipped twice. Pairwise geometry over-reports (a tiled wall run
+  // looks full of gaps) and a bot walking at the goal under-reports (an
+  // L-shaped detour defeats it), so this floods the area with a
+  // player-sized agent. Anything free but unreachable from the middle is
+  // a trap.
+  debugPockets: (cell = 0.2) => {
+    const c = level.baseCentre || { x: 0, z: 0 };
+    const half = (level.playableHalf || 4) + 0.6;
+    const nav = new NavGrid(
+      { minX: c.x - half, maxX: c.x + half, minZ: c.z - half, maxZ: c.z + half }, cell);
+    // forPlayer: the player DOES collide with player-only barriers, which
+    // the horde walks straight through.
+    nav.build(level.colliders, LOCO.radius, null, true);
+    const reach = nav.reachableFrom(c.x, c.z);
+    // Group the unreachable free cells into connected islands and measure
+    // each. A one or two cell island is grid-inflation rounding, not a
+    // place a player can stand; a real trap is at least a body wide.
+    const seen = new Uint8Array(nav.w * nav.h);
+    const pockets = [];
+    let free = 0;
+    for (let cz = 0; cz < nav.h; cz++) {
+      for (let cx = 0; cx < nav.w; cx++) {
+        const i = nav.idx(cx, cz);
+        if (nav.blocked[i]) continue;
+        free++;
+        if (reach[i] || seen[i]) continue;
+        // Flood this island.
+        const queue = [i];
+        seen[i] = 1;
+        let n = 0, sx = 0, sz = 0;
+        for (let head = 0; head < queue.length; head++) {
+          const j = queue[head];
+          const jx = j % nav.w, jz = (j - jx) / nav.w;
+          n++; sx += nav.worldX(jx); sz += nav.worldZ(jz);
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = jx + dx, nz = jz + dz;
+            if (!nav.inBounds(nx, nz)) continue;
+            const k = nav.idx(nx, nz);
+            if (seen[k] || nav.blocked[k] || reach[k]) continue;
+            seen[k] = 1;
+            queue.push(k);
+          }
         }
-        const d = Math.hypot(rig.group.position.x - c.x, rig.group.position.z - c.z);
-        if (d > 1.6) stuck.push({ from: [+x.toFixed(1), +z.toFixed(1)], endedAt: +d.toFixed(1) });
+        const area = n * cell * cell;
+        // A player occupies about 0.32 m^2. Anything smaller is a sliver
+        // between two inflated obstacles, which nobody can occupy.
+        if (area >= 0.3) {
+          pockets.push({ at: [+(sx / n).toFixed(1), +(sz / n).toFixed(1)], area: +area.toFixed(2) });
+        }
       }
     }
-    rig.group.position.copy(save);
-    return { tested, stuck };
+    return { tested: free, stuck: pockets };
+  },
+
+  // ---- Recoil probe surface ----
+  tuning: () => TUNING,
+  debugHeat: () => arsenal.heat,
+  debugAim: () => ({ yaw: rig.yaw, pitch: rig.pitch }),
+  debugSwitch: (w) => { arsenal.active = w; },
+  // Top the weapon up and cancel any reload, so a probe measures recoil
+  // and not the reload that happened to land in the middle of its burst.
+  debugRefill: () => {
+    arsenal.reloading = false;
+    arsenal.reloadT = 0;
+    for (const [w, a] of Object.entries(arsenal.ammo)) {
+      const def = TUNING.weapons[w];
+      if (def && def.magazine) a.mag = def.magazine;
+    }
+    arsenal.onHudChange();
+  },
+  debugResetRecoil: () => {
+    arsenal.heat = 0; arsenal.shotIndex = 0;
+    recoilRecover = 0; recoilHoldT = 0; rig.pitch = 0; rig.yaw = 0;
+  },
+  // force: ignore the mechanical cooldown so a probe fires exactly the
+  // sequence it asked for. Without it the cooldown silently drops shots
+  // and every measurement compares different shot indices.
+  debugFireOnce: (force = false) => {
+    if (force) { arsenal.cooldown = 0; arsenal.cooldownR = 0; }
+    const ray = aimRay();
+    if (ray) arsenal.fire(ray.origin, ray.dir);
   },
 
   debugRamps: () => (level.ramps || []).map((r) => ({

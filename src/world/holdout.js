@@ -354,6 +354,7 @@ export function buildHoldout(level, rng, quality, makeElevator) {
   // so where you stand inside the base is a real decision.
   const BX = -13, BZ = -11;
   level.baseCentre = { x: BX, z: BZ };
+  level.playableHalf = BASE_SIZE / 2;   // the player never leaves the base
   const hb = BASE_SIZE / 2;
 
   // Daylight and haze. fogNear starts past the base so the base itself is
@@ -501,9 +502,12 @@ export function buildHoldout(level, rng, quality, makeElevator) {
   // Interior cover: the crate from the sketch plus a little junk. All of
   // it stays out of two lanes that must never be blocked: the ramp up to
   // the platform, and the floor in front of the lift doors.
+  // Everything near a wall is FLUSH to it. A prop parked 0.8 m off a wall
+  // leaves a slot barely wider than the player, which they can walk into
+  // and then struggle to walk out of. Flush, or a clear two metres away.
   cover(level, MATS.crate, BX - 3.11, BZ - 3.11, 1.3, 1.3, 1.0);   // NW corner, flush
-  cover(level, MATS.crate, BX - 0.5, BZ, 0.9, 0.9, 0.75);          // middle
-  cover(level, MATS.sandbag, BX - 2.2, BZ - 0.6, 1.4, 0.7);        // west of the ramp
+  cover(level, MATS.crate, BX - 0.5, BZ, 0.9, 0.9, 0.75);          // middle, open floor
+  cover(level, MATS.sandbag, BX - 3.06, BZ - 0.6, 1.4, 0.7);       // flush to the west wall
 
   // ---- The elevator plate ----
   // FOUNDATION BUG 5: the lift is part of the base, so its position AND

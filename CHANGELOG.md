@@ -1,5 +1,58 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.12.1 - 2026-08-23 - fire rate is your trigger finger
+
+Ola: "the fire rate should be more like a real weapon in that you CAN
+shoot super quick but you will probably miss, as the recoil will offset
+your aim."
+
+**fireCooldown is now only the mechanical floor of the action**: how fast
+the slide can cycle or the pump can be worked. Pistol 0.40 -> 0.10 s,
+shotgun 0.90 -> 0.42 s, dual pistols 0.20 -> 0.09 s per hand. Everything
+above that is your click speed.
+
+**Recoil is the price, and it is LEARNABLE.** Each shot heats the weapon;
+heat makes the next kick bigger and the shot wider, and it bleeds off
+when you stop. The vertical climb is identical every burst and the
+horizontal follows a fixed per-weapon pattern (the SMG climbs, pulls
+right, then sweeps back left) with only a small jitter on top, so a good
+player learns the shape and pulls against it. Random spread would just
+feel unfair.
+
+**Recovery is delayed and complete.** It does not start until the trigger
+has been still for 0.16 s. Without that gate the sight snapped back
+between shots and spamming cost nothing: the probe measured eight rapid
+shots climbing LESS than five paced ones. And when it does recover it
+recovers fully, because a permanent residue per shot compounds into
+fourteen degrees of drift over a long fight that you never get back.
+
+**VR keeps its own model.** The controller IS the aim, so shifting it
+would fight the player's hand. In VR recoil is a visible kick on the
+weapon model plus the same growing spread. Same skill curve, nothing
+wrestling your arm.
+
+Measured at 20 m by the new `test/recoilprobe.mjs`:
+- pistol paced: 0 cm of climb. Pistol spammed at 10 shots/s: 321 cm, so
+  you walk off a walker's head around the fifth shot.
+- SMG paced: 0 cm. SMG spammed: 140 cm.
+- three identical 12-shot bursts vary by 33% of one step, so the shape
+  repeats and can be compensated.
+- after a 20-round burst and 1.8 s of stillness the aim sits 0.0 cm from
+  where it started.
+- sustained damage, where magazine and reload are the real limit:
+  pistol 3.2/s, shotgun 7.0/s, SMG 6.4/s, AK 7.7/s. The SMG is still
+  worth twice the pistol, so it keeps its reason to exist.
+
+**The pocket check is now a flood fill.** The bot-walker version could be
+defeated by an L-shaped detour and reported false traps; pairwise
+geometry over-reports on tiled walls. It now floods the playable area
+with a player-sized agent from the middle and reports every unreachable
+island bigger than a body. Slivers between two inflated obstacles are
+ignored because nobody can stand in them.
+
+Also: interior cover is flush against walls rather than parked 0.8 m off
+them, which is exactly the width that traps a player.
+
 ## v0.12.0 - 2026-08-23 - VR hands, the lift plate, daylight waves
 
 **VR: three weapons for two hands.** Every controller grip got a full copy
