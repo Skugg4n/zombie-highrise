@@ -21,6 +21,7 @@
 import * as THREE from 'three';
 
 const W = 512, H = 320;                 // wrist canvas, 1.6:1
+const PULSE_SECONDS = 1.4;              // how long an announcement plays
 const AMMO_W = 256, AMMO_H = 128;
 
 const COL = {
@@ -97,31 +98,79 @@ export class WristDisplay {
     const glow = new THREE.PointLight(0x6fa8d0, 0.35, 0.55);
     glow.position.z = 0.06;
     this.group.add(glow);
+    this.glow = glow;
 
     this._key = '';
+    this.pulseT = 0;              // 1 -> 0 while an announcement plays
+    this._lastObjective = null;
   }
 
-  // Attach to the left grip, rotated so that turning the wrist inward
-  // (the gesture for checking a watch) presents the screen to the eyes.
+  // ON THE INNER FOREARM, AT A WATCH ANGLE.
+  //
+  // It used to sit on top of the forearm like a panel bolted to the arm,
+  // which is a place nobody looks and which crowded the flashlight the
+  // same hand is holding. A watch lives on the palm side and behind the
+  // hand, so the gesture that reads it is the one you already know: turn
+  // the wrist inward.
+  //
+  // In WebXR grip space the origin is the palm, +Y is out of the BACK of
+  // the hand and -Z is the direction a held object points. So the palm
+  // side is -Y and the elbow side is +Z, and the screen has to face -Y,
+  // tilted back toward the eyes so a partial turn is enough.
   attachTo(grip) {
     if (!grip || this.group.parent === grip) return;
     grip.add(this.group);
-    this.group.position.set(0.0, 0.045, 0.075);
-    this.group.rotation.set(-0.95, 0.0, 0.0);
+    this.group.position.set(0.0, -0.032, 0.115);
+    this.group.rotation.set(Math.PI / 2 - 0.34, 0, 0);
+  }
+
+  // ---- Announcing ----
+  // A passive display gets ignored. This one has to earn the glance: when
+  // the objective changes it swells, flashes its edge and holds the new
+  // line at a larger size for a moment. The player learns that a pulse in
+  // the corner of their eye means something changed, which is the only
+  // way a wrist display becomes a habit rather than furniture.
+  step(dt) {
+    if (this.pulseT > 0) {
+      this.pulseT = Math.max(0, this.pulseT - dt / PULSE_SECONDS);
+      // Two quick swells rather than one slow one: a single grow-and-
+      // shrink reads as a rendering hiccup, two reads as a signal.
+      const e = this.pulseT;
+      const swell = Math.sin(e * Math.PI * 2) * 0.5 + Math.sin(e * Math.PI) * 0.5;
+      this.group.scale.setScalar(1 + 0.22 * Math.max(0, swell) * e);
+      if (this.glow) this.glow.intensity = 0.35 + 2.4 * e;
+      // Redraw while the emphasis is decaying, since the objective line
+      // is drawn larger for the first part of it.
+      this._key = '';
+    } else if (this.group.scale.x !== 1) {
+      this.group.scale.setScalar(1);
+      if (this.glow) this.glow.intensity = 0.35;
+    }
   }
 
 
-  // s: { objective, sub, left, hp, hpMax, scrap, weapon, mag, reserve,
-  //      reloading, baseIntegrity, packs, mines }
+  // s: { objective, sub, urgency, left, hp, hpMax, scrap, weapon, mag,
+  //      reserve, reloading, baseIntegrity, packs, mines }
+  //
+  // Returns true when the objective CHANGED, so the caller can play the
+  // announcement sound. The display cannot make noise itself and should
+  // not know about the audio engine.
   update(s) {
+    let announced = false;
+    if (s.objective !== this._lastObjective) {
+      this._lastObjective = s.objective;
+      this.pulseT = 1;
+      announced = true;
+    }
     // Redraw only on real change: a canvas upload every frame costs more
     // than the whole display is worth on a Quest 2.
     const key = [
-      s.objective, s.sub, s.left, s.hp, s.scrap, s.weapon, s.mag, s.reserve,
-      s.reloading ? 1 : 0, s.baseIntegrity === null ? -1 : Math.round(s.baseIntegrity * 20),
-      s.packs, s.mines,
+      s.objective, s.sub, s.urgency, s.left, s.hp, s.scrap, s.weapon, s.mag,
+      s.reserve, s.reloading ? 1 : 0,
+      s.baseIntegrity === null ? -1 : Math.round(s.baseIntegrity * 20),
+      s.packs, s.mines, Math.round(this.pulseT * 6),
     ].join('|');
-    if (key === this._key) return;
+    if (key === this._key) return announced;
     this._key = key;
 
     const c = this.ctx;
@@ -131,16 +180,34 @@ export class WristDisplay {
     c.fill();
 
     // ---- Objective: the biggest thing on the screen, in plain words ----
+    // Colour carries urgency so it reads before it is read: amber when
+    // something needs doing, red when something is going wrong.
+    const urgent = s.urgency === 'danger' ? COL.bad
+      : s.urgency === 'warn' ? COL.accent : COL.good;
     c.fillStyle = COL.panel;
     roundRect(c, 14, 14, W - 28, 92, 12);
     c.fill();
+    // A coloured spine down the left of the objective block, and the whole
+    // block edged while an announcement is playing.
+    c.fillStyle = urgent;
+    roundRect(c, 14, 14, 8, 92, 4);
+    c.fill();
+    if (this.pulseT > 0) {
+      c.strokeStyle = urgent;
+      c.lineWidth = 3 + 4 * this.pulseT;
+      roundRect(c, 14, 14, W - 28, 92, 12);
+      c.stroke();
+    }
     c.fillStyle = COL.accent;
     c.font = 'bold 20px system-ui, sans-serif';
     c.textBaseline = 'top';
-    c.fillText('OBJECTIVE', 30, 26);
+    c.fillText('OBJECTIVE', 34, 26);
     c.fillStyle = COL.text;
-    c.font = 'bold 42px system-ui, sans-serif';
-    c.fillText(s.objective || '', 30, 52);
+    // The new line is held larger for the first part of the announcement,
+    // then settles: the size change is what catches the eye.
+    const grow = Math.min(1, this.pulseT * 1.6);
+    c.font = `bold ${Math.round(42 + 8 * grow)}px system-ui, sans-serif`;
+    c.fillText(s.objective || '', 34, 52 - 4 * grow);
     if (s.sub) {
       c.fillStyle = COL.dim;
       c.font = '22px system-ui, sans-serif';

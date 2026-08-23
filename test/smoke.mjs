@@ -75,6 +75,32 @@ async function newPage(context, label, errs) {
 
 const errs = [];
 
+// ---- 0. The record matches the build ------------------------------------
+// CLAUDE.md: bump the version on every change, and log every change in
+// CHANGELOG.md. That rule broke on v0.14.0 and v0.14.1, which are the same
+// two commits that produced the newest dead code in the repo. A rule that
+// only holds when you are not busy is not a rule, so it is a test now.
+//
+// This runs FIRST and needs no browser: an undocumented release should
+// stop the run before anything slower gets a chance to.
+console.log('THE RECORD');
+{
+  const cfg = await readFile(join(ROOT, 'src/config.js'), 'utf8');
+  const m = cfg.match(/export const VERSION = '([^']+)'/);
+  note(!!m, 'src/config.js declares a VERSION');
+  if (m) {
+    const version = m[1];
+    const log = await readFile(join(ROOT, 'CHANGELOG.md'), 'utf8');
+    // Accept "## v0.14.2" and "## v0.14.2 - 2026-08-23 - title".
+    const documented = new RegExp(`^##\\s+v${version.replace(/\./g, '\\.')}\\b`, 'm').test(log);
+    note(documented,
+      documented
+        ? `v${version} has a CHANGELOG entry`
+        : `v${version} is the shipping version but CHANGELOG.md has no "## v${version}" `
+          + `entry. Every version the player can see must say what changed in it.`);
+  }
+}
+
 // ---- 1. Host + client + sync --------------------------------------------
 console.log('MULTIPLAYER STEEL THREAD');
 const hostCtx = await browser.newContext({ viewport: { width: 1280, height: 720 } });

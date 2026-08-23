@@ -7,6 +7,13 @@ const metal = () => new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness:
 const wood = () => new THREE.MeshStandardMaterial({ color: 0x6b4f35, roughness: 0.9 });
 const tape = () => new THREE.MeshStandardMaterial({ color: 0x8a8578, roughness: 1.0 });
 
+// Same as part(), but tags the mesh so the recoil animation can find it.
+function namedPart(g, geo, material, x, y, z, rx, name) {
+  const m = part(g, geo, material, x, y, z, rx || 0);
+  m.name = name;
+  return m;
+}
+
 function part(g, geo, material, x, y, z, rx = 0) {
   const m = new THREE.Mesh(geo, material);
   m.position.set(x, y, z);
@@ -20,20 +27,20 @@ export function makeWeaponMesh(kind) {
   switch (kind) {
     case 'shotgun': {
       part(g, new THREE.CylinderGeometry(0.022, 0.022, 0.5, 8), metal(), 0, 0.02, -0.22, Math.PI / 2);
-      part(g, new THREE.CylinderGeometry(0.026, 0.026, 0.3, 8), tape(), 0, -0.02, -0.16, Math.PI / 2);
+      namedPart(g, new THREE.CylinderGeometry(0.026, 0.026, 0.3, 8), tape(), 0, -0.02, -0.16, Math.PI / 2, 'slide');
       part(g, new THREE.BoxGeometry(0.05, 0.09, 0.24), wood(), 0, -0.02, 0.1);
       part(g, new THREE.BoxGeometry(0.04, 0.12, 0.06), wood(), 0, -0.09, 0.16, 0.3);
       break;
     }
     case 'smg': {
-      part(g, new THREE.BoxGeometry(0.05, 0.08, 0.3), metal(), 0, 0, -0.08);
+      namedPart(g, new THREE.BoxGeometry(0.05, 0.08, 0.3), metal(), 0, 0, -0.08, 0, 'slide');
       part(g, new THREE.CylinderGeometry(0.016, 0.016, 0.16, 8), metal(), 0, 0.01, -0.3, Math.PI / 2);
       part(g, new THREE.BoxGeometry(0.035, 0.14, 0.05), metal(), 0, -0.1, -0.02, 0.15);
       part(g, new THREE.BoxGeometry(0.032, 0.09, 0.045), tape(), 0, -0.06, 0.09, 0.25);
       break;
     }
     case 'ak': {
-      part(g, new THREE.BoxGeometry(0.05, 0.07, 0.42), metal(), 0, 0, -0.1);
+      namedPart(g, new THREE.BoxGeometry(0.05, 0.07, 0.42), metal(), 0, 0, -0.1, 0, 'slide');
       part(g, new THREE.CylinderGeometry(0.014, 0.014, 0.22, 8), metal(), 0, 0.015, -0.4, Math.PI / 2);
       part(g, new THREE.BoxGeometry(0.045, 0.06, 0.16), wood(), 0, -0.005, 0.2);       // stock
       part(g, new THREE.BoxGeometry(0.045, 0.05, 0.14), wood(), 0, -0.01, -0.32);      // foregrip
@@ -60,7 +67,10 @@ export function makeWeaponMesh(kind) {
       break;
     }
     default: {  // pistol: slide + barrel + front sight + trigger guard + taped grip
-      part(g, new THREE.BoxGeometry(0.034, 0.038, 0.15), metal(), 0, 0.022, -0.05);   // slide
+      // The slide is tagged so recoil can cycle it. Ola: "the pistol has
+      // no visible recoil in VR, so the shot feels dead."
+      const slide = part(g, new THREE.BoxGeometry(0.034, 0.038, 0.15), metal(), 0, 0.022, -0.05);
+      slide.name = 'slide';
       part(g, new THREE.BoxGeometry(0.03, 0.02, 0.13), metal(), 0, 0.0, -0.055);      // frame
       part(g, new THREE.CylinderGeometry(0.008, 0.008, 0.03, 6), metal(), 0, 0.022, -0.135, Math.PI / 2);
       part(g, new THREE.BoxGeometry(0.006, 0.012, 0.008), metal(), 0, 0.047, -0.115); // front sight

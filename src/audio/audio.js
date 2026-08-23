@@ -177,6 +177,13 @@ const RECIPES = {
     tone(d, { freq: 442, endFreq: 664, type: 'square', peak: 0.14, attack: 0.05, decay: 0.4, detune: 18 });
   },
   repair: (d) => { noiseBurst(d, { peak: 0.22, decay: 0.06, freq: 2400, q: 3 }); setTimeout(() => ctx && noiseBurst(d, { peak: 0.2, decay: 0.07, freq: 1600, q: 2.5 }), 130); },
+  // The wrist display announcing a new objective. Deliberately soft and
+  // two-note: it fires whenever the objective line changes, so anything
+  // sharp would become nagging within one wave.
+  wristping: (d) => {
+    tone(d, { freq: 980, peak: 0.10, attack: 0.005, decay: 0.09, type: 'sine' });
+    setTimeout(() => ctx && tone(d, { freq: 1470, peak: 0.09, decay: 0.14, type: 'sine' }), 85);
+  },
   dronefly: (d) => tone(d, { freq: 320, endFreq: 300, type: 'sawtooth', peak: 0.12, attack: 0.15, decay: 0.9, detune: 12 }),
   dronedrop: (d) => { tone(d, { freq: 420, endFreq: 180, type: 'square', peak: 0.16, decay: 0.14 }); noiseBurst(d, { peak: 0.2, attack: 0.01, decay: 0.2, freq: 600, q: 1.2 }); },
 };

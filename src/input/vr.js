@@ -22,6 +22,10 @@ const BTN_STICK = 3, BTN_AX = 4, BTN_BY = 5;
 // How long the gun must point at the floor before it reloads.
 const RELOAD_HOLD = 0.35;
 
+// How far the slide travels back on a shot. Small: this is a 3 cm part
+// on a weapon held at arm's length, and overdoing it reads as a toy.
+const SLIDE_TRAVEL = 0.032;
+
 // How far down -Z the barrel tip sits on each weapon model, so tracers and
 // muzzle flash leave the gun and not the player's wrist.
 const MUZZLE = { pistol: 0.16, akimbo: 0.14, smg: 0.39, shotgun: 0.48, ak: 0.52, machete: 0.45 };
@@ -165,6 +169,8 @@ export class VRInput {
         holder.userData.shown = want;
         holder.userData.lamp = null;
         holder.userData.ammoTag = null;
+        holder.userData.slide = null;
+        holder.userData.flash = null;
         holder.clear();
         if (want === 'light') {
           holder.add(makeFlashlightMesh());
@@ -230,9 +236,10 @@ export class VRInput {
 
   // Called every frame from the game with everything a flat player can
   // read off the screen. Nothing important may exist only as flat HUD.
-  setWristState(state) {
-    if (!this.wrist) return;
-    this.wrist.update(state);
+  setWristState(state, dt = 0) {
+    if (!this.wrist) return false;
+    this.wrist.step(dt);
+    return this.wrist.update(state);
   }
 
   // Ammo tag on whichever hand is holding a gun.
@@ -388,14 +395,73 @@ export class VRInput {
     const holder = i >= 0 ? this.gripWeapons[i] : null;
     if (!holder) return;
     holder.userData.recoil = Math.min(0.09, (holder.userData.recoil || 0) + amount * 2.4);
+    // The slide cycle and the flash are their own timers: they are a fixed
+    // mechanical event, not proportional to how hard the shot kicked.
+    holder.userData.cycleT = 1;
+    holder.userData.flashT = 1;
   }
 
+  // What makes a shot read in VR is the WEAPON doing something, since the
+  // aim must never be moved for the player. Three things happen at once:
+  // the whole gun rotates back about the grip, the slide cycles, and the
+  // muzzle flashes. Ola: "the pistol has no visible recoil in VR, so the
+  // shot feels dead."
   _stepRecoil(dt) {
     for (const holder of this.gripWeapons) {
       const r = holder.userData.recoil || 0;
-      if (r <= 0) continue;
-      holder.userData.recoil = Math.max(0, r - dt * 0.55);
+      if (r > 0) holder.userData.recoil = Math.max(0, r - dt * 0.55);
+
+      // The slide: snaps back fast, returns slower, exactly like the real
+      // thing. 0.09 s all in, which is short enough to read as mechanical
+      // rather than as the gun coming apart.
+      const c = holder.userData.cycleT || 0;
+      if (c > 0) {
+        holder.userData.cycleT = Math.max(0, c - dt / 0.09);
+        const slide = holder.userData.slide
+          || (holder.userData.slide = holder.getObjectByName('slide') || null);
+        if (slide) {
+          if (slide.userData.homeZ === undefined) slide.userData.homeZ = slide.position.z;
+          // Back in the first third, forward over the rest.
+          const t = 1 - holder.userData.cycleT;
+          const back = t < 0.34 ? t / 0.34 : 1 - (t - 0.34) / 0.66;
+          slide.position.z = slide.userData.homeZ + back * SLIDE_TRAVEL;
+        }
+      }
+
+      // The muzzle flash: a light AND a visible flare, because a light
+      // alone is invisible against a bright daylight field.
+      const f = holder.userData.flashT || 0;
+      if (f > 0) {
+        holder.userData.flashT = Math.max(0, f - dt / 0.055);
+        const fl = holder.userData.flash || this._makeMuzzleFlash(holder);
+        fl.visible = true;
+        fl.scale.setScalar(0.55 + 1.5 * holder.userData.flashT);
+        fl.rotation.z += dt * 22;
+        fl.children[0].material.opacity = holder.userData.flashT;
+        fl.children[1].intensity = 9 * holder.userData.flashT;
+      } else if (holder.userData.flash && holder.userData.flash.visible) {
+        holder.userData.flash.visible = false;
+        holder.userData.flash.children[1].intensity = 0;
+      }
     }
+  }
+
+  // A flare quad plus a point light, parked at the barrel tip.
+  _makeMuzzleFlash(holder) {
+    const g = new THREE.Group();
+    const flare = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.16, 0.16),
+      new THREE.MeshBasicMaterial({
+        color: 0xffd9a0, transparent: true, opacity: 0, depthWrite: false,
+      }));
+    g.add(flare);
+    const light = new THREE.PointLight(0xffc070, 0, 6, 2);
+    g.add(light);
+    g.position.set(0, 0, -(MUZZLE[this.weaponKind] ?? 0.2));
+    g.visible = false;
+    holder.add(g);
+    holder.userData.flash = g;
+    return g;
   }
 
   // The VR reload animation. There is no camera-mounted viewmodel in the

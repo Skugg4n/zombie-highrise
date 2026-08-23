@@ -1,5 +1,37 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.14.3 - 2026-08-23 - the wrist earns its glance, and shots read in VR
+
+**The wrist display moved and woke up.** It sat on TOP of the forearm like
+a panel bolted to the arm, which is a place nobody looks and which crowded
+the flashlight the same hand carries. It is on the inner forearm now at a
+watch angle, so the gesture that reads it is the one you already know:
+turn the wrist inward.
+
+It also announces instead of waiting to be noticed. When the objective
+changes it swells twice, edges itself in the urgency colour, holds the new
+line at a larger size for a moment, and plays a soft two-note ping. The
+objective itself is colour-coded: green while things are fine, amber when
+something needs doing, red when something is going wrong. "THE WALL IS
+FAILING" replaces "HOLD THE LINE" below 35% integrity, and "REPAIR THE
+WALL" only appears when there is damage to repair. A display that never
+changes teaches you not to look at it.
+
+**Shots read in VR.** The pistol had no visible recoil at all, so firing
+felt dead. Three things now happen at once, none of which touch the
+player's aim: the weapon rotates back about the grip, the slide cycles
+(back fast over the first third, forward over the rest, 0.09 s all in),
+and the muzzle flashes with a flare quad as well as a light, because a
+light alone is invisible against a bright daylight field. Every weapon has
+a tagged cycling part, not just the pistol.
+
+**A guard on the record itself.** The smoke test now fails if the version
+the player can see has no matching entry in CHANGELOG.md. v0.14.0 and
+v0.14.1 shipped without one, against CLAUDE.md's own rule, and they were
+the same two commits that produced the newest dead code in the repo. A
+rule that only holds when you are not busy is not a rule. Verified by
+temporarily bumping to an undocumented version and watching it go red.
+
 ## v0.14.2 - 2026-08-23 - the dead code audit
 
 Ola, after the VR reload gesture turned out to be dead code: "your rule

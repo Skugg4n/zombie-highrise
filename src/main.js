@@ -2349,25 +2349,39 @@ function vrObjective(w) {
   switch (w.ph) {
     case 'lobby':
       return { objective: 'STAND BY', sub: 'waiting for the host' };
-    case 'day':
+    case 'day': {
+      // A damaged wall is a job with a deadline, so it says so and goes
+      // amber. An intact one is just prep.
+      const hurt = level.baseWall && level.baseWall.integrity() < 0.98;
       return {
-        objective: level.baseWall ? 'REPAIR THE WALL' : 'LAY YOUR TRAPS',
+        objective: hurt ? 'REPAIR THE WALL' : level.baseWall ? 'DIG IN' : 'LAY YOUR TRAPS',
         sub: `${label.toLowerCase()} ${w.n + 1} in ${w.t}s`,
+        urgency: hurt ? 'warn' : 'normal',
       };
+    }
     case 'countdown':
-      return { objective: 'THEY ARE COMING', sub: `${label} ${w.n + 1} in ${w.t}` };
-    case 'night':
-      return { objective: `HOLD THE LINE`, sub: `${label} ${w.n}` };
+      return {
+        objective: 'THEY ARE COMING', sub: `${label} ${w.n + 1} in ${w.t}`,
+        urgency: 'warn',
+      };
+    case 'night': {
+      const wall = level.baseWall ? level.baseWall.integrity() : 1;
+      return {
+        objective: wall < 0.35 ? 'THE WALL IS FAILING' : 'HOLD THE LINE',
+        sub: `${label} ${w.n}`,
+        urgency: wall < 0.35 ? 'danger' : wall < 0.6 ? 'warn' : 'normal',
+      };
+    }
     case 'elevator':
-      return { objective: 'GO TO THE LIFT', sub: 'area cleared' };
+      return { objective: 'GO TO THE LIFT', sub: 'area cleared', urgency: 'normal' };
     case 'ride':
       return { objective: 'RIDING UP', sub: `floor ${w.lv + 1}` };
     case 'finale':
-      return { objective: 'GET TO THE HELICOPTER', sub: 'extraction inbound' };
+      return { objective: 'GET TO THE HELICOPTER', sub: 'extraction inbound', urgency: 'warn' };
     case 'victory':
       return { objective: 'EXTRACTED', sub: 'you made it out' };
     case 'gameover':
-      return { objective: 'DOWN', sub: 'the run is over' };
+      return { objective: 'DOWN', sub: 'the run is over', urgency: 'danger' };
     default:
       return { objective: '', sub: '' };
   }
@@ -2421,9 +2435,9 @@ function updateVrReadouts() {
   const w = lastWave;
   updateVrPanel(w);
   const info = arsenal.hudInfo();
-  const { objective, sub } = vrObjective(w);
-  vrInput.setWristState({
-    objective, sub,
+  const { objective, sub, urgency } = vrObjective(w);
+  const announced = vrInput.setWristState({
+    objective, sub, urgency: urgency || 'normal',
     left: w && w.ph === 'night' ? w.left : null,
     hp: myHp, hpMax: 100,
     scrap,
@@ -2431,7 +2445,9 @@ function updateVrReadouts() {
     mag: info.mag, reserve: info.reserve, reloading: info.reloading,
     baseIntegrity: level.baseWall ? level.baseWall.integrity() : null,
     packs: info.packs, mines: info.mines || 0,
-  });
+  }, lastDt);
+  // The display earns its glance by telling you when to look at it.
+  if (announced) audio.play('wristping');
   vrInput.setAmmoTag(info.mag, info.magMax, info.reloading);
   // A lit torch in bright daylight is absurd. On surface levels the hand
   // simply carries the tool; underground it actually lights the way.
