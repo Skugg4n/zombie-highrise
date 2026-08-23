@@ -246,6 +246,12 @@ export const TUNING = {
     // it drops, and every payload is priced as a staple.
     droneDeploy: 0,
     dronePayload: { mine: 10, tar: 8, spike: 12, lure: 14 },
+    // Loot that lands outside the base becomes a field crate. Fetching it
+    // is free (the flight time is the price) and is the drone's second
+    // job. A kill just outside the wall drops inside instead, so the
+    // field does not fill with crates for every stray body.
+    lootFallsInsideWithin: 7,
+    droneFetchRadius: 6,
     minePlacementFromMap: 12,      // hand-placed mines are a staple, not a luxury      // remote placement pays a small premium
     mine: { triggerRadius: 0.6, blastRadius: 2.5, damage: 12 },
     // Explosive barrels: level furniture, free damage if you aim well and
@@ -258,6 +264,15 @@ export const TUNING = {
   // create grenade/mine moments. Nights land at 45-90 s. Day 45 s,
   // skippable when everyone readies up.
   pacing: {
+    // THE STUCK WATCHDOG. No round may ever be unwinnable because one
+    // enemy cannot reach anybody. Patience is deliberately generous: a
+    // zombie walking the long way around a ridge makes no DIRECT progress
+    // for several seconds and must not be teleported for it.
+    watchdog: {
+      patience: 5.0,          // seconds of no progress before each stage
+      progressEpsilon: 0.6,   // metres closer that counts as real progress
+    },
+
     // PLAYTEST FIX (Ola): the day used to be 45 s of nothing before the
     // game started. Now the day is a SHORT working phase with a daylight
     // trickle of zombies, and the first one lands almost immediately.

@@ -239,6 +239,9 @@ export class Arsenal {
           if (a.reserve !== Infinity) a.reserve -= take;
         }
         this.dispatch({ t: 'reloadDone', w: this.active });
+        // The moment the fresh magazine seats. Without this the reload
+        // just... ends, and the player has no idea when they can fire.
+        if (this.effects.magSeated) this.effects.magSeated();
         this.onHudChange();
       }
     }

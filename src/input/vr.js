@@ -11,7 +11,8 @@
 // - The active weapon's model sits on both controller grips.
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
-import { makeWeaponMesh, makeGloveMesh } from '../world/weapons3d.js';
+import { makeWeaponMesh, makeFlashlightMesh, makeUnderBarrelLight } from '../world/weapons3d.js';
+import { WristDisplay, WeaponAmmoTag } from '../world/wrist.js';
 
 // Quest touch controller gamepad button indices (xr-standard mapping):
 // 0 trigger, 1 squeeze, 3 stick press, 4 A/X, 5 B/Y.
@@ -131,13 +132,14 @@ export class VRInput {
   }
 
   // Swap the weapon model on both grips (active weapon changed).
-  // ONE weapon, in the hand that is actually holding it.
+  // ONE weapon, in the hand that is actually holding it, and a
+  // FLASHLIGHT in the other.
   //
   // Every grip used to get a full copy of the model, so a player with
   // dual pistols saw a gun in each hand AND the flat-mode viewmodel
   // hanging off the camera: three weapons for two hands. Now only akimbo
-  // arms both hands; everything else is the dominant hand, and the free
-  // hand gets a glove so it is still visibly a hand.
+  // arms both hands, and when it does the light moves under the barrel
+  // rather than vanishing.
   setWeaponModel(kind) {
     this.weaponKind = kind;
     this._dressHands();
@@ -145,19 +147,100 @@ export class VRInput {
 
   _dressHands() {
     const kind = this.weaponKind;
-    const twoHanded = kind === 'akimbo';
+    const bothHands = kind === 'akimbo';
+    this.lamps = [];
     for (let i = 0; i < this.gripWeapons.length; i++) {
       const holder = this.gripWeapons[i];
       const grip = this.grips[i];
       // Until handedness arrives from the 'connected' event, treat the
       // first grip as the main hand so something is always visible.
       const isMain = this.hands.right ? grip === this.hands.right : i === 0;
-      const want = (twoHanded || isMain) ? kind : 'glove';
-      if (holder.userData.shown === want) continue;
-      holder.userData.shown = want;
-      holder.clear();
-      holder.add(want === 'glove' ? makeGloveMesh() : makeWeaponMesh(kind));
+      const want = (bothHands || isMain) ? kind : 'light';
+      if (holder.userData.shown !== want) {
+        holder.userData.shown = want;
+        holder.userData.lamp = null;
+        holder.userData.ammoTag = null;
+        holder.clear();
+        if (want === 'light') {
+          holder.add(makeFlashlightMesh());
+        } else {
+          holder.add(makeWeaponMesh(kind));
+          // Ammo has to be readable without looking away from the fight,
+          // so it rides on the gun itself.
+          const tag = new WeaponAmmoTag();
+          holder.add(tag.mesh);
+          holder.userData.ammoTag = tag;
+          // Both hands full: the light goes under the barrel.
+          if (bothHands && !isMain) holder.add(makeUnderBarrelLight());
+        }
+      }
+      // Cache the lens for the beam toggle.
+      if (!holder.userData.lensCached) {
+        holder.userData.lensCached = true;
+        holder.traverse((o) => {
+          if (o.parent && o.parent.userData && o.parent.userData.lens === o) {
+            holder.userData.lens = o;
+          }
+        });
+        holder.children.forEach((ch) => {
+          if (ch.userData && ch.userData.lens) holder.userData.lens = ch.userData.lens;
+        });
+      }
     }
+    this._placeWrist();
+  }
+
+  // The wrist display lives on the LEFT forearm. Left is the off hand for
+  // the default player, so the gesture is a natural wrist turn rather
+  // than taking the gun off target.
+  _placeWrist() {
+    if (!this.wrist) this.wrist = new WristDisplay();
+    const left = this.hands.left || this.grips[1] || this.grips[0];
+    if (left) this.wrist.attachTo(left);
+  }
+
+  // Called every frame from the game with everything a flat player can
+  // read off the screen. Nothing important may exist only as flat HUD.
+  setWristState(state) {
+    if (!this.wrist) return;
+    this.wrist.update(state);
+  }
+
+  // Ammo tag on whichever hand is holding a gun.
+  setAmmoTag(mag, magMax, reloading) {
+    for (const holder of this.gripWeapons) {
+      const tag = holder.userData.ammoTag;
+      if (tag) tag.update(mag, magMax, reloading);
+    }
+  }
+
+  // The hand light. `on` is decided by the game: a lit torch in bright
+  // daylight is absurd, so holdout levels leave it dark and the hand just
+  // carries the tool.
+  setHandLight(on) {
+    if (this.handLightOn === on) return;
+    this.handLightOn = on;
+    for (const holder of this.gripWeapons) {
+      holder.traverse((o) => {
+        if (o.material && o.material.emissive && o.geometry
+          && o.geometry.type === 'CircleGeometry') {
+          o.material.emissiveIntensity = on ? 2.2 : 0;
+        }
+      });
+    }
+    if (!this.handBeam) {
+      // One real spot light, parented to whichever hand carries the lamp.
+      this.handBeam = new THREE.SpotLight(0xffe9c0, 0, 22, 0.55, 0.6, 1.0);
+      this.handBeamTarget = new THREE.Object3D();
+      this.handBeamTarget.position.set(0, 0, -6);
+      this.handBeam.target = this.handBeamTarget;
+    }
+    const carrier = this.gripWeapons.find((h) => h.userData.shown === 'light')
+      || this.gripWeapons[0];
+    if (carrier && this.handBeam.parent !== carrier) {
+      carrier.add(this.handBeam, this.handBeamTarget);
+    }
+    this.handBeam.intensity = on ? 5.5 : 0;
   }
 
   // World transform of a tracked hand, or null when untracked.

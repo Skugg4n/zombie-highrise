@@ -74,6 +74,13 @@ export function platform(level, mat, x, z, w, d, height, rampDir = 'south') {
     box(level.group, sw, hh, sd, mat, sx, hh / 2, sz);
     level.ramps.push({ x: sx, z: sz, hx: sw / 2, hz: sd / 2, top: hh });
   }
+  // NOTE ON WALKING OFF THE SIDE OF A RAMP: that is a real 1.4 m drop and
+  // the character controller treats it as one, which is correct. It was
+  // tempting to fence the ramp in, but inside an 8 m base a fence down
+  // both sides of a central ramp cuts the base in half. The reason Ola
+  // fell "through" the ramp was the VR grounding bug (the ground was
+  // sampled under the play-space origin instead of under the player), and
+  // that is fixed where it belongs, in src/main.js.
   return height;
 }
 

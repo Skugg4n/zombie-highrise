@@ -100,8 +100,30 @@ const RECIPES = {
   smg: (d) => { noiseBurst(d, { peak: 0.4, decay: 0.06, freq: 1900, q: 0.8 }); tone(d, { freq: 200, endFreq: 90, type: 'square', peak: 0.15, decay: 0.05 }); },
   ak: (d) => { noiseBurst(d, { peak: 0.55, decay: 0.11, freq: 1000, q: 0.6 }); tone(d, { freq: 130, endFreq: 55, type: 'triangle', peak: 0.4, decay: 0.1 }); },
   machete: (d) => noiseBurst(d, { peak: 0.3, attack: 0.01, decay: 0.12, freq: 2600, q: 2.5 }),
-  dryfire: (d) => noiseBurst(d, { peak: 0.15, decay: 0.03, freq: 3000, q: 4 }),
-  reload: (d) => { noiseBurst(d, { peak: 0.2, decay: 0.05, freq: 2200, q: 3 }); setTimeout(() => ctx && noiseBurst(d, { peak: 0.25, decay: 0.05, freq: 1800, q: 3 }), 140); },
+  // OUT OF AMMO. This is the primary "you are dry" signal and it has to
+  // cut through a firefight: a hard mechanical CLICK, not a whisper.
+  dryfire: (d) => {
+    noiseBurst(d, { peak: 0.55, attack: 0.001, decay: 0.035, freq: 3400, q: 6 });
+    tone(d, { freq: 1900, endFreq: 900, type: 'square', peak: 0.3, attack: 0.001, decay: 0.05 });
+    setTimeout(() => ctx && noiseBurst(d, { peak: 0.3, attack: 0.001, decay: 0.03, freq: 2200, q: 5 }), 55);
+  },
+  // RELOAD, in three beats you can hear separately: the magazine
+  // release, the empty mag hitting the floor, and the fresh one going in.
+  // Ola could not tell a reload was happening at all, and in VR there is
+  // no viewmodel to watch, so the sound has to carry it.
+  reload: (d) => {
+    noiseBurst(d, { peak: 0.32, attack: 0.001, decay: 0.05, freq: 2400, q: 4 });
+    tone(d, { freq: 620, endFreq: 380, type: 'square', peak: 0.16, decay: 0.06 });
+    setTimeout(() => ctx && noiseBurst(d, { peak: 0.24, attack: 0.002, decay: 0.14, freq: 900, q: 1.4 }), 170);
+  },
+  // The moment the fresh magazine SEATS. A solid mechanical clack plus a
+  // rising two-note confirmation: the weapon is ready, go.
+  magseat: (d) => {
+    noiseBurst(d, { peak: 0.5, attack: 0.001, decay: 0.06, freq: 1500, q: 3 });
+    tone(d, { freq: 240, endFreq: 150, type: 'square', peak: 0.3, attack: 0.001, decay: 0.08 });
+    setTimeout(() => ctx && tone(d, { freq: 880, peak: 0.14, decay: 0.06 }), 70);
+    setTimeout(() => ctx && tone(d, { freq: 1320, peak: 0.12, decay: 0.09 }), 130);
+  },
   explosion: (d) => { noiseBurst(d, { peak: 1.0, attack: 0.005, decay: 0.7, freq: 300, q: 0.4, type: 'lowpass' }); tone(d, { freq: 55, endFreq: 28, type: 'sine', peak: 0.8, decay: 0.5 }); },
   zhit: (d) => { noiseBurst(d, { peak: 0.35, decay: 0.07, freq: 700, q: 1.5 }); tone(d, { freq: 220, endFreq: 140, type: 'sawtooth', peak: 0.1, decay: 0.08 }); },
   zdie: (d) => { tone(d, { freq: 170, endFreq: 55, type: 'sawtooth', peak: 0.3, attack: 0.02, decay: 0.5, detune: -30 }); noiseBurst(d, { peak: 0.2, attack: 0.05, decay: 0.3, freq: 400, q: 1 }); },
@@ -127,8 +149,33 @@ const RECIPES = {
   // Base wall: a dull concrete thud while it holds, a heavy collapse when
   // a segment finally goes. The break has to carry across the whole field
   // because it is the worst thing that can happen to you on a holdout.
-  wallhit: (d) => { noiseBurst(d, { peak: 0.3, attack: 0.005, decay: 0.16, freq: 340, q: 1.1, type: 'lowpass' }); tone(d, { freq: 120, endFreq: 80, type: 'square', peak: 0.16, decay: 0.12 }); },
-  wallbreak: (d) => { noiseBurst(d, { peak: 0.8, attack: 0.01, decay: 0.9, freq: 240, q: 0.5, type: 'lowpass' }); tone(d, { freq: 70, endFreq: 34, type: 'sine', peak: 0.5, decay: 0.7 }); },
+  // THE BASE UNDER ATTACK. Ola: "much louder and more urgent... the
+  // player must feel the emergency without looking." Three tiers, chosen
+  // by how close that section is to going: a body blow while it holds,
+  // splintering wood as it loosens, and a heavy collapse when it goes.
+  wallhit: (d) => {
+    noiseBurst(d, { peak: 0.72, attack: 0.002, decay: 0.2, freq: 300, q: 1.0, type: 'lowpass' });
+    tone(d, { freq: 110, endFreq: 62, type: 'square', peak: 0.38, decay: 0.16 });
+  },
+  // Wood giving way: bright cracking over the body blow. This is the
+  // sound that tells you a section is nearly gone.
+  wallcrack: (d) => {
+    noiseBurst(d, { peak: 0.8, attack: 0.001, decay: 0.26, freq: 1500, q: 2.2 });
+    noiseBurst(d, { peak: 0.6, attack: 0.004, decay: 0.34, freq: 420, q: 0.8, type: 'lowpass' });
+    tone(d, { freq: 190, endFreq: 90, type: 'sawtooth', peak: 0.3, decay: 0.22 });
+    setTimeout(() => ctx && noiseBurst(d, { peak: 0.45, attack: 0.001, decay: 0.18, freq: 2200, q: 3 }), 90);
+  },
+  wallbreak: (d) => {
+    noiseBurst(d, { peak: 1.0, attack: 0.005, decay: 1.1, freq: 220, q: 0.45, type: 'lowpass' });
+    noiseBurst(d, { peak: 0.7, attack: 0.001, decay: 0.5, freq: 1300, q: 1.6 });
+    tone(d, { freq: 62, endFreq: 28, type: 'sine', peak: 0.75, decay: 0.9 });
+    setTimeout(() => ctx && noiseBurst(d, { peak: 0.5, attack: 0.02, decay: 0.7, freq: 500, q: 0.7, type: 'lowpass' }), 160);
+  },
+  // A rising alarm as the perimeter as a whole gets close to failing.
+  baseAlarm: (d) => {
+    tone(d, { freq: 440, endFreq: 660, type: 'sawtooth', peak: 0.3, attack: 0.03, decay: 0.45, detune: -12 });
+    tone(d, { freq: 442, endFreq: 664, type: 'square', peak: 0.14, attack: 0.05, decay: 0.4, detune: 18 });
+  },
   repair: (d) => { noiseBurst(d, { peak: 0.22, decay: 0.06, freq: 2400, q: 3 }); setTimeout(() => ctx && noiseBurst(d, { peak: 0.2, decay: 0.07, freq: 1600, q: 2.5 }), 130); },
   dronefly: (d) => tone(d, { freq: 320, endFreq: 300, type: 'sawtooth', peak: 0.12, attack: 0.15, decay: 0.9, detune: 12 }),
   dronedrop: (d) => { tone(d, { freq: 420, endFreq: 180, type: 'square', peak: 0.16, decay: 0.14 }); noiseBurst(d, { peak: 0.2, attack: 0.01, decay: 0.2, freq: 600, q: 1.2 }); },

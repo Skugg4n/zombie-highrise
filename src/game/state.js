@@ -205,7 +205,9 @@ export class HostSim {
   _actDrone(id, p, m) {
     if (!Array.isArray(m.p)) return;
     const kind = m.k || 'mine';
-    const cost = TUNING.economy.dronePayload[kind];
+    // Fetching your own loot is not a purchase, so it is free. It still
+    // costs you the drone's flight time, which is the real price.
+    const cost = kind === 'fetch' ? 0 : TUNING.economy.dronePayload[kind];
     if (cost === undefined) return;
     if (p.inv.s < cost) { this.events.push({ e: 'nofunds', by: id, need: cost }); return; }
     p.inv.s -= cost;
@@ -215,7 +217,7 @@ export class HostSim {
       id: did, owner: id, phase: 'fly', payload: kind,
       pos: home.clone(), home,
       target: new THREE.Vector3(m.p[0], this.level.heightAt(m.p[0], m.p[2]) + 4.0, m.p[2]),
-      dropT: 0,
+      dropT: 0, carrying: null,
     });
     this.events.push({ e: 'droned', by: id, k: kind });
   }
@@ -223,6 +225,25 @@ export class HostSim {
   // Payload hits the ground. Mines reuse the existing mine system so they
   // trip and explode exactly like a hand-placed one.
   _dropPayload(d) {
+    // FETCH: grab the nearest field crate instead of dropping anything.
+    // The crate rides home under the drone and lands inside the base.
+    if (d.payload === 'fetch') {
+      let best = null, bd = TUNING.economy.droneFetchRadius ** 2;
+      for (const item of this.items.values()) {
+        if (!item.field) continue;
+        const dx = item.pos.x - d.target.x, dz = item.pos.z - d.target.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < bd) { bd = d2; best = item; }
+      }
+      if (best) {
+        d.carrying = best.id;
+        best.carried = true;
+        this.events.push({ e: 'fetched', id: best.id });
+      } else {
+        this.events.push({ e: 'fetchmiss', by: d.owner });
+      }
+      return;
+    }
     const pos = d.target.clone();
     pos.y = this.level.heightAt(pos.x, pos.z);
     if (d.payload === 'mine') {
@@ -534,14 +555,16 @@ export class HostSim {
       const pos = base.clone().add(new THREE.Vector3(
         (Math.random() * 2 - 1) * 1.6, 0, (Math.random() * 2 - 1) * 1.6));
       resolveCircle(pos, 0.5, this.level.colliders);
+      if (!this._reachable(pos)) pos.copy(this._nearestReachable(pos));
       pos.y = this.level.heightAt(pos.x, pos.z);
       this.spawnItem(kind, pos);
     }
   }
 
-  spawnItem(kind, pos) {
+  spawnItem(kind, pos, field = false) {
     const id = this.nextIid++;
-    this.items.set(id, { id, kind, pos: pos.clone() });
+    this.items.set(id, { id, kind, pos: pos.clone(), field });
+    if (field) this.events.push({ e: 'fielddrop', id, kind, p: pos.toArray() });
   }
 
   _enterCountdown() {
@@ -732,9 +755,9 @@ export class HostSim {
 
   // ---- Combat ----------------------------------------------------------
   spawnZombie(type, opts = {}) {
-    const spawns = this.level.zombieSpawns.length ? this.level.zombieSpawns : this.level.entries;
-    if (!spawns.length) return;
-    const s = spawns[Math.floor(Math.random() * spawns.length)];
+    const all = this.level.zombieSpawns.length ? this.level.zombieSpawns : this.level.entries;
+    if (!all.length) return;
+    const s = this._pickSpawn(all);
     const id = this.nextZid++;
     const stats = TUNING.enemies[type];
     // Small jitter only: +-0.4 m keeps spawns inside 1.6 m doorways
@@ -743,9 +766,10 @@ export class HostSim {
     if (type === 'butcher') hpMult *= 1 + 0.5 * (Math.max(1, this.players.size) - 1);
     this.zombies.set(id, {
       id, type,
-      pos: s.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.8)),
+      pos: this._legalSpawnPos(s),
       hp: Math.max(1, Math.round(stats.hp * hpMult)), alive: true,
       biteT: 0, targetId: null, retargetT: 0, stuckT: 0,
+      bestDist: Infinity, noProgressT: 0, rescues: 0,
       daylight: !!opts.daylight,
     });
     this.events.push({ e: 'zspawn', id });
@@ -841,6 +865,120 @@ export class HostSim {
     this.wave.phase = 'gameover';
     this.wave.t = 0;
     for (const p of this.players.values()) { p.down = true; p.hp = 0; }
+  }
+
+  // Escalating rescue for an enemy that is not closing on its target.
+  // Stage 1 replans. Stage 2 relocates to the nearest open ground, which
+  // clears geometry it has wedged itself into. Stage 3 puts it back at a
+  // spawn point that is known to have a route, which is the guarantee
+  // that no round can be lost to one unreachable enemy.
+  _watchdog(z, stats, goal, dt) {
+    const W = TUNING.pacing.watchdog;
+    const d = z.pos.distanceTo(goal);
+    // Anything within reach of its goal is doing its job by definition.
+    if (d <= stats.radius + 2.0) { z.bestDist = d; z.noProgressT = 0; return; }
+    // Real progress only: a wobble back and forth must not reset the timer.
+    if (d < z.bestDist - W.progressEpsilon) {
+      z.bestDist = d;
+      z.noProgressT = 0;
+      return;
+    }
+    z.noProgressT += dt;
+    if (z.noProgressT < W.patience) return;
+    z.noProgressT = 0;
+    z.rescues++;
+    const nav = this._nav();
+    if (z.rescues === 1) {
+      z.path = null; z.pathT = 0;          // stage 1: think again
+      z.bestDist = d;
+      return;
+    }
+    if (z.rescues === 2 && nav) {
+      const [cx, cz] = nav.nearestFree(z.pos.x, z.pos.z);   // stage 2: unwedge
+      z.pos.x = nav.worldX(cx);
+      z.pos.z = nav.worldZ(cz);
+      z.path = null;
+      z.bestDist = z.pos.distanceTo(goal);
+      return;
+    }
+    // Stage 3: send it back to a spawn that demonstrably has a route in.
+    // Its old position was a dead end, so anywhere legal is an upgrade.
+    const from = this._reachableSpawn(goal);
+    if (from) {
+      z.pos.copy(this._legalSpawnPos(from));
+      this.events.push({ e: 'zrescue', id: z.id });
+    }
+    z.path = null;
+    z.rescues = 0;
+    z.bestDist = z.pos.distanceTo(goal);
+  }
+
+  // A spawn point with a real path to `goal`, cached per level because it
+  // is the same answer every time and A* is not free.
+  _reachableSpawn(goal) {
+    const list = this.level.zombieSpawns.length ? this.level.zombieSpawns : this.level.entries;
+    if (!list.length) return null;
+    const nav = this._nav();
+    if (!nav) return list[0];
+    if (!this.level._goodSpawns) {
+      this.level._goodSpawns = list.filter((s) => {
+        const path = nav.findPath(s.x, s.z, goal.x, goal.z);
+        if (!path || !path.length) return false;
+        const end = path[path.length - 1];
+        // A partial path that stops far short is not a route.
+        return Math.hypot(end.x - goal.x, end.z - goal.z) < 8;
+      });
+      if (!this.level._goodSpawns.length) this.level._goodSpawns = list.slice();
+    }
+    const good = this.level._goodSpawns;
+    return good[Math.floor(Math.random() * good.length)];
+  }
+
+  // WHICH RING DOES THIS ONE COME FROM?
+  //
+  // A level may tag its spawn points near / mid / far. Wave 1 draws from
+  // the near ring so the level opens within seconds instead of a minute
+  // of watching an empty field, and later waves widen out so you get both
+  // the thing already on you and the thing you can see gathering.
+  //
+  // Levels with no rings behave exactly as before.
+  _pickSpawn(all) {
+    const wave = Math.max(1, this.wave.night || 1);
+    const mix = wave <= 1 ? { near: 1.0, mid: 0.0, far: 0.0 }
+      : wave === 2 ? { near: 0.6, mid: 0.4, far: 0.0 }
+      : wave <= 4 ? { near: 0.4, mid: 0.4, far: 0.2 }
+      : { near: 0.3, mid: 0.35, far: 0.35 };
+    const want = (() => {
+      const r = Math.random();
+      if (r < mix.near) return 'near';
+      if (r < mix.near + mix.mid) return 'mid';
+      return 'far';
+    })();
+    const inRing = all.filter((p) => p.ring === want);
+    const pool = inRing.length ? inRing : all;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  // A spawn point is authored to sit BEHIND a sight blocker, and "behind"
+  // is easy to get slightly wrong: a metre out and the point is inside the
+  // house rather than behind it. A zombie born inside a prop cannot path
+  // out, and one unreachable zombie leaves the wave counter stuck forever.
+  //
+  // So the position is snapped to open ground before anything is created.
+  // The jitter is applied first and the snap second, so a crowd still
+  // spreads out but nobody starts inside a wall.
+  _legalSpawnPos(s) {
+    const p = s.clone().add(new THREE.Vector3(
+      (Math.random() - 0.5) * 0.8, 0, (Math.random() - 0.5) * 0.8));
+    const nav = this._nav();
+    if (nav) {
+      const [cx, cz] = nav.nearestFree(p.x, p.z);
+      p.x = nav.worldX(cx);
+      p.z = nav.worldZ(cz);
+    }
+    const gy = groundHeight(this.level, p.x, p.z, Infinity);
+    p.y = Number.isFinite(gy) ? gy : (this.level.baseY || 0);
+    return p;
   }
 
   // Hitscan: ray vs every living zombie's torso sphere, nearest first,
@@ -1010,7 +1148,44 @@ export class HostSim {
       if (owned.has('smg')) opts.push('ammo_smg');
       if (opts.length) kind = opts[Math.floor(Math.random() * opts.length)];
     }
-    if (kind) this.spawnItem(kind, z.pos);
+    if (!kind) return;
+    // LOOT YOU CANNOT REACH IS NOT LOOT. On a holdout level most zombies
+    // die out in the field, which the squad is deliberately confined out
+    // of. A drop there used to be litter you could see and never touch.
+    //
+    // Close kills fall inside the base. Distant ones become a FIELD CRATE
+    // with a beacon, and fetching it is the drone's second real job
+    // alongside placing traps.
+    if (this._reachable(z.pos)) { this.spawnItem(kind, z.pos); return; }
+    const home = this._nearestReachable(z.pos);
+    if (home && z.pos.distanceTo(home) < TUNING.economy.lootFallsInsideWithin) {
+      this.spawnItem(kind, home);
+    } else {
+      this.spawnItem(kind, z.pos, true);
+    }
+  }
+
+  // Can a player stand here? Levels that confine the squad say so; on any
+  // level without a boundary everything is reachable.
+  _reachable(pos) {
+    const c = this.level.baseCentre;
+    const half = this.level.playableHalf;
+    if (!c || !half) return true;
+    return Math.abs(pos.x - c.x) <= half && Math.abs(pos.z - c.z) <= half;
+  }
+
+  // The closest point inside the playable area to `pos`, so a kill just
+  // outside the wall drops its loot just inside it.
+  _nearestReachable(pos) {
+    const c = this.level.baseCentre;
+    const half = this.level.playableHalf;
+    if (!c || !half) return pos.clone();
+    const inset = half - 0.7;
+    const p = pos.clone();
+    p.x = Math.max(c.x - inset, Math.min(p.x, c.x + inset));
+    p.z = Math.max(c.z - inset, Math.min(p.z, c.z + inset));
+    p.y = this.level.heightAt(p.x, p.z);
+    return p;
   }
 
   damagePlayer(id, amount) {
@@ -1250,6 +1425,15 @@ export class HostSim {
       resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
       const gy = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
       z.pos.y = Number.isFinite(gy) ? gy : (this.level.baseY || 0);
+
+      // WATCHDOG. Moving is not the same as getting anywhere: a zombie
+      // shut inside a house can circle its rooms forever and never look
+      // stuck. What matters is whether it is closing on its target, and
+      // one enemy that never arrives makes the whole round unwinnable
+      // (this is the same class of bug as the wave counter freezing at
+      // "1 left"), so it is solved here at the system level rather than
+      // per level.
+      this._watchdog(z, stats, goal, dt);
 
       // Stuck detection: if pushout keeps eating the movement, force a
       // replan; if that fails too, sidestep. An agent must NEVER freeze.
@@ -1650,8 +1834,28 @@ export class HostSim {
       } else {
         const to = d.home.clone().sub(d.pos);
         const dist = to.length();
-        if (dist < 0.6) this.drones.delete(d.id);
-        else d.pos.addScaledVector(to.normalize(), Math.min(dist, 13 * dt));
+        // A fetched crate hangs under the drone the whole way back, so the
+        // player can watch their loot coming home.
+        if (d.carrying) {
+          const item = this.items.get(d.carrying);
+          if (item) { item.pos.set(d.pos.x, Math.max(0, d.pos.y - 0.6), d.pos.z); }
+          else d.carrying = null;
+        }
+        if (dist < 0.6) {
+          if (d.carrying) {
+            const item = this.items.get(d.carrying);
+            if (item) {
+              const land = this._nearestReachable(new THREE.Vector3(d.home.x, 0, d.home.z));
+              item.pos.copy(land);
+              item.field = false;
+              item.carried = false;
+              this.events.push({ e: 'delivered', id: item.id, kind: item.kind });
+            }
+          }
+          this.drones.delete(d.id);
+        } else {
+          d.pos.addScaledVector(to.normalize(), Math.min(dist, 13 * dt));
+        }
       }
     }
   }
@@ -1686,6 +1890,7 @@ export class HostSim {
     for (const item of [...this.items.values()]) {
       for (const [pid, p] of this.players) {
         if (p.down) continue;
+        if (item.field) continue;          // out in the field: send the drone
         if (p.pos.distanceToSquared(item.pos) > 0.9 * 0.9) continue;
         if (!this._grant(p, item.kind)) continue;
         this.items.delete(item.id);
@@ -1751,7 +1956,8 @@ export class HostSim {
     const is = [];
     for (const item of this.items.values()) {
       is.push([item.id, ITEM_KINDS.indexOf(item.kind),
-        +item.pos.x.toFixed(2), +item.pos.y.toFixed(2), +item.pos.z.toFixed(2)]);
+        +item.pos.x.toFixed(2), +item.pos.y.toFixed(2), +item.pos.z.toFixed(2),
+        item.field ? 1 : 0]);
     }
     const ms = [];
     for (const mine of this.mines.values()) {

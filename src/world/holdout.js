@@ -312,6 +312,31 @@ function pylons(level, x, z, dx, dz, count) {
   }
 }
 
+// A mound of rubble and concrete pipes. Close-in cover: big enough to
+// hide a body walking out from behind it, small enough not to wall off
+// the base's sightlines.
+function pipeMound(level, x, z, rot) {
+  const g = level.group;
+  const stone = mat(0x8a8378, 1.0);
+  const pipe = mat(0x9d968b, 0.9);
+  for (let i = 0; i < 4; i++) {
+    const [ox, oz] = rotXZ((i - 1.5) * 1.35, (i % 2) ? 0.5 : -0.5, rot);
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.62, 2.6, 10, 1, true), pipe);
+    p.position.set(x + ox, 0.62, z + oz);
+    p.rotation.set(Math.PI / 2, 0, rot + (i % 2) * 0.2);
+    g.add(p);
+    level.colliders.push({ x: x + ox, z: z + oz, hx: 1.3, hz: 0.65, tall: true });
+  }
+  for (let i = 0; i < 5; i++) {
+    const [ox, oz] = rotXZ((i - 2) * 1.1, 1.9 + (i % 2) * 0.6, rot);
+    const r = new THREE.Mesh(new THREE.DodecahedronGeometry(0.55 + (i % 3) * 0.2, 0), stone);
+    r.position.set(x + ox, 0.35, z + oz);
+    r.rotation.set(i, i * 1.4, i * 0.6);
+    g.add(r);
+    level.colliders.push({ x: x + ox, z: z + oz, hx: 0.7, hz: 0.7, tall: true });
+  }
+}
+
 function busWreck(level, x, z, rot) {
   const g = level.group;
   const body = mat(0x5a5347, 0.9, 0.2);
@@ -394,6 +419,9 @@ export function buildHoldout(level, rng, quality, makeElevator) {
   container(level, 12, -22, -0.9, 0x2f4a52);            // on the ridge approach
   container(level, -22, -4, 1.4, 0x4a4736);             // west, the quiet side
   busWreck(level, -6, 20, 0.35);                        // south-west approach
+  // Close-in cover, so the near ring has somewhere to come from.
+  pipeMound(level, -4, -15, 0.6);                       // 10 m out, north-east
+  busWreck(level, -15, -1.5, 1.5);                      // 10 m out, south
   pylons(level, -8, -30, 6.5, 4.2, 6);                  // marching in from the ridge
   pylons(level, 26, -2, 2.0, 7.5, 5);                   // east, past the tree
   skyline(g, rng);
@@ -410,21 +438,53 @@ export function buildHoldout(level, rng, quality, makeElevator) {
     g.add(d);
   }
 
-  // ---- Zombie spawns: always behind a blocker, never in view ----
-  // Each spawn names the thing it hides behind, so the fiction is legible
-  // in the debug overlay as well as on screen.
+  // ---- Zombie spawns: three rings, always behind a blocker ----
+  //
+  // Ola on the approach: "mixed distances, not one distance. Nearest
+  // spawn cover about 12-15 m so something is on you within roughly ten
+  // seconds, mid ring about 25 m, far ring 40 m+ for the ones you watch
+  // build up. Wave 1 starts from the near ring so the level opens fast."
+  //
+  // The long walk is only tension if you can ACT during it, so the near
+  // ring gives you something to shoot immediately while the far ring
+  // builds the thing you are dreading. Every point still sits behind a
+  // sight blocker: nothing is ever born in the open.
+  //
+  // A spawn is described by the thing it hides behind and how far out it
+  // is, and the position is DERIVED: put it on the base-to-blocker ray at
+  // the ring distance, which is always further out than the blocker, so
+  // it is always hidden and always at the intended range. Hand-placed
+  // coordinates drift out of their ring the moment anything moves.
+  const spawnBehind = (bx, bz, dist) => {
+    const dx = bx - BX, dz = bz - BZ;
+    const d = Math.hypot(dx, dz) || 1;
+    return { x: BX + (dx / d) * dist, z: BZ + (dz / d) * dist };
+  };
   const spawnPoints = [
-    { x: 6, z: -40, from: 'ridge' },
-    { x: -6, z: -38, from: 'ridge' },
-    { x: 21, z: -9, from: 'tree' },
-    { x: 25, z: 12, from: 'cars' },
-    { x: -26, z: 19, from: 'rock' },
-    { x: 8, z: 30, from: 'house' },
-    { x: -37, z: -30, from: 'house' },
+    // NEAR (13-15 m): something is on you within about ten seconds, so
+    // the level opens fast instead of with a minute of empty field.
+    { at: [-4, -15], from: 'pipes', ring: 'near', dist: 14 },
+    { at: [-15, -1.5], from: 'bus', ring: 'near', dist: 14.5 },
+    { at: [-22, -4], from: 'container', ring: 'near', dist: 15 },
+    // MID (24-27 m): the working distance, where most of it happens.
+    { at: [2, -14], from: 'barrier', ring: 'mid', dist: 25 },
+    { at: [-4, 6], from: 'container', ring: 'mid', dist: 26 },
+    { at: [12, -22], from: 'container', ring: 'mid', dist: 27 },
+    { at: [-34, -27], from: 'house', ring: 'mid', dist: 27 },
+    // FAR (40 m+): the ones you watch gather out of the haze, and dread.
+    { at: [6, -34], from: 'ridge', ring: 'far', dist: 42 },
+    { at: [18, -6], from: 'tree', ring: 'far', dist: 40 },
+    { at: [22, 9], from: 'cars', ring: 'far', dist: 44 },
+    { at: [-22, 16], from: 'rock', ring: 'far', dist: 41 },
+    { at: [8, 26], from: 'house', ring: 'far', dist: 46 },
+    { at: [-6, 20], from: 'bus', ring: 'far', dist: 40 },
   ];
-  for (const s of spawnPoints) {
-    level.zombieSpawns.push(new THREE.Vector3(s.x, 0, s.z));
-    level.spawnSources.push({ x: s.x, z: s.z, kind: s.from });
+  for (const sp of spawnPoints) {
+    const s = { ...spawnBehind(sp.at[0], sp.at[1], sp.dist), from: sp.from, ring: sp.ring };
+    const v = new THREE.Vector3(s.x, 0, s.z);
+    v.ring = s.ring;
+    level.zombieSpawns.push(v);
+    level.spawnSources.push({ x: s.x, z: s.z, kind: s.from, ring: s.ring });
     // entries double as the "they are coming from here" markers used by
     // the tactical map and the approach warning.
     level.entries.push(new THREE.Vector3(
@@ -506,7 +566,7 @@ export function buildHoldout(level, rng, quality, makeElevator) {
   // leaves a slot barely wider than the player, which they can walk into
   // and then struggle to walk out of. Flush, or a clear two metres away.
   cover(level, MATS.crate, BX - 3.11, BZ - 3.11, 1.3, 1.3, 1.0);   // NW corner, flush
-  cover(level, MATS.crate, BX - 0.5, BZ, 0.9, 0.9, 0.75);          // middle, open floor
+  cover(level, MATS.crate, BX - 1.9, BZ + 2.2, 0.9, 0.9, 0.75);    // south-west of centre
   cover(level, MATS.sandbag, BX - 3.06, BZ - 0.6, 1.4, 0.7);       // flush to the west wall
 
   // ---- The elevator plate ----

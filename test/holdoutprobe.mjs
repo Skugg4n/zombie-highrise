@@ -32,9 +32,22 @@ await page.waitForFunction(() => window.__zhr.state() === 'playing', null, { tim
 
 // Spawn distance: nothing may start close to the base.
 const spawnInfo = await page.evaluate(() => window.__zhr.holdout().spawns);
-console.log('spawn points:', spawnInfo.map((s) => `${s.from} @${s.dist.toFixed(0)}m`).join(', '));
-const tooClose = spawnInfo.filter((s) => s.dist < 25);
-console.log(tooClose.length ? `FAIL: ${tooClose.length} spawn(s) inside 25 m` : 'OK: every spawn is 25 m+ from the base');
+// Mixed distances, not one distance (Ola): a near ring so the level opens
+// fast, a mid ring for the working fight, and a far ring you watch build.
+const RINGS = { near: [11, 17], mid: [22, 30], far: [38, 999] };
+const byRing = {};
+for (const s of spawnInfo) (byRing[s.ring || 'far'] ||= []).push(s);
+let ringsOk = true;
+for (const [ring, [lo, hi]] of Object.entries(RINGS)) {
+  const list = byRing[ring] || [];
+  const bad = list.filter((s) => s.dist < lo || s.dist > hi);
+  if (!list.length || bad.length) ringsOk = false;
+  console.log(`  ${ring.padEnd(4)} ring: ${list.length} spawns at `
+    + `${list.map((s) => `${s.from} ${s.dist.toFixed(0)}m`).join(', ') || 'NONE'}`
+    + (bad.length ? `  OUT OF BAND (${lo}-${hi} m)` : ''));
+}
+console.log(ringsOk ? 'OK: near, mid and far rings are all populated and in band'
+  : 'FAIL: the approach is not mixed');
 
 // Every spawn must have a route in. A single zombie that cannot reach the
 // base leaves "NIGHT 1 - 1 left" on screen forever.

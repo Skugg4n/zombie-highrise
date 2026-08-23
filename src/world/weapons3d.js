@@ -74,9 +74,35 @@ export function makeWeaponMesh(kind) {
   return g;
 }
 
-// The empty hand in VR. Without it the off-hand is invisible, and a hand
-// you cannot see is worse than a wrong one: you lose track of where your
-// grenades and health packs are coming from.
+// The off hand in VR. It used to be a bare glove, and Ola read that as
+// "a mechanical lump that can shoot". It is a FLASHLIGHT now: something
+// with an obvious purpose that you aim independently of the gun, which is
+// the whole point of having two hands in VR.
+//
+// The caller decides whether to light it. On a daylight holdout level a
+// lit torch is absurd, so the lamp stays off and the hand simply holds
+// the tool.
+export function makeFlashlightMesh() {
+  const g = new THREE.Group();
+  const shell = new THREE.MeshStandardMaterial({ color: 0x2f343a, roughness: 0.5, metalness: 0.4 });
+  const grip = new THREE.MeshStandardMaterial({ color: 0x1c1f22, roughness: 1.0 });
+  part(g, new THREE.CylinderGeometry(0.023, 0.026, 0.15, 10), shell, 0, 0, -0.05, Math.PI / 2);
+  part(g, new THREE.CylinderGeometry(0.019, 0.019, 0.06, 10), grip, 0, 0, 0.035, Math.PI / 2);
+  part(g, new THREE.CylinderGeometry(0.032, 0.026, 0.035, 10), shell, 0, 0, -0.13, Math.PI / 2);
+  // The lens: emissive so you can see the tool is on without looking at
+  // what it is pointing at.
+  const lens = new THREE.Mesh(
+    new THREE.CircleGeometry(0.028, 12),
+    new THREE.MeshStandardMaterial({ color: 0x0d0f11, emissive: 0xffe9c0, emissiveIntensity: 0 }));
+  lens.position.set(0, 0, -0.147);
+  lens.rotation.y = Math.PI;
+  g.add(lens);
+  g.userData.lens = lens;
+  return g;
+}
+
+// The gloved hand, kept for the case where the off hand holds nothing at
+// all (dual pistols put a light under the barrel instead).
 export function makeGloveMesh() {
   const g = new THREE.Group();
   const leather = new THREE.MeshStandardMaterial({ color: 0x33302c, roughness: 0.9 });
@@ -85,6 +111,21 @@ export function makeGloveMesh() {
   part(g, new THREE.BoxGeometry(0.065, 0.05, 0.06), leather, 0, 0.005, -0.08); // fingers
   part(g, new THREE.BoxGeometry(0.03, 0.05, 0.045), leather, -0.04, -0.01, -0.03); // thumb
   part(g, new THREE.BoxGeometry(0.075, 0.03, 0.035), strap, 0, 0, 0.06);      // wrist strap
+  return g;
+}
+
+// An under-barrel light for when both hands are full (dual pistols).
+export function makeUnderBarrelLight() {
+  const g = new THREE.Group();
+  const shell = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.5, metalness: 0.4 });
+  part(g, new THREE.CylinderGeometry(0.014, 0.014, 0.07, 8), shell, 0, -0.028, -0.06, Math.PI / 2);
+  const lens = new THREE.Mesh(
+    new THREE.CircleGeometry(0.013, 10),
+    new THREE.MeshStandardMaterial({ color: 0x0d0f11, emissive: 0xffe9c0, emissiveIntensity: 0 }));
+  lens.position.set(0, -0.028, -0.096);
+  lens.rotation.y = Math.PI;
+  g.add(lens);
+  g.userData.lens = lens;
   return g;
 }
 

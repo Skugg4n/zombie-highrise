@@ -4,7 +4,46 @@ Live build: https://skugg4n.github.io/zombie-highrise/
 Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw".
 
-## v0.11.0 - THE FIRST HOLDOUT LEVEL (START HERE, THIS IS THE ONE)
+## v0.13.0 - VR CAN SEE (CHECK THIS FIRST IN THE HEADSET)
+
+- [ ] WRIST DISPLAY: turn your left wrist toward you like checking a
+      watch. It should show the objective in plain words, how many are
+      left, HP, base integrity, scrap, weapon and ammo. Tell me if
+      anything you need is still missing from it.
+- [ ] AMMO ON THE GUN: a counter on the weapon itself, red at zero.
+      You should never need the wrist mid-fight.
+- [ ] RELOAD: point the gun at the floor and hold. You should hear the
+      mag come out, hear it hit the floor, hear the new one seat with a
+      clack, and see the charge light go green.
+- [ ] EMPTY: pull the trigger with an empty gun. A hard CLICK.
+- [ ] LEFT HAND: a flashlight you aim yourself. On floor 1 (daylight) it
+      is carried but unlit, which is deliberate. With dual pistols it
+      moves under the barrel.
+- [ ] RAMP: walk up and down it in roomscale. You should not fall
+      through. This was the ground being sampled under the play-space
+      origin instead of under you.
+- [ ] RECOIL: fire fast and watch the gun kick in your hand. Your AIM
+      must never be moved for you, only the spread should widen.
+
+## v0.13.0 - EVERYWHERE
+
+- [ ] SHOOTING: tap-fire is dead accurate; spam and the muzzle climbs off
+      the target. The pattern is the same every burst, so you can learn
+      to pull against it. Tell me if it feels unfair rather than skilful.
+- [ ] BASE UNDER ATTACK: you should hear which section is nearly gone
+      without looking, and an alarm that speeds up as the perimeter
+      fails.
+- [ ] THE APPROACH: something should be on you within about ten seconds
+      of a wave starting, with more gathering at 25 m and 40 m. THIS IS
+      THE THING I MOST WANT JUDGED: is the walk-in interesting, or is it
+      waiting?
+- [ ] FIELD CRATES: kill something far out and a crate with a blue beacon
+      drops. Open the map, set the drone to FETCH (free) and click it.
+      The drone should carry it home and land it in the base.
+- [ ] No zombie should ever be unkillable or unreachable. If a wave ever
+      sticks with one left, tell me where it was standing.
+
+## v0.11.0 - THE FIRST HOLDOUT LEVEL
 
 This is the level to judge. Everything else in the build is the old
 high-rise content still sitting further up the cycle. Play floor 1 and

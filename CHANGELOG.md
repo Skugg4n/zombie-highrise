@@ -1,5 +1,104 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.13.0 - 2026-08-23 - VR can see, and the round can always be won
+
+From Ola's VR playtest.
+
+### VR was flying blind
+
+"There is no HUD, no text and no readable state in VR at all. I do not
+know if the gun is loaded, how many zombies remain, or what to do next."
+
+**A wrist display on the left forearm.** Angled so a natural
+watch-checking turn brings it square to your eyes. It carries the
+objective in plain words ("GO TO THE LIFT", "REPAIR THE WALL", "HOLD THE
+LINE"), zombies remaining, health, base integrity, scrap, weapon, ammo
+and kit. The rule from here on: nothing important may exist only as flat
+HUD text.
+
+**An ammo counter on the weapon itself.** Ammo is the one number you need
+mid-fight and you should never look away from a zombie to read it. Big,
+high contrast, red at zero, and it shows a reload symbol while reloading.
+
+Both are canvas textures redrawn only when their content changes, because
+a per-frame canvas upload is a frame-rate problem on a Quest 2.
+
+### Reload and ammo feedback
+
+- **A hard mechanical CLICK on an empty trigger.** This is the primary
+  "you are out" signal and it did not exist.
+- **The reload is audible in three beats**: magazine release, empty mag
+  hitting the floor, fresh one going in. In VR there is no viewmodel to
+  watch, so the sound has to carry it.
+- **A confirmation the moment the magazine seats**: a solid clack, a
+  rising two-note tone, the weapon snapping up, and the VR charge light
+  going green. Before this the reload just... ended.
+
+### The off hand is a flashlight
+
+It was holding a bare glove, which Ola read as "a mechanical lump that
+can shoot". It is a torch now, aimed independently of the gun, with a
+real beam. With dual pistols equipped it becomes an under-barrel light
+instead. And it only lights on dark levels: waving a lit torch around in
+bright daylight is absurd, so on a surface holdout the hand simply
+carries the tool.
+
+### Two bugs that made rounds unwinnable
+
+**"The ramp is wonky and the player sometimes falls through it."** In
+roomscale VR the player can stand two metres from the play-space origin,
+and the ground was sampled under the ORIGIN. You stood on the ramp while
+the game decided your feet were on the floor beside it. The character
+controller now runs at the camera's ground position in VR. The ramp
+geometry itself was verified solid from four approaches by the new
+`test/rampprobe.mjs`.
+
+**"A zombie spawned far away inside a house and could not be killed."**
+Both fixes, as asked:
+- Spawn points are snapped to open ground before the zombie exists. A
+  spawn authored to sit BEHIND a house is easy to get a metre wrong and
+  end up INSIDE it.
+- A **stuck watchdog** as a general safety net, at the system level rather
+  than per level. Moving is not the same as arriving: an enemy shut in a
+  building can circle its rooms forever and never look stuck. What is
+  measured is progress toward its target. Five seconds without any
+  escalates through replan, unwedge, and finally relocation to a spawn
+  point that demonstrably has a route. No round can be lost to one
+  unreachable enemy.
+
+### The approach is mixed, not one distance
+
+Ola: "nearest spawn cover about 12-15 m so something is on you within
+roughly ten seconds, mid ring about 25 m, far ring 40 m+ for the ones you
+watch build up. Wave 1 starts from the near ring so the level opens
+fast."
+
+Three rings, and spawn positions are now DERIVED rather than typed: a
+spawn is described by the thing it hides behind and how far out it sits,
+and is placed on the base-to-blocker ray at that distance. It is
+therefore always hidden and always in its band, which hand-placed
+coordinates stop being the moment anything moves. Two close-in blockers
+were added (a pipe mound and a second bus wreck) so the near ring has
+somewhere to come from. Wave 1 draws entirely from the near ring; later
+waves widen out.
+
+### Loot you cannot reach is not loot
+
+Most zombies die out in the field, which the squad is deliberately
+confined out of, so drops were litter you could see and never touch. A
+kill just outside the wall now drops inside it. A distant kill becomes a
+FIELD CRATE with a beacon visible from the base, and fetching it is the
+drone's second real job: FETCH is free, the flight time is the price, and
+the crate hangs under the drone the whole way home.
+
+### The base under attack is loud now
+
+Three tiers chosen by how close that section is to going: a body blow
+while it holds, wood splintering once it is nearly through, and a heavy
+collapse when it breaks. Plus a rising alarm as the perimeter as a whole
+fails, pulsing faster the closer it gets. You must feel the emergency
+without looking.
+
 ## v0.12.1 - 2026-08-23 - fire rate is your trigger finger
 
 Ola: "the fire rate should be more like a real weapon in that you CAN

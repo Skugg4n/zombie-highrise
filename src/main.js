@@ -234,6 +234,8 @@ const horde = new HordeRenderer(scene, 40, QUALITY === 'DESKTOP');
 const zombieStates = new Map();   // id -> {type,x,y,z,rotY,animT,staggerT,flashT}
 const dyingStates = [];           // corpses toppling out: {..., t}
 const tmpV = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
+const vrFeet = new THREE.Vector3();   // where the VR player's feet actually are
 const tmpQ = new THREE.Quaternion();
 
 function poseZombie(group, animT) {
@@ -593,7 +595,7 @@ const explosions = [];             // [{light, shell, t}]
 
 function updateItemVisuals(rows, dt) {
   const keep = new Set();
-  for (const [id, ki, x, y, z] of rows) {
+  for (const [id, ki, x, y, z, field] of rows) {
     keep.add(id);
     let v = itemVisuals.get(id);
     if (!v) {
@@ -605,7 +607,20 @@ function updateItemVisuals(rows, dt) {
       ring.rotation.x = -Math.PI / 2;
       ring.name = 'ring';
       group.add(ring);
-      v = { group, ring, kind: ITEM_KINDS[ki], bobT: Math.random() * 6 };
+      // A crate out in the field needs a beacon: it has to be findable
+      // from inside the base at forty metres, and it must read as "send
+      // the drone", not "walk over and grab it".
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.22, 9, 6, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: 0x6fd0ff, transparent: true, opacity: 0.24,
+          depthWrite: false, side: THREE.DoubleSide,
+        }));
+      beam.position.y = 4.5;
+      beam.name = 'beacon';
+      beam.visible = false;
+      group.add(beam);
+      v = { group, ring, beam, kind: ITEM_KINDS[ki], bobT: Math.random() * 6 };
       itemVisuals.set(id, v);
       scene.add(v.group);
     }
@@ -614,6 +629,14 @@ function updateItemVisuals(rows, dt) {
     v.group.rotation.y += dt * 1.2;
     // Ring stays glued to the ground while the item bobs.
     v.ring.position.y = -(v.group.position.y - y) + 0.02;
+    if (v.beam) {
+      v.beam.visible = !!field;
+      if (field) {
+        v.beam.material.opacity = 0.18 + 0.1 * Math.sin(v.bobT * 1.6);
+        v.beam.position.y = 4.5 - (v.group.position.y - y);
+      }
+    }
+    v.ring.material.color.setHex(field ? 0x6fd0ff : 0xe0a33c);
     v.ring.rotation.z += dt;
     v.ring.material.opacity = 0.35 + Math.sin(v.bobT * 1.5) * 0.15;
   }
@@ -1220,6 +1243,13 @@ function makeArsenal() {
       swing: () => { viewmodelSwingT = 0.34; spawnSwingTrail(); audio.play('machete'); },
       throw: () => audio.play('throw'),
       reload: () => audio.play('reload'),
+      magSeated: () => {
+        audio.play('magseat');
+        // Visual confirmation too: the flat viewmodel snaps up and the VR
+        // weapon's charge light goes green (handled in vr.js).
+        viewmodelKick = 0.045;
+        magSeatFlashT = 0.28;
+      },
       dry: () => audio.play('dryfire'),
     },
   });
@@ -1338,11 +1368,27 @@ function applyWallState(hps) {
 
 // Base integrity readout + the repair prompt, refreshed on wall events and
 // once per frame while the prompt could change.
+let baseAlarmT = 0;
+let magSeatFlashT = 0;   // brief 'ready' confirmation after a reload
+let lastDt = 1 / 60;     // the frame loop's dt, for helpers called from it
 function updateBaseHud() {
   const wall = level && level.baseWall;
   if (!wall) { hud.setBase(null); hud.setRepairPrompt(false); return; }
-  hud.setBase(wall.integrity());
+  const integrity = wall.integrity();
+  hud.setBase(integrity);
   hud.setRepairPrompt(!!nearestRepairTarget(), TUNING.base.repairCost);
+  // A pulse that speeds up as the perimeter fails: the emergency has to
+  // be audible from anywhere in the base, including with your back to it.
+  if (integrity < TUNING.base.warnAt && lastWave && lastWave.ph === 'night') {
+    baseAlarmT -= lastDt;
+    if (baseAlarmT <= 0) {
+      baseAlarmT = 0.6 + 2.2 * Math.max(0, (integrity - TUNING.base.loseAt))
+        / Math.max(0.01, TUNING.base.warnAt - TUNING.base.loseAt);
+      audio.play('baseAlarm');
+    }
+  } else {
+    baseAlarmT = 0;
+  }
 }
 
 // ---- Night vision -------------------------------------------------------
@@ -1390,15 +1436,17 @@ let mapSavedFog = null;
 // The drone button doubles as the payload selector: click it again to
 // cycle what it will carry. One button, no submenu, and the price is
 // always on the label.
-const DRONE_PAYLOADS = ['mine', 'tar', 'spike', 'lure'];
+const DRONE_PAYLOADS = ['mine', 'tar', 'spike', 'lure', 'fetch'];
 const PAYLOAD_LABEL = {
-  mine: 'MINE', tar: 'TAR', spike: 'SPIKES', lure: 'FLARE',
+  mine: 'MINE', tar: 'TAR', spike: 'SPIKES', lure: 'FLARE', fetch: 'FETCH',
 };
 let dronePayload = 'mine';
 
 function refreshDroneButton() {
   const cost = TUNING.economy.dronePayload[dronePayload];
-  $('btn-map-drone').textContent = `DRONE: ${PAYLOAD_LABEL[dronePayload]} - ${cost}`;
+  $('btn-map-drone').textContent = dronePayload === 'fetch'
+    ? 'DRONE: FETCH LOOT - free'
+    : `DRONE: ${PAYLOAD_LABEL[dronePayload]} - ${cost}`;
   $('btn-map-mine').textContent = `MINE - ${TUNING.economy.minePlacementFromMap}`;
 }
 
@@ -1815,6 +1863,16 @@ function handleEvents(evs) {
         }
         break;
       }
+      case 'fielddrop':
+        showToast('Supplies down in the field. Send the drone.', 2400);
+        break;
+      case 'fetchmiss':
+        showToast('Nothing there to pick up.', 1600);
+        break;
+      case 'delivered':
+        audio.play('pickup');
+        showToast('Drone delivered the crate.', 1800);
+        break;
       case 'bite': {
         const v = zombieStates.get(ev.id);
         if (v) v.lungeT = 0.35;
@@ -1832,12 +1890,19 @@ function handleEvents(evs) {
           if (seg.collider) seg.collider.dead = seg.dead;
           wall.refresh(ev.i);
         }
+        const at = [seg ? seg.x : 0, 1, seg ? seg.z : 0];
         if (ev.broke) {
-          audio.play('wallbreak', [seg ? seg.x : 0, 1, seg ? seg.z : 0]);
+          audio.play('wallbreak', at);
           showToast('BREACH! The wall is down.', 2200);
-          if (!(vrInput && vrInput.active)) addShake(0.03);
+          if (!(vrInput && vrInput.active)) addShake(0.05);
         } else if (!ev.fix) {
-          audio.play('wallhit', [seg ? seg.x : 0, 1, seg ? seg.z : 0]);
+          // Escalate with the damage: a body blow while the section holds,
+          // wood splintering once it is nearly through. The player must be
+          // able to hear WHICH part of the base is about to go without
+          // turning to look at it.
+          const f = seg ? seg.hp / seg.maxHp : 1;
+          audio.play(f < 0.4 ? 'wallcrack' : 'wallhit', at);
+          if (f < 0.25 && !(vrInput && vrInput.active)) addShake(0.012);
         }
         updateBaseHud();
         break;
@@ -2244,6 +2309,65 @@ function presentPhase(ph) {
   }
 }
 
+// ---- VR readouts --------------------------------------------------------
+// RULE (Ola's VR playtest): nothing important may exist only as flat HUD
+// text. Everything a flat player reads off the screen has to reach a VR
+// player, so this mirrors the whole HUD onto the wrist and the ammo count
+// onto the weapon.
+//
+// The objective is deliberately in plain words rather than a phase name:
+// "GO TO THE LIFT" tells you what to do, "elevator" does not.
+function vrObjective(w) {
+  if (!w) return { objective: 'STAND BY', sub: '' };
+  const label = level.waveLabel || 'NIGHT';
+  switch (w.ph) {
+    case 'lobby':
+      return { objective: 'STAND BY', sub: 'waiting for the host' };
+    case 'day':
+      return {
+        objective: level.baseWall ? 'REPAIR THE WALL' : 'LAY YOUR TRAPS',
+        sub: `${label.toLowerCase()} ${w.n + 1} in ${w.t}s`,
+      };
+    case 'countdown':
+      return { objective: 'THEY ARE COMING', sub: `${label} ${w.n + 1} in ${w.t}` };
+    case 'night':
+      return { objective: `HOLD THE LINE`, sub: `${label} ${w.n}` };
+    case 'elevator':
+      return { objective: 'GO TO THE LIFT', sub: 'area cleared' };
+    case 'ride':
+      return { objective: 'RIDING UP', sub: `floor ${w.lv + 1}` };
+    case 'finale':
+      return { objective: 'GET TO THE HELICOPTER', sub: 'extraction inbound' };
+    case 'victory':
+      return { objective: 'EXTRACTED', sub: 'you made it out' };
+    case 'gameover':
+      return { objective: 'DOWN', sub: 'the run is over' };
+    default:
+      return { objective: '', sub: '' };
+  }
+}
+
+function updateVrReadouts() {
+  if (!vrInput || !vrInput.active) return;
+  const w = lastWave;
+  const info = arsenal.hudInfo();
+  const { objective, sub } = vrObjective(w);
+  vrInput.setWristState({
+    objective, sub,
+    left: w && w.ph === 'night' ? w.left : null,
+    hp: myHp, hpMax: 100,
+    scrap,
+    weapon: info.name,
+    mag: info.mag, reserve: info.reserve, reloading: info.reloading,
+    baseIntegrity: level.baseWall ? level.baseWall.integrity() : null,
+    packs: info.packs, mines: info.mines || 0,
+  });
+  vrInput.setAmmoTag(info.mag, info.magMax, info.reloading);
+  // A lit torch in bright daylight is absurd. On surface levels the hand
+  // simply carries the tool; underground it actually lights the way.
+  vrInput.setHandLight(!level.daylight && (flashlightOn || !!level.lighting.dark));
+}
+
 // ---- HUD phase text -----------------------------------------------------
 function updateWaveHud(w) {
   if (!w) { hud.setWave('NIGHT 1'); return; }
@@ -2284,6 +2408,7 @@ let groanT = 3;
 renderer.setAnimationLoop(() => {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
+  lastDt = dt;
   last = now;
 
   if (!PHOTOMODE && !UISTATE) {
@@ -2329,9 +2454,25 @@ renderer.setAnimationLoop(() => {
     }
     // Vertical is honest for everyone: you step up, you walk down, and if
     // there is nothing under you, you fall.
+    //
+    // VR NOTE (Ola: "the ramp is wonky and the player sometimes falls
+    // through it"). In roomscale the player can be two metres from the
+    // rig's origin, so sampling the ground under the RIG samples the
+    // wrong place entirely: you stand on the ramp while the game decides
+    // your feet are on the floor beside it. The controller therefore runs
+    // at the CAMERA's ground position in VR, and the resulting height is
+    // carried back to the rig, which is what actually moves.
     playerVel.x = 0; playerVel.z = 0;
-    const grounded = moveAndCollide(
-      level, rig.group.position, playerVel, dt, [], LOCO.radius);
+    let grounded;
+    if (inVR) {
+      const cam = camera.getWorldPosition(tmpV2);
+      vrFeet.set(cam.x, rig.group.position.y, cam.z);
+      grounded = moveAndCollide(level, vrFeet, playerVel, dt, [], LOCO.radius);
+      rig.group.position.y = vrFeet.y;
+    } else {
+      grounded = moveAndCollide(
+        level, rig.group.position, playerVel, dt, [], LOCO.radius);
+    }
     // Falling out of the world (off a balcony, into a chasm) is a death,
     // not an eternal descent.
     if (!grounded && rig.group.position.y < (level.baseY || 0) - 25) {
@@ -2511,6 +2652,7 @@ renderer.setAnimationLoop(() => {
       if (lastWave && lastWave.ph !== presentedPhase) presentPhase(lastWave.ph);
       updateWaveHud(lastWave);
       updateBaseHud();
+      updateVrReadouts();
     }
     updateDayNight();
     updateNightVision(dt);
@@ -2697,7 +2839,7 @@ window.__zhr = {
     }
     return {
       spawns: level.spawnSources.map((s) => ({
-        from: s.kind, dist: Math.hypot(s.x - c.x, s.z - c.z),
+        from: s.kind, ring: s.ring || null, dist: Math.hypot(s.x - c.x, s.z - c.z),
       })),
       state: {
         integrity: wall.integrity(),
@@ -2914,6 +3056,35 @@ window.__zhr = {
     if (force) { arsenal.cooldown = 0; arsenal.cooldownR = 0; }
     const ray = aimRay();
     if (ray) arsenal.fire(ray.origin, ray.dir);
+  },
+
+  // Walk a straight line through the level with the real character
+  // controller and report every frame's ground height. Used to hunt
+  // "the ramp is wonky and I fall through it": a fall shows up as a
+  // sudden drop, a hole shows up as a Y that is not on any ramp step.
+  debugWalkLine: (x0, z0, x1, z1, steps = 90) => {
+    const save = rig.group.position.clone();
+    const dx = (x1 - x0) / steps, dz = (z1 - z0) / steps;
+    rig.group.position.set(x0, level.heightAt(x0, z0), z0);
+    playerVel.set(0, 0, 0);
+    const out = [];
+    for (let i = 0; i <= steps; i++) {
+      const tx = x0 + dx * i, tz = z0 + dz * i;
+      // Drive with velocity so the controller's own step logic decides,
+      // exactly as it would for a walking player.
+      const px = rig.group.position.x, pz = rig.group.position.z;
+      playerVel.set((tx - px) * 60, playerVel.y, (tz - pz) * 60);
+      moveAndCollide(level, rig.group.position, playerVel, 1 / 60, [], LOCO.radius);
+      resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
+      out.push([
+        +rig.group.position.x.toFixed(2),
+        +rig.group.position.y.toFixed(2),
+        +rig.group.position.z.toFixed(2),
+      ]);
+    }
+    rig.group.position.copy(save);
+    playerVel.set(0, 0, 0);
+    return out;
   },
 
   debugRamps: () => (level.ramps || []).map((r) => ({
