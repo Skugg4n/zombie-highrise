@@ -132,6 +132,113 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   await dark.close();
 }
 
+// ---- 2c. The strategy view: the drone is usable in a headset ----
+// Ola: "the wrist is the TRIGGER, not the whole surface... big enough to
+// read the map and place a drone target precisely." Before this the drone
+// needed a click on a 2D map, so in VR it could not be sent at all. The
+// test is the whole errand: unfold the panel, point at a spot, send the
+// drone, and check that a drone is in the air heading there.
+{
+  const s = await page.evaluate(async () => {
+    const D = window.__zhr;
+    const closed = D.debugStrategy();
+    D.debugStrategyOpen(true);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const open = D.debugStrategy();
+    const pointed = D.debugStrategyPointAt(0.5, 0.5);
+    const aimed = D.debugStrategy();
+    return { closed, open, pointed, aimed, centre: D.debugPanelToWorld(0.5, 0.5) };
+  });
+  check(s.closed.open === false, 'the panel starts folded');
+  check(s.open.open === true, 'glancing at the wrist unfolds the panel');
+  check(!!s.pointed, 'the panel can be pointed at', JSON.stringify(s.pointed));
+  check(s.aimed.cursor !== null, 'and the cursor lands where you point',
+    JSON.stringify(s.aimed.cursor));
+  check(s.aimed.label && s.aimed.label.length > 0,
+    'and it says what the trigger will do', s.aimed.label);
+
+  // The middle of the panel must be the middle of the level, or every
+  // point placed on it lands somewhere else. This is the one bit of maths
+  // in the feature and the one that will be silently wrong.
+  // Does the panel's coordinate maths agree with the camera's own
+  // projection? Checking the CENTRE alone proves nothing: the frustum is
+  // symmetric, so the middle maps to the middle whatever the signs are.
+  // Off-centre points are where a flipped axis shows up, and a flipped
+  // axis means every drone lands on the wrong side of the level with
+  // nothing on screen to say so.
+  const mapping = await page.evaluate(() => {
+    const D = window.__zhr;
+    let worst = 0, detail = '';
+    for (const [u, v] of [[0.2, 0.3], [0.8, 0.25], [0.35, 0.9], [0.95, 0.55]]) {
+      const w = D.debugPanelToWorld(u, v);
+      const back = D.debugProjectToPanel(w.x, w.z);
+      const err = Math.hypot(back.u - u, back.v - v);
+      if (err > worst) { worst = err; detail = `(${u},${v}) -> ${w.x.toFixed(1)},${w.z.toFixed(1)} -> (${back.u.toFixed(3)},${back.v.toFixed(3)})`; }
+    }
+    return { worst, detail };
+  });
+  check(mapping.worst < 0.005,
+    'a point on the panel is the ground it is drawn over',
+    `worst error ${mapping.worst.toFixed(4)} ${mapping.detail}`);
+
+  const centreOk = await page.evaluate((c) => {
+    // baseCentre() is [x, y, z], not {x, z}. Reading .x off an array
+    // gives undefined and Math.hypot(NaN) is NaN, which is how the first
+    // version of this reported "off by NaN" instead of failing loudly.
+    const b = window.__zhr.baseCentre ? window.__zhr.baseCentre() : null;
+    if (!b) return null;
+    return { c, b, off: Math.hypot(c.x - b[0], c.z - b[2]) };
+  }, s.centre);
+  check(centreOk && centreOk.off < 1.5,
+    'the middle of the panel is the middle of the level',
+    centreOk ? `off by ${centreOk.off.toFixed(2)} m` : 'no base centre');
+
+  const sent = await page.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugScrap(200);
+    D.debugStrategyPointAt(0.62, 0.42);
+    const before = D.debugField().drones.length;
+    const ok = D.debugStrategyClick();
+    await new Promise((r) => setTimeout(r, 350));
+    return { ok, before, after: D.debugField().drones.length,
+      st: D.debugStrategy() };
+  });
+  check(sent.ok === true, 'the trigger sends the drone');
+  check(sent.after > sent.before,
+    `a drone is actually in the air (${sent.before} -> ${sent.after})`);
+  check(sent.st.target !== null, 'and the panel marks where it was sent',
+    JSON.stringify(sent.st.target));
+
+  await page.evaluate(() => window.__zhr.debugStrategyOpen(false));
+}
+
+// ---- 2d. The holster: a real object you reach for ----
+// Ola: "the holster is a real object visible on the hip. Move the hand to
+// it and press the hand button to stow or draw."
+{
+  const h = await page.evaluate(() => {
+    const D = window.__zhr;
+    const before = D.debugHolster();
+    const reach = D.debugReachHolster();
+    const after = D.debugHolster();
+    const fired = D.debugVrTrigger('right');
+    const back = D.debugReachHolster();
+    return { before, reach, after, fired, drawn: D.debugHolster(), back };
+  });
+  check(h.before && h.before.exists && h.before.visible,
+    'there is a holster on the hip you can see');
+  check(h.before.stowed === false, 'you start with the weapon in hand');
+  check(h.reach && h.reach.near === true,
+    'the hand can reach it', JSON.stringify(h.reach));
+  check(h.after.stowed === true && h.after.onHip === true,
+    'squeezing at the hip stows the weapon, and it is visibly on the hip',
+    JSON.stringify(h.after));
+  check(h.fired && h.fired.armed === false,
+    'a stowed weapon does not fire');
+  check(h.drawn.stowed === false && h.drawn.onHip === false,
+    'squeezing there again draws it back', JSON.stringify(h.drawn));
+}
+
 // ---- 3. Manual reload works in VR (regression guard) ----
 // Point the barrel at the floor and hold: this is the whole gesture, and
 // it silently stopped working once before.

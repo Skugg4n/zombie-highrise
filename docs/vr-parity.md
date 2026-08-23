@@ -93,3 +93,36 @@ Two things to know when writing such a test:
    **do** this?
 3. Add a row to the table above and a case to `test/vrprobe.mjs`.
 4. Only then is it done.
+
+## The drone, and what "performable in VR" costs (v0.19.0)
+
+The drone was the clearest failure of the rule on this list. It was fully
+built, load-bearing on holdout levels (it is the only way to collect loot
+that lands where the squad cannot walk), and completely unusable in a
+headset, because sending it needs a POINT on a map and VR had no way to
+give one. The flat player clicked. The VR player had nothing.
+
+What it took to fix, which is the useful part of the story:
+
+1. **A surface big enough to aim at.** The wrist display is a watch face.
+   You can read three numbers off it; you cannot pick a spot on a level
+   from it. So the wrist became the TRIGGER: look at it for half a second
+   and a large panel unfolds in front of you.
+2. **A way to point.** Two, without a mode switch: with the pistol in
+   hand you point along the barrel, and if you stow the pistol on your
+   hip the free hand points instead. What you are holding decides.
+3. **A reason to trust it.** The panel is a render of the same
+   orthographic camera the flat map uses, markers and all. It is not a
+   second drawing of the level, so it cannot disagree with the first.
+4. **Arithmetic that is actually checked.** Turning a point on the panel
+   back into a place on the ground is the one bit of maths in the
+   feature, and the first version had the vertical axis mirrored: every
+   drone would have flown to the wrong side of the level with nothing on
+   screen to say so. It is now checked against the camera's own
+   projection matrix at off-centre points. Checking the centre alone
+   proved nothing, because a symmetric frustum maps the centre to the
+   centre no matter which signs are wrong.
+
+**The lesson for the next feature:** "usable in VR" is rarely a matter of
+drawing the same thing on a panel. It usually means finding the physical
+gesture that replaces the click. Here that was a glance and a reach.

@@ -31,14 +31,23 @@ doing the bookkeeping. That is my job.
       coordinate, e.g. POSITION 7C.
 
 ### Strategy view in VR (the drone is unusable without it)
-- [ ] The wrist is the TRIGGER, not the whole surface. Looking at it
-      unfolds a larger holographic panel at a comfortable distance, big
-      enough to read the map and place a drone target precisely.
-- [ ] Support both interaction modes: holster the pistol at the hip to
-      free the hand for pointing, AND point with the barrel using the
-      trigger as the click.
-- [ ] The holster is a real object visible on the hip. Move the hand to it
-      and press the hand button to stow or draw.
+- [x] (v0.19.0) The wrist is the TRIGGER, not the whole surface. Looking
+      at it unfolds a larger holographic panel at a comfortable distance,
+      big enough to read the map and place a drone target precisely. Half
+      a second of looking at the wrist unfolds it; looking away for a
+      moment folds it. The panel is textured by a render of the SAME map
+      camera the flat map uses, so it cannot drift out of agreement with
+      the map on the screen, and it is world-locked rather than
+      head-locked, because you cannot point precisely at something that
+      moves with your head.
+- [x] (v0.19.0) Support both interaction modes: holster the pistol at the
+      hip to free the hand for pointing, AND point with the barrel using
+      the trigger as the click. Both, with no mode switch: what you are
+      holding decides which hand points.
+- [x] (v0.19.0) The holster is a real object visible on the hip. Move the
+      hand to it and press the hand button to stow or draw. The weapon
+      mesh physically moves between hand and hip, and a stowed weapon
+      cannot fire.
 
 ### Bugs
 - [x] (v0.17.0) The ramp clipping when entered from the side. Fixed by the

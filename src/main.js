@@ -14,6 +14,7 @@ import { NavGrid } from './game/navgrid.js';
 import { voidBlocker } from './world/levelkit.js';
 import { InteractionLayer } from './world/interact.js';
 import { DebugMenu } from './world/debugmenu.js';
+import { StrategyView } from './world/strategy.js';
 import { setDoorOpen } from './world/traverse.js';
 import { makeAvatarMesh, makeNameTag, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
@@ -97,6 +98,10 @@ camera.add(flashlight, flashlightTarget);
 flashlight.position.set(0, 0.05, 0.05);
 flashlight.target = flashlightTarget;
 let flashlightOn = false;
+// Is the main weapon on the hip? Set by the VR holster gesture. A
+// holstered weapon cannot fire, which the VR layer enforces on its own
+// side too, and it is what frees a hand to point at the strategy map.
+let holstered = false;
 // Visible beam cone (cheap volumetric hint).
 const beamGeo = new THREE.ConeGeometry(2.1, 7, 12, 1, true);
 beamGeo.rotateX(-Math.PI / 2);
@@ -1439,6 +1444,65 @@ const actions = {
     arsenal.placeMine(pos);
   },
   mineAt: (pos) => { if (canAct()) arsenal.placeMine(pos); },
+  // ---- The strategy view ----
+  strategy: (on) => toggleStrategy(on),
+  strategyCentre: () => (strategy && strategy.open
+    ? strategy.group.position.toArray() : null),
+  // Called every frame while the panel is open with the ray from the
+  // pointing hand. Everything the panel says about what will happen is
+  // decided here, so the label can never promise something the action
+  // then refuses.
+  strategyPoint: (origin, dir) => {
+    const s = strategy;
+    if (!s || !s.open) return;
+    const hit = s.hitTest(origin, dir);
+    s.cursor = hit;
+    if (!hit) {
+      s.label = 'POINT AT THE MAP';
+      s.hint = 'trigger places a drone target';
+      s.blocked = false;
+      return;
+    }
+    const w = panelToWorld(hit.u, hit.v);
+    const grounded = level.droneAllowed === false;
+    const cost = dronePayloadCost(dronePayload);
+    s.blocked = grounded || scrap < cost;
+    s.label = grounded
+      ? 'NO SIGNAL DOWN HERE'
+      : `DRONE: ${dronePayload === 'fetch' ? 'FETCH LOOT' : PAYLOAD_LABEL[dronePayload]}`
+        + `  ${w.x.toFixed(0)}, ${w.z.toFixed(0)}`;
+    s.hint = grounded
+      ? 'the drone stays topside'
+      : scrap < cost
+        ? `needs ${cost} scrap, you have ${scrap}`
+        : `trigger to send  |  ${cost} scrap  |  Y cycles payload`;
+  },
+  // The trigger, while the panel is open: send the drone to the point
+  // under the cursor. This is the whole reason the panel exists.
+  strategyClick: () => {
+    const s = strategy;
+    if (!s || !s.open || !s.cursor) return false;
+    const w = panelToWorld(s.cursor.u, s.cursor.v);
+    if (level.droneAllowed === false) {
+      showToast('No signal down here. The drone stays topside.', 2200);
+      return false;
+    }
+    const cost = dronePayloadCost(dronePayload);
+    if (scrap < cost) { showToast(`Not enough scrap (${cost} needed)`, 2000); return false; }
+    const y = level.heightAt(w.x, w.z);
+    dispatchAction({ t: 'drone', p: [w.x, y, w.z], k: dronePayload });
+    audio.play('dronefly');
+    showToast(`Drone away: ${PAYLOAD_LABEL[dronePayload]}`, 1400);
+    strategyTarget = w;
+    return true;
+  },
+  strategyCyclePayload: () => {
+    dronePayload = DRONE_PAYLOADS[(DRONE_PAYLOADS.indexOf(dronePayload) + 1) % DRONE_PAYLOADS.length];
+    refreshDroneButton();
+    return dronePayload;
+  },
+  strategyOpen: () => !!(strategy && strategy.open),
+  setHolstered: (on) => { holstered = on; },
   flashlight: () => { flashlightOn = !flashlightOn; },
   throwCycle: () => { if (canAct()) arsenal.cycleThrowable(); },
   nightVision: () => toggleNightVision(),
@@ -1750,6 +1814,98 @@ let mapActive = false;
 let mapMode = 'ping';
 let mapSavedFog = null;
 
+// ---- The strategy view: the same map, in VR, big enough to aim at ----
+//
+// Ola: "the wrist is the TRIGGER, not the whole surface... a larger
+// holographic panel floating at a comfortable distance, big enough to
+// read the map and place a drone target precisely." Without it the drone
+// could not be used in a headset at all, because sending it needs a point
+// on the map and VR had no way to give one.
+//
+// It reuses mapCam, so what unfolds is the map the flat player sees,
+// markers and all, rather than a second drawing that can drift.
+let strategy = null;
+let strategyTarget = null;          // {x, z} the last placed point
+
+function getStrategy() {
+  if (!strategy) {
+    strategy = new StrategyView(renderer);
+    strategy.attachTo(scene);
+  }
+  return strategy;
+}
+
+// The map camera frames the level; this is the same framing maths the
+// flat map uses, factored out so the panel and the screen can never
+// disagree about where a point on the map is in the world.
+function frameMapCam(aspect) {
+  const c = level.baseCentre || { x: 0, z: 0 };
+  mapCam.position.set(c.x, 60, c.z);
+  mapCam.lookAt(c.x, 0, c.z);
+  const ext = level.mapExtent || LEVEL_SIZE * 0.62;
+  if (aspect >= 1) {
+    mapCam.top = ext; mapCam.bottom = -ext;
+    mapCam.left = -ext * aspect; mapCam.right = ext * aspect;
+  } else {
+    mapCam.left = -ext; mapCam.right = ext;
+    mapCam.top = ext / aspect; mapCam.bottom = -ext / aspect;
+  }
+  mapCam.updateProjectionMatrix();
+}
+
+// A point on the panel, in 0..1 from the top left, back to the ground it
+// stands for.
+//
+// The map camera looks straight down with up = -Z, which means screen-down
+// is world +Z: the image is NOT mirrored top to bottom, and v maps
+// straight onto Z. The first version of this inverted v "because screen
+// coordinates run downwards", which flipped every point across the middle
+// of the level. Nothing on screen would have said so, and every drone
+// would have flown to the wrong side. The vrprobe checks both axes
+// against the camera's own projection matrix now, at off-centre points,
+// because a symmetric frustum maps the centre to the centre no matter
+// which signs are wrong.
+function panelToWorld(u, v) {
+  const x = mapCam.position.x + (mapCam.left + u * (mapCam.right - mapCam.left));
+  const z = mapCam.position.z + (mapCam.bottom + v * (mapCam.top - mapCam.bottom));
+  return { x, z };
+}
+
+// And back again, so a placed target can be drawn on the panel.
+function worldToPanel(x, z) {
+  const u = (x - mapCam.position.x - mapCam.left) / (mapCam.right - mapCam.left);
+  const v = (z - mapCam.position.z - mapCam.bottom) / (mapCam.top - mapCam.bottom);
+  return { u, v };
+}
+
+// Open or close the panel. Opening borrows the map's whole setup: the
+// ceiling comes off, the fog is suspended, the markers turn on.
+function toggleStrategy(on) {
+  const s = getStrategy();
+  if (on === s.open) return s.open;
+  if (on) {
+    frameMapCam(1);                    // the panel is square-ish
+    level.group.traverse((o) => {
+      if (o.userData && o.userData.ceiling) o.visible = false;
+    });
+    mapSavedFog = scene.fog;
+    scene.fog = null;
+    mapMarkers.visible = true;
+    strategyTarget = null;
+    s.target = null;
+    s.show(camera);
+    audio.play('wristping');
+  } else {
+    s.hide();
+    level.group.traverse((o) => {
+      if (o.userData && o.userData.ceiling) o.visible = true;
+    });
+    if (mapSavedFog) { scene.fog = mapSavedFog; mapSavedFog = null; }
+    mapMarkers.visible = false;
+  }
+  return s.open;
+}
+
 // There used to be a second button here, MINE, which teleported a mine
 // onto the map for 12 scrap. Ola: "MINE and DRONE:MINE read as
 // duplicates." They were worse than duplicates. The drone carried the
@@ -1830,19 +1986,7 @@ function toggleMap(force) {
     // Frame the level being played, not a fixed box: a holdout field is
     // more than twice the size of an interior floor, and centring on the
     // world origin would put the base in a corner.
-    const c = level.baseCentre || { x: 0, z: 0 };
-    mapCam.position.set(c.x, 60, c.z);
-    mapCam.lookAt(c.x, 0, c.z);
-    const ext = level.mapExtent || LEVEL_SIZE * 0.62;
-    const aspect = innerWidth / innerHeight;
-    if (aspect >= 1) {
-      mapCam.top = ext; mapCam.bottom = -ext;
-      mapCam.left = -ext * aspect; mapCam.right = ext * aspect;
-    } else {
-      mapCam.left = -ext; mapCam.right = ext;
-      mapCam.top = ext / aspect; mapCam.bottom = -ext / aspect;
-    }
-    mapCam.updateProjectionMatrix();
+    frameMapCam(innerWidth / innerHeight);
   }
 }
 
@@ -3248,6 +3392,15 @@ renderer.setAnimationLoop(() => {
       updateInteractions(dt);
       stepPickupFlash(dt);
       if (debugMenu && debugMenu.open) debugMenu.draw();
+      if (strategy && strategy.open) {
+        // The marker follows the GROUND it was placed on, not the pixel
+        // that was clicked. Identical while the panel is open and the
+        // framing is fixed, and correct if either ever changes, which is
+        // the difference between a marker and a smudge.
+        strategy.target = strategyTarget
+          ? worldToPanel(strategyTarget.x, strategyTarget.z) : null;
+        strategy.draw();
+      }
       updateVrReadouts();
     }
     updateDayNight();
@@ -3326,6 +3479,11 @@ renderer.setAnimationLoop(() => {
   updateShotVfx(dt);
 
   if (preview) { preview.render(); return; }
+  // The strategy panel is a second pass through the scene from above.
+  // It has to happen BEFORE the main render and it must not photograph
+  // itself; StrategyView handles both, and throttles itself to ~10 Hz
+  // because a map is a readout, not an action view.
+  if (strategy && strategy.open) strategy.renderMap(scene, mapCam, dt);
   renderer.render(scene, mapActive && !(vrInput && vrInput.active) ? mapCam : camera);
 });
 
@@ -3681,6 +3839,50 @@ window.__zhr = {
   debugVrButtonY: () => (vrInput ? vrInput.debugPressButton('left', 5) : false),
   // The torch: is it lit, and does the empty hand's trigger work it?
   debugVrTrigger: (hand) => (vrInput ? vrInput.debugPullTrigger(hand) : null),
+  // The holster and the strategy view, as a player would meet them.
+  debugReachHolster: () => (vrInput ? vrInput.debugReachHolster() : null),
+  debugHolster: () => (vrInput ? {
+    exists: !!vrInput.holster,
+    visible: !!(vrInput.holster && vrInput.holster.visible),
+    stowed: !!vrInput.holstered,
+    // Where the weapon mesh actually is, which is the thing you see.
+    onHip: !!(vrInput.holsterSlot && vrInput.holsterSlot.children.length > 0),
+  } : null),
+  debugStrategy: () => {
+    if (!strategy) return { open: false };
+    return {
+      open: strategy.open,
+      label: strategy.label,
+      hint: strategy.hint,
+      cursor: strategy.cursor ? [+strategy.cursor.u.toFixed(3), +strategy.cursor.v.toFixed(3)] : null,
+      target: strategy.target ? [+strategy.target.u.toFixed(3), +strategy.target.v.toFixed(3)] : null,
+      // Has the map image actually been rendered into the panel?
+      painted: strategy.rt.texture.version > 0 || strategy._mapT >= 0,
+      worldTarget: strategyTarget ? [+strategyTarget.x.toFixed(1), +strategyTarget.z.toFixed(1)] : null,
+    };
+  },
+  // Point at a spot on the panel the way a hand does: through hitTest,
+  // with a real ray, from where the pointing hand actually is.
+  debugStrategyPointAt: (u, v) => {
+    if (!strategy || !strategy.open) return null;
+    strategy.group.updateWorldMatrix(true, false);
+    const local = new THREE.Vector3((u - 0.5) * 0.92, (0.5 - v) * 0.72, 0);
+    const world = strategy.group.localToWorld(local);
+    const origin = camera.getWorldPosition(new THREE.Vector3());
+    const dir = world.clone().sub(origin).normalize();
+    actions.strategyPoint(origin, dir);
+    return strategy.cursor ? [+strategy.cursor.u.toFixed(2), +strategy.cursor.v.toFixed(2)] : null;
+  },
+  debugStrategyClick: () => actions.strategyClick(),
+  debugPanelToWorld: (u, v) => panelToWorld(u, v),
+  // The same question answered by the camera's own projection matrix,
+  // for the probe to check my arithmetic against. If these two disagree,
+  // every point placed on the panel lands somewhere other than where it
+  // was pointed at, and nothing on screen would say so.
+  debugProjectToPanel: (x, z) => {
+    const p = new THREE.Vector3(x, 0, z).project(mapCam);
+    return { u: (p.x + 1) / 2, v: (1 - p.y) / 2 };
+  },
   debugArchetype: () => level.archetype || level.type || null,
   debugTorch: () => ({
     dark: !!level.lighting.dark,
@@ -3988,6 +4190,14 @@ window.__zhr = {
     const p = rig.group.position;
     return { dx, dz, out: Math.max(Math.abs(p.x - c.x), Math.abs(p.z - c.z)) };
   },
+  debugScrap: (n) => {
+    if (!sim) return false;
+    for (const p of sim.players.values()) p.inv.s = n;
+    scrap = n;
+    hud.setScrap(scrap);
+    return true;
+  },
+  debugStrategyOpen: (on) => toggleStrategy(on),
   debugDrone: (kind, x, z) => {
     if (!sim) return null;
     for (const p of sim.players.values()) p.inv.s = 9999;

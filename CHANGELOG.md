@@ -1,5 +1,54 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.19.0 - 2026-08-24 - the strategy view, and a holster to free your hand
+
+**The drone existed and could not be used in a headset.** It is the
+holdout level's answer to "loot landed where I cannot walk", and sending
+it needs a point on a map. A flat player clicks. A VR player had nothing
+at all. Ola: "the wrist is the TRIGGER, not the whole surface. Looking at
+the wrist unfolds a larger holographic panel floating at a comfortable
+distance, big enough to read the map and place a drone target precisely."
+
+That is what this is:
+
+- **Glance, dwell, unfold.** Raise the forearm so the display faces you
+  and look at it for half a second. Look away from the panel for a moment
+  and it folds. A dwell rather than a button, because it is the gesture
+  you would make anyway to read a watch, and both conditions must hold
+  (looking at it AND it facing you) so a wrist drifting through your
+  sightline cannot open the map mid-fight.
+- **The map is the real map.** The panel is textured by a render of the
+  same orthographic camera the flat map uses, markers and all. Not a
+  second drawing that can drift out of agreement with the first. Throttled
+  to about 10 Hz, because a map is a readout, not an action view, and a
+  full extra scene pass every frame is exactly what a Quest 2 cannot
+  absorb.
+- **World-locked, not head-locked.** Once unfolded it stays where it was
+  placed. You cannot point precisely at something that runs away from
+  your hand.
+- **Both ways to point, with no mode switch.** Pistol in hand: you point
+  along the barrel, the same target ray the gun shoots along, so the panel
+  is aimed at exactly like a target. Pistol stowed: the free hand points.
+  What you are holding decides.
+- **A holster you reach for.** A visible loop on the right hip. Move your
+  hand to it and squeeze to stow or draw; squeeze anywhere else and you
+  still reload. The weapon mesh physically moves between hand and hip, so
+  what you see is what is true, and a stowed weapon cannot fire.
+
+**A bug this found before Ola could.** Turning a point on the panel back
+into a place on the ground had the vertical axis mirrored, so every drone
+would have flown to the wrong side of the level with nothing on screen to
+say so. The map camera looks down with up = -Z, which means screen-down
+is world +Z and the image is not mirrored at all. The probe now checks
+the mapping against the camera's own projection matrix at OFF-CENTRE
+points: checking the centre proved nothing, because a symmetric frustum
+maps the centre to the centre no matter which signs are wrong.
+
+Also found while wiring the test: controller groups run with
+matrixAutoUpdate off, because WebXR writes their matrix directly, so
+moving a hand by setting its position does nothing until the matrix is
+recomposed by hand.
+
 ## v0.18.3 - 2026-08-24 - the torch gets a switch, the headlamp goes away
 
 **The flashlight had no switch in VR.** Ola: "the flashlight in the hand

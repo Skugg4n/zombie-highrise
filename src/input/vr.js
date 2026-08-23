@@ -36,6 +36,12 @@ const SLIDE_TRAVEL = 0.032;
 // muzzle flash leave the gun and not the player's wrist.
 const MUZZLE = { pistol: 0.16, akimbo: 0.14, smg: 0.39, shotgun: 0.48, ak: 0.52, machete: 0.45 };
 
+// Module scratch. Allocating vectors inside a per-frame gesture check is
+// how a headset finds its garbage collector.
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
+const _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3();
+const _v5 = new THREE.Vector3(), _q1 = new THREE.Quaternion();
+
 export class VRInput {
   constructor(ctx) {
     this.ctx = ctx;
@@ -57,6 +63,19 @@ export class VRInput {
     this.downT = 0;                             // how long the gun has pointed down
     this.downArmed = true;                      // one reload per gesture
 
+    // THE STRATEGY VIEW and THE HOLSTER.
+    // Ola: "the wrist is the TRIGGER, not the whole surface." So the wrist
+    // display is a glance detector: hold your forearm up and look at it,
+    // and the big panel unfolds. Look away and it folds again after a
+    // moment, because a map welded open in front of your face is worse
+    // than no map.
+    this.glanceT = 0;                           // seconds spent looking at the wrist
+    this.strategyOpen = false;
+    this.awayT = 0;                             // seconds spent looking away from the panel
+    this.holstered = false;                     // is the main weapon on the hip?
+    this.holster = null;                        // the loop on the hip, a real object
+    this.pointer = null;                        // the beam from the pointing hand
+
     const renderer = ctx.renderer;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType('local-floor');
@@ -64,6 +83,13 @@ export class VRInput {
     for (let i = 0; i < 2; i++) {
       const controller = renderer.xr.getController(i);
       controller.addEventListener('selectstart', () => {
+        // THE PANEL OWNS THE TRIGGER while it is open. You are pointing
+        // at a map, not at the field, and a shot fired at your own
+        // strategy display would be a comedy.
+        if (this.strategyOpen && this.ctx.actions.strategyClick) {
+          this.ctx.actions.strategyClick();
+          return;
+        }
         // BUG (Ola): "the flashlight fires bullets." Since the off hand
         // started carrying a torch, its trigger was still wired to the
         // gun. Only a hand actually holding a weapon can shoot.
@@ -101,6 +127,13 @@ export class VRInput {
           } else {
             ctx.actions.mineAt(grip.getWorldPosition(new THREE.Vector3()));
           }
+        } else if (this._handAtHolster(grip)) {
+          // THE HOLSTER IS A PLACE, NOT A BUTTON. Ola: "the holster is a
+          // real object visible on the hip. Move the hand to it and press
+          // the hand button to stow or draw." Squeezing anywhere else
+          // still reloads, so the gesture costs nothing when you are not
+          // reaching for your hip.
+          this.setHolstered(!this.holstered);
         } else {
           ctx.actions.reload();
         }
@@ -182,6 +215,10 @@ export class VRInput {
   }
 
   _dressHands() {
+    // The hip loop exists whenever there is a body to hang it on. Built
+    // here rather than lazily on first reach, because a holster you
+    // cannot SEE is not something a player will ever try to reach for.
+    this._buildHolster();
     const kind = this.weaponKind;
     const bothHands = kind === 'akimbo';
     this.lamps = [];
@@ -221,7 +258,12 @@ export class VRInput {
     const i = this.controllers.indexOf(controller);
     if (i < 0) return true;              // unknown hand: do not break firing
     const holder = this.gripWeapons[i];
-    return !holder || holder.userData.shown !== 'light';
+    if (!holder || holder.userData.shown === 'light') return false;
+    // A holstered weapon is on your hip, not in your hand. Without this
+    // the empty hand would still fire an invisible pistol, which is the
+    // same class of bug as the flashlight that fired bullets.
+    if (this.holstered && holder.parent === this.holsterSlot) return false;
+    return true;
   }
 
   // The wrist display lives on the LEFT forearm. Left is the off hand for
@@ -316,6 +358,145 @@ export class VRInput {
     return true;
   }
 
+  // ---- The strategy view ----------------------------------------------
+  //
+  // GLANCE, DWELL, UNFOLD. The wrist display is the trigger: raise the
+  // forearm so the screen faces you and look at it. Half a second of
+  // that opens the big panel. It is a dwell rather than a button because
+  // the gesture is the one you would make anyway to read a watch.
+  //
+  // Closing is the mirror: look away from the PANEL for a moment and it
+  // folds. Not away from the wrist, which you naturally stop looking at
+  // the instant the panel appears.
+  _strategyGesture(dt) {
+    const acts = this.ctx.actions;
+    if (!acts.strategy) return;
+    // The game owns whether the panel is open. Mirroring it here rather
+    // than keeping a second copy means the trigger cannot be routed to a
+    // panel that closed itself.
+    this.strategyOpen = !!(acts.strategyOpen && acts.strategyOpen());
+    const cam = this.ctx.camera;
+    const eye = cam.getWorldPosition(_v1);
+    const look = cam.getWorldDirection(_v2);
+
+    if (!this.strategyOpen) {
+      const w = this.wrist && this.wrist.group;
+      if (!w) { this.glanceT = 0; return; }
+      w.updateWorldMatrix(true, false);
+      const at = w.getWorldPosition(_v3);
+      const toWrist = _v4.copy(at).sub(eye);
+      const dist = toWrist.length();
+      if (dist < 0.12 || dist > 0.85) { this.glanceT = 0; return; }
+      toWrist.divideScalar(dist);
+      // Are you looking at it, and is it facing you? Both, or a wrist
+      // that happens to drift through your sightline opens the map in the
+      // middle of a fight.
+      const facing = _v5.set(0, 0, 1).applyQuaternion(w.getWorldQuaternion(_q1));
+      const looking = look.dot(toWrist);
+      const presented = facing.dot(toWrist) < -0.45;
+      if (looking > 0.86 && presented) {
+        this.glanceT += dt;
+        if (this.glanceT > 0.5) { this.glanceT = 0; acts.strategy(true); }
+      } else {
+        this.glanceT = Math.max(0, this.glanceT - dt * 2);
+      }
+      return;
+    }
+
+    // Open: point, and fold when you look away.
+    this.glanceT = 0;
+    const panelAt = acts.strategyCentre ? acts.strategyCentre() : null;
+    if (panelAt) {
+      const toPanel = _v3.set(panelAt[0], panelAt[1], panelAt[2]).sub(eye).normalize();
+      this.awayT = look.dot(toPanel) < 0.55 ? this.awayT + dt : 0;
+      if (this.awayT > 0.9) { this.awayT = 0; acts.strategy(false); return; }
+    }
+    // The pointing hand: the free one if the pistol is stowed, otherwise
+    // the barrel. Ola asked for both, and this is both without a mode
+    // switch: what you are holding decides.
+    const ray = this._pointRay();
+    if (ray && acts.strategyPoint) acts.strategyPoint(ray.origin, ray.dir);
+  }
+
+  // The ray you are aiming with. Barrel pointing uses the same target-ray
+  // space the gun shoots along, so what you point at is what you would
+  // hit: the panel is aimed at exactly like a target.
+  _pointRay() {
+    const useOff = this.holstered;
+    const grip = this.gripFor(useOff ? 'left' : 'right');
+    const i = this.grips.indexOf(grip);
+    const controller = this.controllers[i];
+    if (!controller) return null;
+    controller.updateWorldMatrix(true, false);
+    const origin = controller.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+    return { origin, dir };
+  }
+
+  // ---- The holster --------------------------------------------------
+  //
+  // A visible loop on the right hip, parented to the play space so it
+  // stays with your body rather than swinging with your head. Stowing the
+  // pistol is what frees a hand for pointing at the map, and it is a
+  // physical gesture rather than a menu because reaching for your hip is
+  // the thing that feels good.
+  _buildHolster() {
+    if (this.holster) return this.holster;
+    const g = new THREE.Group();
+    const loop = new THREE.Mesh(
+      new THREE.TorusGeometry(0.055, 0.012, 6, 14),
+      new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.9 }));
+    loop.rotation.x = Math.PI / 2;
+    g.add(loop);
+    const strap = new THREE.Mesh(
+      new THREE.BoxGeometry(0.03, 0.10, 0.012),
+      new THREE.MeshStandardMaterial({ color: 0x2b241c, roughness: 0.95 }));
+    strap.position.set(0, 0.05, -0.03);
+    g.add(strap);
+    // The stowed weapon lives here, so it is visible on your hip and you
+    // can see at a glance that you are unarmed.
+    this.holsterSlot = new THREE.Group();
+    this.holsterSlot.rotation.x = -0.5;
+    g.add(this.holsterSlot);
+    g.position.set(0.22, 0.92, 0.06);         // right hip, roughly
+    this.holster = g;
+    this.ctx.rig.group.add(g);
+    return g;
+  }
+
+  // Is this hand close enough to the hip to mean it? Generous, because
+  // reaching for your own hip in a headset is done by feel.
+  _handAtHolster(grip) {
+    if (!this.holster) return false;
+    const a = grip.getWorldPosition(new THREE.Vector3());
+    const b = this.holster.getWorldPosition(new THREE.Vector3());
+    return a.distanceTo(b) < 0.26;
+  }
+
+  // Stow or draw. The weapon mesh physically moves between the hand and
+  // the hip, so what you see is what is true.
+  setHolstered(on) {
+    if (this.holstered === on) return this.holstered;
+    this._buildHolster();
+    const grip = this.gripFor('right');
+    const i = this.grips.indexOf(grip);
+    const holder = this.gripWeapons[i];
+    if (!holder) return this.holstered;
+    this.holstered = on;
+    if (on) {
+      this.holsterSlot.add(holder);
+      holder.position.set(0, 0, 0);
+      holder.rotation.set(0, 0, 0);
+    } else {
+      grip.add(holder);
+      holder.position.set(0, 0, 0);
+      holder.rotation.set(0, 0, 0);
+    }
+    if (this.ctx.actions.setHolstered) this.ctx.actions.setHolstered(on);
+    return this.holstered;
+  }
+
   // Which grip is which hand. `this.hands` is filled in by the controller
   // `connected` event, which does not fire for every runtime and does not
   // fire at all in a test, so every caller needs the same fallback: the
@@ -324,6 +505,31 @@ export class VRInput {
   gripFor(hand) {
     if (hand === 'right') return this.hands.right || this.grips[0];
     return this.hands.left || this.grips[1] || this.grips[0];
+  }
+
+  // TEST SEAM: the holster, as a player experiences it. Move the hand to
+  // the hip and squeeze: the same listener a real controller calls.
+  debugReachHolster() {
+    this._buildHolster();
+    const grip = this.gripFor('right');
+    const i = this.grips.indexOf(grip);
+    const controller = this.controllers[i];
+    if (!controller || !this.holster) return null;
+    // Put the hand where the hip is, exactly as reaching for it would.
+    const at = this.holster.getWorldPosition(new THREE.Vector3());
+    this.ctx.rig.group.worldToLocal(at);
+    grip.position.copy(at);
+    // Controller groups run with matrixAutoUpdate off, because WebXR
+    // writes their matrix directly every frame. Moving one by setting
+    // .position therefore does nothing until the matrix is recomposed by
+    // hand, which is why the first version of this reached for the hip
+    // and stayed where it was.
+    grip.updateMatrix();
+    grip.updateWorldMatrix(true, false);
+    const near = this._handAtHolster(grip);
+    controller.dispatchEvent({ type: 'squeezestart' });
+    controller.dispatchEvent({ type: 'squeezeend' });
+    return { near, holstered: this.holstered, visible: !!this.holster.visible };
   }
 
   // TEST SEAM: pull a trigger, through the listener the runtime calls.
@@ -627,6 +833,7 @@ export class VRInput {
     this._alignWeapons();
     this._stepRecoil(dt);
     this._reloadGesture(dt);
+    this._strategyGesture(dt);
     const stationary = this.ctx.getLocoMode() === 'stationary';
 
     for (const src of session.inputSources) {
@@ -646,6 +853,14 @@ export class VRInput {
           : (pressed(BTN_AX) ? 'X' : pressed(BTN_BY) ? 'Y' : null);
         if (name && this.panel.press(name)) continue;
         if (name) continue;              // swallow it either way while open
+      }
+      // THE STRATEGY PANEL owns Y while it is open: cycling the payload
+      // is the only other decision there is to make on a map.
+      if (this.strategyOpen) {
+        if (src.handedness === 'left' && pressed(BTN_BY)) {
+          if (this.ctx.actions.strategyCyclePayload) this.ctx.actions.strategyCyclePayload();
+          continue;
+        }
       }
       // THE DEBUG MENU owns its own inputs while it is open, so nothing
       // else fires underneath it.
