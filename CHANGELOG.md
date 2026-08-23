@@ -1,5 +1,26 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.10.1 - 2026-08-23
+
+**Foundation bug 2: ground and collision ignored height.** Ola: "no gravity,
+absence of natural laws."
+
+- NEW `src/game/locomotion.js`: a real character controller. `groundHeight()`
+  samples terrain, ramps and the tops of solid boxes, constrained by how high
+  the mover can currently reach. `moveAndCollide()` resolves horizontal
+  movement axis by axis, then decides: rise within step-up climbs, a bigger
+  rise is a wall, a small drop walks down, a big drop falls with gravity.
+- `blockingFor()` fixes "cannot step onto its last step": a platform you are
+  tall enough to step onto must not push you out horizontally. Its own
+  collider used to eject the player at the exact moment they arrived at the
+  edge. Players climb the full 2.4 m watchtower ramp now.
+- Real falling: walk off an edge and you fall. Fall out of the world and you
+  respawn at the level spawn with 45 damage and a "You fell." toast.
+- Zombies use the same ground and the same steppable rule, so they can follow
+  the player up a ramp instead of orbiting its base.
+- Verified by `test/groundprobe.mjs`: Y goes 0, 0.2, 0.6, 1.0, 1.4, 1.8, 2.2,
+  2.4 in clean steps. Smoke test green, navprobe still 0 frozen.
+
 ## v0.10.0 - 2026-08-23 - THE REBUILD begins
 
 Direction change from Ola's v0.9.3 playtest, captured in the new

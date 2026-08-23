@@ -89,11 +89,16 @@ the rebuild. What changes is the LEVELS.
 
 ### Step 1 - Foundation bugs (nothing else matters until these are fixed)
 
-- [ ] **Enemy navigation.** Zombies get stuck, jitter, walk into geometry
+- [x] **Enemy navigation.** (v0.10.0: navgrid.js, A* + string-pulling +
+      separation; navprobe reports 0 frozen on all three level types)
+      ORIGINAL: Zombies get stuck, jitter, walk into geometry
       and cannot escape, and are harmless. Implement a navigation grid
       over the level with real pathfinding plus agent separation. They
       must route around obstacles, find breaches, and never freeze.
-- [ ] **Ground and collision ignore height.** Players walk up and down the
+- [x] **Ground and collision ignore height.** (v0.10.1: locomotion.js,
+      step-up 0.45 / step-down 0.55 / gravity 22, steppable tops no longer
+      eject the mover; groundprobe climbs the 2.4 m ramp cleanly)
+      ORIGINAL: Players walk up and down the
       sides of a ramp as if the world were flat and cannot step onto its
       last step ("no gravity, absence of natural laws"). Implement proper
       ground sampling, step-up and slope limits, and real falling.

@@ -13,6 +13,7 @@ import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
 import { levelTypeFor, FINAL_LEVEL, LEVEL_SIZE } from '../world/levelgen.js';
 import { NavGrid } from './navgrid.js';
+import { blockingFor, groundHeight } from './locomotion.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 'screamer', 'butcher'];
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
@@ -726,7 +727,7 @@ export class HostSim {
     if (knockback > 0) {
       const shove = knockback * (best.type === 'brute' ? 0.5 : 1);
       best.pos.addScaledVector(new THREE.Vector3(d.x, 0, d.z).normalize(), shove);
-      resolveCircle(best.pos, TUNING.enemies[best.type].radius * 0.8, this._zColliders());
+      resolveCircle(best.pos, TUNING.enemies[best.type].radius * 0.8, this._zColliders(best.pos.y));
       best.stunT = Math.max(best.stunT || 0, 0.3);   // a visible pause: weight
     }
     if (bestHead) {
@@ -746,10 +747,12 @@ export class HostSim {
   }
 
   // Colliders the HORDE obeys: player-only barriers are invisible to them
-  // (they are there to stop the player walking off an open edge).
-  _zColliders() {
-    return this.level.collidersZ
+  // (they are there to stop the player walking off an open edge), and a
+  // platform low enough to step onto must not eject them either.
+  _zColliders(y = 0) {
+    const base = this.level.collidersZ
       || (this.level.collidersZ = this.level.colliders.filter((c) => !c.playerOnly));
+    return blockingFor(this.level, y, base);
   }
 
   damageZombie(z, damage, isMelee, byId = null) {
@@ -1051,8 +1054,9 @@ export class HostSim {
       const beforeX = z.pos.x, beforeZ = z.pos.z;
       z.pos.x += mx * step;
       z.pos.z += mz * step;
-      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
-      z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
+      const gy = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
+      z.pos.y = Number.isFinite(gy) ? gy : (this.level.baseY || 0);
 
       // Stuck detection: if pushout keeps eating the movement, force a
       // replan; if that fails too, sidestep. An agent must NEVER freeze.
@@ -1064,8 +1068,8 @@ export class HostSim {
           // Slide along the wall rather than grinding into it.
           z.pos.x += -mz * step * 0.9;
           z.pos.z += mx * step * 0.9;
-          resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
-          z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+          resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
+          z.pos.y = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
         }
         if (z.stuckT > 4) {
           // Last resort: teleport to the nearest legal cell. Being briefly
@@ -1190,8 +1194,8 @@ export class HostSim {
     if (move.lengthSq() > 1e-6) {
       move.normalize().multiplyScalar(stats.speed * dt);
       z.pos.add(move);
-      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
-      z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
+      z.pos.y = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
     }
     return true;
   }
@@ -1239,8 +1243,8 @@ export class HostSim {
       const step = stats.chargeSpeed * dt;
       const before = z.pos.clone();
       z.pos.addScaledVector(z.chargeDir, step);
-      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
-      z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders(z.pos.y));
+      z.pos.y = groundHeight(this.level, z.pos.x, z.pos.z, z.pos.y);
       z.chargeDist += step;
       const moved = z.pos.distanceTo(before);
       // Hit a player?

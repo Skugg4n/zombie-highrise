@@ -8,6 +8,7 @@ import { buildLevel, disposeLevel, MATS, makeHelicopter, FINAL_LEVEL, LEVEL_SIZE
 import { makeSkyDome, makeSunGlow, makeDustMotes } from './world/sky.js';
 import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
+import { LOCO, moveAndCollide, groundHeight, blockingFor } from './game/locomotion.js';
 import { makeZombieMesh, makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
@@ -204,6 +205,7 @@ function loadLevel(idx) {
 
 // ---- Player rig ---------------------------------------------------------
 const rig = { group: new THREE.Group(), yaw: 0, pitch: 0, camera };
+const playerVel = new THREE.Vector3();   // vertical velocity for gravity
 camera.position.set(0, CONFIG.PLAYER_HEIGHT, 0);
 rig.group.add(camera);
 rig.group.position.copy(level.playerSpawns[0] || new THREE.Vector3());
@@ -2068,17 +2070,32 @@ renderer.setAnimationLoop(() => {
       const rollTarget = myDown ? 0.16 : 0;
       camera.rotation.z += (rollTarget - camera.rotation.z) * Math.min(1, dt * 2.4);
     }
-    // Collision + terrain under the player (head position in VR).
+    // ---- Ground and collision (real, not teleport-to-height) ---------
+    // The input layers write into rig.group.position directly, so we treat
+    // the frame's horizontal displacement as this frame's velocity and run
+    // it through the character controller: step-up, slope, gravity, falls.
     const ref = inVR ? camera.getWorldPosition(tmpV) : rig.group.position;
     if (inVR) {
       const before = tmpV.clone();
-      resolveCircle(tmpV, 0.3, level.colliders);
+      resolveCircle(tmpV, 0.3, blockingFor(level, rig.group.position.y));
       rig.group.position.x += tmpV.x - before.x;
       rig.group.position.z += tmpV.z - before.z;
     } else {
-      resolveCircle(rig.group.position, 0.32, level.colliders);
+      resolveCircle(rig.group.position, LOCO.radius, blockingFor(level, rig.group.position.y));
     }
-    rig.group.position.y = level.heightAt(ref.x, ref.z);
+    // Vertical is honest for everyone: you step up, you walk down, and if
+    // there is nothing under you, you fall.
+    playerVel.x = 0; playerVel.z = 0;
+    const grounded = moveAndCollide(
+      level, rig.group.position, playerVel, dt, [], LOCO.radius);
+    // Falling out of the world (off a balcony, into a chasm) is a death,
+    // not an eternal descent.
+    if (!grounded && rig.group.position.y < (level.baseY || 0) - 25) {
+      rig.group.position.copy(level.playerSpawns[0]);
+      playerVel.set(0, 0, 0);
+      if (sim) sim.damagePlayer('H', 45);
+      showToast('You fell.', 2200);
+    }
 
     // Weapons: auto fire + reload timing, predicted locally.
     stepFeelClip(dt);
