@@ -16,6 +16,10 @@ import { makeWeaponMesh } from '../world/weapons3d.js';
 // 0 trigger, 1 squeeze, 3 stick press, 4 A/X, 5 B/Y.
 const BTN_STICK = 3, BTN_AX = 4, BTN_BY = 5;
 
+// How far down -Z the barrel tip sits on each weapon model, so tracers and
+// muzzle flash leave the gun and not the player's wrist.
+const MUZZLE = { pistol: 0.16, akimbo: 0.14, smg: 0.39, shotgun: 0.48, ak: 0.52, machete: 0.45 };
+
 export class VRInput {
   constructor(ctx) {
     this.ctx = ctx;
@@ -29,6 +33,8 @@ export class VRInput {
     this.fireHeld = false;
     this.firingController = null;
     this.prevButtons = new Map();               // inputSource -> [bool,...]
+    this.weaponKind = 'pistol';
+    this._q = new THREE.Quaternion();           // scratch, avoid per-frame allocation
 
     const renderer = ctx.renderer;
     renderer.xr.enabled = true;
@@ -114,6 +120,7 @@ export class VRInput {
 
   // Swap the weapon model on both grips (active weapon changed).
   setWeaponModel(kind) {
+    this.weaponKind = kind;
     for (const holder of this.gripWeapons) {
       holder.clear();
       holder.add(makeWeaponMesh(kind));
@@ -134,16 +141,12 @@ export class VRInput {
   getAimRay() {
     const c = this.firingController || this.controllers[0];
     if (!c || !this.active) return null;
-    return {
-      origin: c.getWorldPosition(new THREE.Vector3()),
-      dir: new THREE.Vector3(0, 0, -1).applyQuaternion(c.getWorldQuaternion(new THREE.Quaternion())),
-    };
+    return this._muzzle(c);
   }
 
   _fireFrom(controller) {
-    const origin = controller.getWorldPosition(new THREE.Vector3());
-    const dir = new THREE.Vector3(0, 0, -1)
-      .applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+    this._alignWeapons();
+    const { origin, dir } = this._muzzle(controller);
     this.ctx.actions.fireFrom(origin, dir);
   }
 
@@ -165,10 +168,45 @@ export class VRInput {
     rig.group.position.z += before.z - after.z;
   }
 
+  // FOUNDATION BUG 3: the weapon pointed roughly 45 degrees off the aim.
+  //
+  // WebXR gives two poses per controller. The GRIP pose is the hand: its
+  // origin is the palm, and on Oculus Touch its forward axis is tilted well
+  // away from where the user thinks they are pointing. The TARGET RAY pose
+  // is the pointing direction. Three.js exposes them as getControllerGrip(i)
+  // and getController(i).
+  //
+  // The gun models hung off the grip (right place, wrong angle) while shots
+  // fired along the target ray. That gap is the whole bug, and its size is
+  // controller-specific, so we do not hardcode an angle: we read the live
+  // rotation between the two poses and cancel it out. The gun then sits in
+  // the hand AND points exactly where the shot goes, on any headset.
+  _alignWeapons() {
+    for (let i = 0; i < this.gripWeapons.length; i++) {
+      const grip = this.grips[i], ray = this.controllers[i], holder = this.gripWeapons[i];
+      if (!grip || !ray || !holder) continue;
+      // Both poses share rig.group as their parent, so local quaternions
+      // compose directly: holderLocal = grip^-1 * targetRay.
+      holder.quaternion.copy(this._q.copy(grip.quaternion).invert().multiply(ray.quaternion));
+    }
+  }
+
+  // World-space barrel tip of a controller's weapon model.
+  _muzzle(controller) {
+    const i = this.controllers.indexOf(controller);
+    const holder = i >= 0 ? this.gripWeapons[i] : null;
+    const origin = (holder || controller).getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion((holder || controller).getWorldQuaternion(new THREE.Quaternion()));
+    origin.addScaledVector(dir, MUZZLE[this.weaponKind] ?? 0.2);
+    return { origin, dir };
+  }
+
   update(dt) {
     if (!this.active) return;
     const session = this.ctx.renderer.xr.getSession();
     if (!session) return;
+    this._alignWeapons();
     const stationary = this.ctx.getLocoMode() === 'stationary';
 
     for (const src of session.inputSources) {

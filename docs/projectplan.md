@@ -102,7 +102,11 @@ the rebuild. What changes is the LEVELS.
       sides of a ramp as if the world were flat and cannot step onto its
       last step ("no gravity, absence of natural laws"). Implement proper
       ground sampling, step-up and slope limits, and real falling.
-- [ ] **VR weapon aim is 45 degrees off.** The pistol points up and away
+- [x] **VR weapon aim is 45 degrees off.** (v0.10.2: the models hung off
+      the GRIP pose while shots fired along the TARGET RAY pose; the live
+      rotation between the two is now cancelled out each frame, and shots
+      leave the barrel tip. vraimprobe: 47.5deg off -> 0.00deg.)
+      ORIGINAL: The pistol points up and away
       from the controller forward axis. Fix the weapon-to-controller
       transform and verify in headset.
 - [x] Reload needs a readable animation (done in v0.9.2)

@@ -2348,6 +2348,43 @@ window.__zhr = {
   },
   debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
   debugTeleport: (x, z) => { rig.group.position.x = x; rig.group.position.z = z; },
+
+  // Foundation bug 3 check: feed the VR rig a grip pose rotated away from the
+  // aim ray (Touch controllers really are tilted this much) and report the
+  // angle between where the gun points and where the bullet goes. It must be
+  // ~0 after alignment, and it was ~45 before the fix.
+  debugVRAim: (tiltDeg = 45) => {
+    if (!vrInput || !vrInput.grips.length) return null;
+    const tilt = new THREE.Quaternion()
+      .setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(tiltDeg), 0.3, 0));
+    // three.js turns matrixAutoUpdate OFF on XR controller groups and writes
+    // the pose straight into .matrix, decomposing it afterwards. A fake pose
+    // has to do exactly the same or the world transform never moves.
+    const pose = (obj, q) => {
+      obj.matrix.compose(obj.position.set(0, 1.2, -0.3), q, obj.scale.set(1, 1, 1));
+      obj.matrix.decompose(obj.position, obj.quaternion, obj.scale);
+      obj.matrixWorldNeedsUpdate = true;
+    };
+    for (let i = 0; i < vrInput.grips.length; i++) {
+      pose(vrInput.grips[i], tilt);
+      pose(vrInput.controllers[i], new THREE.Quaternion());
+    }
+    vrInput._alignWeapons();
+    rig.group.updateMatrixWorld(true);
+    const gunFwd = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(vrInput.gripWeapons[0].getWorldQuaternion(new THREE.Quaternion()));
+    const rayFwd = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(vrInput.controllers[0].getWorldQuaternion(new THREE.Quaternion()));
+    const rawFwd = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(vrInput.grips[0].getWorldQuaternion(new THREE.Quaternion()));
+    const deg = (a, b) => THREE.MathUtils.radToDeg(a.angleTo(b));
+    const m = vrInput._muzzle(vrInput.controllers[0]);
+    return {
+      offBy: deg(gunFwd, rayFwd),          // after the fix
+      wasOffBy: deg(rawFwd, rayFwd),       // what the player used to see
+      shotOffBy: deg(m.dir, rayFwd),
+    };
+  },
   forceNight: (n) => { if (sim) sim.forceNight(n); },
   debugClearNight: () => {
     if (!sim) return;

@@ -1,5 +1,25 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.10.2 - 2026-08-23
+
+**Foundation bug 3: VR weapon aim was 45 degrees off.** The pistol pointed up
+and away from where the shots went.
+
+- WebXR reports two poses per controller. The GRIP pose is the hand (origin at
+  the palm), the TARGET RAY pose is where the user is pointing. On Oculus
+  Touch these differ by a large, controller-specific angle. The gun models
+  hung off the grip while shots fired along the target ray, and that gap WAS
+  the bug.
+- The angle is no longer guessed: the live rotation between the two poses is
+  read each frame and cancelled out, so the gun sits in the hand and points
+  exactly along the shot. Works on any controller, not just Touch.
+- Shots, tracers and muzzle flash now leave the barrel tip instead of the
+  wrist, with a per-weapon muzzle length.
+- Held auto fire uses the same barrel ray, so a burst no longer drifts away
+  from the first shot.
+- Verified by `test/vraimprobe.mjs` with fake grip poses at +45, +60 and -30
+  degrees: the gun was 47.5 / 61.5 / 34.2 degrees off the aim, now 0.00.
+
 ## v0.10.1 - 2026-08-23
 
 **Foundation bug 2: ground and collision ignored height.** Ola: "no gravity,
