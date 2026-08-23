@@ -1643,9 +1643,13 @@ function dronePayloadCost(kind) {
 
 function refreshDroneButton() {
   const cost = dronePayloadCost(dronePayload);
-  $('btn-map-drone').textContent = dronePayload === 'fetch'
-    ? 'DRONE: FETCH LOOT - free'
-    : `DRONE: ${PAYLOAD_LABEL[dronePayload]} - ${cost}`;
+  const grounded = level.droneAllowed === false;
+  $('btn-map-drone').classList.toggle('disabled', grounded);
+  $('btn-map-drone').textContent = grounded
+    ? 'DRONE: NO SIGNAL UNDERGROUND'
+    : dronePayload === 'fetch'
+      ? 'DRONE: FETCH LOOT - free'
+      : `DRONE: ${PAYLOAD_LABEL[dronePayload]} - ${cost}`;
   $('btn-map-mine').textContent = `MINE - ${TUNING.economy.minePlacementFromMap}`;
 }
 
@@ -1795,6 +1799,10 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     }
     dispatchAction({ t: 'placeMine', p: p.toArray(), via: 'map' });
   } else if (mapMode === 'drone') {
+    if (level.droneAllowed === false) {
+      showToast('No signal down here. The drone stays topside.', 2200);
+      return;
+    }
     // You pay for the PAYLOAD, not the launch: droneDeploy is 0 by design.
     // Checking the launch fee meant this guard could never fire, so the
     // client played the launch sound and announced "Drone away" while the

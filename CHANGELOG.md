@@ -1,5 +1,74 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.16.0 - 2026-08-23 - LEVEL 2: THE UNDERWORKS
+
+The traverse archetype, built to Ola's sketch L2. Floor 2 of the campaign
+is no longer the old hand-written basement.
+
+**A route, not a siege.** You arrive on a plate in the north-west corner
+and must reach the lift in the south-east. Underground and dark, which is
+where the flashlight and the claustrophobia live, and which is the
+contrast the whole campaign rhythm is built on.
+
+- **The antechamber and the door.** The corner you land in has one way
+  out: a sliding door you open by walking to its button and HOLDING. That
+  is the "moment of standing still and defending" the design doc asks
+  for, and it is the same hold-to-act interaction as repairing a wall,
+  with the same prompt and the same filling ring.
+- **The chasm.** A real void, not a dark texture: the character
+  controller asks the level for ground and gets none. You fall six metres,
+  it costs you 45 health, and you are placed back on solid floor rather
+  than left falling. The pathfinder knows about it too, so the horde never
+  walks in. Measured, not assumed.
+- **The fence** seals the direct east route past the chasm, so the east
+  side has to be reached the long way round.
+- **Three visible holes**, two in the east wall and one in the south. Every
+  entrance is something you can see.
+- **A weapon locker** in the same room as the exit lift.
+
+**Waves come because you ADVANCE, not because a clock ticks.** A route
+level has no day, no night and no countdown: it runs its own phase, and
+crossing each quarter of the room summons a push. Stand still and the
+pressure stays where you left it. The game says so out loud ("They heard
+you move.") so the lesson lands.
+
+**The drone is grounded underground**, and the UI says why rather than
+silently doing nothing: "No signal down here. The drone stays topside."
+
+**Deviation from the sketch, stated:** the sketch says 10x10 m. At 10 m a
+5x4 chasm leaves a walkable ring under two metres wide, which is not
+enough for four players and a horde in one corridor. It ships at 13x13
+with the proportions kept, and `route.size` is the dial.
+
+### The validator earned its keep three times
+
+Every one of these was caught at build time, before the level was ever
+played:
+
+1. The door was in the east-west wall, as a first reading of the sketch
+   suggested. That sealed the antechamber on all four sides: the level
+   could not be started, let alone finished. The sketch draws the door on
+   the north-south wall, and it has to be there.
+2. The antechamber was too small. Once every wall, crate and post is
+   inflated by the agent radius, the free space collapsed to two cells.
+   The failure now prints an ASCII map of what is reachable, which is
+   worth more than any amount of reasoning about wall coordinates.
+3. The door's own button post sat in front of the opening and narrowed it
+   until nothing could path through. The button is offset along the wall
+   now.
+
+New checks that came out of it: doors are flooded OPEN when testing
+routes, because a route level deliberately starts sealed; the chasm is
+flooded as solid; and a route level must have a walkable path from the
+arrival plate to the exit, which is the one failure that means the level
+literally cannot be finished.
+
+New `test/traverseprobe.mjs` covers all of it: the phase, the door, the
+pockets, the fall and its cost, the horde staying out of the hole,
+advancing summoning a push, and the exit plate completing the level.
+
+50 draw calls / 4.7k triangles.
+
 ## v0.15.1 - 2026-08-23 - your teammates are people
 
 Ola: "players currently render as a gas bottle with no arms or legs. In

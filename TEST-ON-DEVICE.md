@@ -4,6 +4,34 @@ Live build: https://skugg4n.github.io/zombie-highrise/
 Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw".
 
+## v0.16.0 - LEVEL 2 IS IN (START HERE)
+
+Floor 2 is THE UNDERWORKS, the traverse level from your L2 sketch. Clear
+floor 1, ride the lift, and you land in it.
+
+- [ ] You arrive on a plate in the north-west corner, in a small
+      antechamber. It is DARK. Your off-hand flashlight finally matters.
+- [ ] The only way out is the sliding door. Walk to the button beside it
+      and HOLD (E, or the left grip in VR). A ring fills. Let go and it
+      drains.
+- [ ] Objective: reach the lift in the far south-east corner. It is lit
+      green and you can see it from most of the room.
+- [ ] THE CHASM in the middle. Walk into it on purpose once: you should
+      fall a long way, take about 45 damage, and be put back on solid
+      floor rather than left falling. Then check the horde never walks in.
+- [ ] Waves come because you MOVE, not on a clock. Push forward and you
+      should get "They heard you move." Stand still and the pressure
+      should stay where you left it. Tell me if that reads.
+- [ ] The fence on the east side blocks the direct route past the chasm.
+      You should have to go the long way round.
+- [ ] Three holes in the walls: two east, one south. Nothing should ever
+      appear from nowhere.
+- [ ] Open the map underground: the drone button should say NO SIGNAL and
+      refuse, rather than pretending.
+- [ ] SIZE: it is 13x13, not the 10x10 on your sketch. At 10 the ring
+      around the chasm is under two metres and four players cannot pass.
+      Tell me if 13 feels too roomy and I will dial it back.
+
 ## v0.13.0 - VR CAN SEE (CHECK THIS FIRST IN THE HEADSET)
 
 - [ ] WRIST DISPLAY: turn your left wrist toward you like checking a
