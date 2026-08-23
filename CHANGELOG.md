@@ -1,5 +1,37 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.15.0 - 2026-08-23 - objectives you can act on
+
+Ola: "'OBJECTIVE: REPAIR WALL' tells the player nothing about how. Every
+objective needs an in-world target: highlight the damaged section, show a
+prompt when the player is near it, and a hold-to-act with a visible
+progress ring. If an objective cannot currently be performed in VR, that
+is a bug, not a missing nicety."
+
+**Repairing and reviving are now the same interaction**, because they are
+the same interaction: go to a marked thing, hold, watch it fill.
+
+- The damaged wall section is **highlighted** with a pulsing ring on the
+  floor, so "which bit?" has an answer you can see from across the base.
+- A **world-space prompt** appears when you are close enough, and names
+  the control you are actually holding: "HOLD E TO REPAIR" on a monitor,
+  "HOLD GRIP TO REPAIR" in a headset.
+- A **progress ring** fills like a clock face while you hold. Let go early
+  and it drains: a hold you can tap through is a tap.
+- A downed teammate gets a **marker that draws through geometry**, because
+  not being able to see them is the entire problem it solves. Standing by
+  them shows the revive ring, and **both players see the same progress**,
+  which meant shipping revive progress in the snapshot.
+
+All of it is world-space rather than DOM, so it works identically flat and
+in VR. A DOM prompt would have been half a feature again, which is the
+mistake the VR parity rule exists to stop.
+
+New `test/interactprobe.mjs` walks the whole chain: no prompt when there
+is nothing to do, no prompt from across the base, prompt on approach, ring
+only while held, wall actually repaired at the end, nothing repaired if
+you let go early, and the same prompt naming the grip inside VR.
+
 ## v0.14.3 - 2026-08-23 - the wrist earns its glance, and shots read in VR
 
 **The wrist display moved and woke up.** It sat on TOP of the forearm like

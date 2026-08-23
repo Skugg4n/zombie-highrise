@@ -41,7 +41,7 @@ action.
 
 | # | Feature | Visible in VR | Actionable in VR | Verified by |
 |---|---|---|---|---|
-| 1 | Objective, in plain words | wrist display | n/a | `vrprobe` |
+| 1 | Objective, in plain words | wrist display, inner forearm, pulses and pings on change | n/a | `vrprobe` |
 | 2 | Wave / zombies remaining | wrist display | n/a | `vrprobe` |
 | 3 | Health | wrist display | n/a | `vrprobe` |
 | 4 | Base integrity | wrist display | n/a | `vrprobe` |
@@ -50,13 +50,13 @@ action.
 | 7 | Reload | gun cants over, charge light fills, three-beat sound | point the barrel at the floor and hold; right grip also works | `vrprobe` |
 | 8 | Out of ammo | red zero on the gun, hard mechanical click | n/a | headset |
 | 9 | Magazine seated | charge light turns green, clack and rising tone | n/a | headset |
-| 10 | Recoil | weapon model kicks; aim is never moved for the player | n/a | headset |
+| 10 | Recoil | weapon kicks about the grip, slide cycles, muzzle flashes; aim is never moved | n/a | headset |
 | 11 | Flashlight | the off hand carries it, lit only on dark levels | aimed with the off hand; Y toggles | `vrprobe` |
 | 12 | Downed | world panel: "YOU ARE DOWN" plus what happens next | face button quits to menu | `vrprobe` |
 | 13 | Game over | world panel: "GAME OVER" plus the floor reached | A retries the floor, B quits | `vrprobe` |
 | 14 | Victory and score | world panel: "EXTRACTED" plus the run stats | A runs it again, B quits | `vrprobe` |
-| 15 | Repair the wall | **PENDING** highlighted section, proximity prompt, hold-to-act ring | **PENDING** | |
-| 16 | Revive a teammate | **PENDING** marker through geometry, proximity prompt, shared progress ring | **PENDING** | |
+| 15 | Repair the wall | highlighted section, world-space prompt, filling ring | walk up and hold the left grip | `interactprobe` |
+| 16 | Revive a teammate | marker drawn through geometry, prompt, ring both players see | stand next to them | `interactprobe` |
 | 17 | Elevator shop | **PENDING** the shop is a DOM panel | **PENDING** | |
 | 18 | Level transitions | arrival card is DOM only; the wrist carries the objective | board by standing on the plate | partial |
 | 19 | Tactical map and drone | **PENDING** the map is DOM and disabled in VR | **PENDING** | |

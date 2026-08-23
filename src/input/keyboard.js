@@ -1,7 +1,7 @@
 // Desktop input: WASD + mouse with pointer lock.
 //   click/hold  shoot (hold = auto weapons keep firing)
 //   R reload, 1-4 weapon slots, Q cycle, G grenade, H health pack,
-//   F flashlight, M tactical map, T mine, E repair the base wall
+//   F flashlight, M tactical map, T mine, HOLD E to repair the base wall
 import * as THREE from 'three';
 import { TUNING } from '../game/tuning.js';
 
@@ -24,7 +24,7 @@ export class KeyboardInput {
       else if (e.code === 'KeyF') act.flashlight();
       else if (e.code === 'KeyM') act.map();
       else if (e.code === 'KeyT') act.mine();
-      else if (e.code === 'KeyE') act.repair();
+      else if (e.code === 'KeyE') act.repairHold(true);
       else if (e.code === 'KeyV') act.throwCycle();
       else if (e.code === 'KeyN') act.nightVision();
       else if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') act.setAds(true);
@@ -33,6 +33,8 @@ export class KeyboardInput {
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') ctx.actions.setAds(false);
+      // Repair is a HOLD: you watch a ring fill, so releasing cancels it.
+      else if (e.code === 'KeyE') ctx.actions.repairHold(false);
     });
     window.addEventListener('blur', () => {
       this.keys.clear();

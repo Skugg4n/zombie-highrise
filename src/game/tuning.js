@@ -62,6 +62,10 @@ export const TUNING = {
   base: {
     zombieWallMult: 1.6,     // a bite does more to concrete than to a person
     repairCost: 5,           // scrap per repair action: cheap, do it every day
+    // Long enough that the ring is worth watching and short enough that
+    // patching four segments is not a chore. A hold you cannot see the
+    // end of stops feeling like progress.
+    repairHoldTime: 0.8,
     repairAmount: 60,        // half a segment, so a ruined one takes two goes
     loseAt: 0.12,            // average integrity at which the base is overrun
     warnAt: 0.45,            // HUD starts shouting about it here

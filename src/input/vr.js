@@ -73,13 +73,21 @@ export class VRInput {
       // Right squeeze reloads; left squeeze drops a mine at the hand.
       controller.addEventListener('squeezestart', () => {
         if (this.hands.left === grip) {
-          // Left squeeze is contextual: patch the base wall if you are
-          // standing at a damaged bit during prep, otherwise drop a mine.
-          const pos = grip.getWorldPosition(new THREE.Vector3());
-          if (!ctx.actions.repair()) ctx.actions.mineAt(pos);
+          // Left squeeze is contextual: HOLD it to patch the base wall if
+          // you are standing at a damaged bit, otherwise it drops a mine.
+          // The hold is the same interaction the flat player gets, with
+          // the same ring, because the ring is world-space.
+          if (ctx.actions.canRepairHere()) {
+            ctx.actions.repairHold(true);
+          } else {
+            ctx.actions.mineAt(grip.getWorldPosition(new THREE.Vector3()));
+          }
         } else {
           ctx.actions.reload();
         }
+      });
+      controller.addEventListener('squeezeend', () => {
+        if (this.hands.left === grip) ctx.actions.repairHold(false);
       });
       const weaponHolder = new THREE.Group();
       weaponHolder.add(makeWeaponMesh('pistol'));

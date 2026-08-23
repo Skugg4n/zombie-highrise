@@ -1919,6 +1919,7 @@ export class HostSim {
         p: p.pos.toArray().map((n) => +n.toFixed(3)),
         ry: +p.ry.toFixed(3), rx: +p.rx.toFixed(3),
         vr: p.vr, hp: p.hp, down: p.down, name: p.name,
+        rv: p.down ? +p.reviveT.toFixed(2) : 0,
         h: p.h, hl: p.hl, hr: p.hr,
         inv: p.inv,
       };

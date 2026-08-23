@@ -10,6 +10,7 @@ import { HordeRenderer } from './world/horde.js';
 import { resolveCircle } from './game/collision.js';
 import { LOCO, moveAndCollide, blockingFor } from './game/locomotion.js';
 import { NavGrid } from './game/navgrid.js';
+import { InteractionLayer } from './world/interact.js';
 import { makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
@@ -1308,17 +1309,11 @@ const actions = {
   // Repair the nearest damaged wall segment. Prep only, cheap, and meant
   // to be spammed: patching the base every morning is the routine that
   // makes the day phase worth having.
-  // Returns true when it actually repaired something, so VR can fall back
-  // to dropping a mine on the same button.
-  repair: () => {
-    if (!canAct()) return false;
-    const seg = nearestRepairTarget();
-    if (!seg) return false;
-    if (scrap < TUNING.base.repairCost) { showToast('Not enough scrap.', 1200); return true; }
-    dispatchAction({ t: 'repair', i: seg.index });
-    audio.play('repair', [seg.x, 1, seg.z]);
-    return true;
-  },
+  // Repair is a HOLD, with a ring you watch fill. "OBJECTIVE: REPAIR WALL"
+  // told the player nothing about how; a highlighted section, a prompt and
+  // a filling ring tell them everything without a word of tutorial.
+  canRepairHere: () => !!nearestRepairTarget(),
+  repairHold: (down) => { repairHeld = down && canAct(); },
 };
 
 // The wall segment the repair prompt is pointing at, or null.
@@ -1355,6 +1350,91 @@ function applyWallState(hps) {
   if (changed) updateBaseHud();
 }
 
+// ---- Hold-to-act -------------------------------------------------------
+// Repairing the wall and reviving a teammate are the same interaction: go
+// to a marked thing, hold, watch it fill. Everything about it is
+// world-space, so it works identically flat and in VR. A DOM prompt would
+// have been half a feature again.
+let repairHeld = false;
+let repairHoldT = 0;
+let interact = null;
+
+function updateInteractions(dt) {
+  if (!interact) interact = new InteractionLayer(scene);
+  if (!isPlaying()) { interact.show(null, camera); interact.setBeacons([]); return; }
+
+  const me = role === 'client' ? net?.myId : 'H';
+  const here = rig.group.position;
+
+  // Downed teammates get a marker that draws THROUGH geometry: not being
+  // able to see them is the entire problem it solves.
+  const downed = [];
+  for (const [id, p] of remotePlayerPoses()) {
+    if (!p.down || id === me) continue;
+    downed.push({ id, x: p.p[0], y: p.p[1], z: p.p[2], rv: p.rv || 0, name: p.name });
+  }
+  interact.setBeacons(downed);
+
+  // Reviving beats repairing: a teammate on the floor is always the more
+  // urgent of the two.
+  let target = null;
+  const mate = downed.find((d) => Math.hypot(d.x - here.x, d.z - here.z) < 1.9);
+  if (mate) {
+    target = {
+      x: mate.x, y: mate.y, z: mate.z,
+      label: 'REVIVING', sub: mate.name || 'teammate',
+      progress: Math.min(1, mate.rv / TUNING.player.reviveTime),
+    };
+    repairHoldT = 0;
+  } else {
+    const seg = nearestRepairTarget();
+    if (seg) {
+      const afford = scrap >= TUNING.base.repairCost;
+      if (repairHeld && afford) {
+        repairHoldT += dt;
+        if (repairHoldT >= TUNING.base.repairHoldTime) {
+          repairHoldT = 0;
+          dispatchAction({ t: 'repair', i: seg.index });
+          audio.play('repair', [seg.x, 1, seg.z]);
+        }
+      } else {
+        repairHoldT = Math.max(0, repairHoldT - dt * 2.5);
+      }
+      target = {
+        x: seg.x, y: 0, z: seg.z,
+        label: afford ? (inVRNow() ? 'HOLD GRIP TO REPAIR' : 'HOLD E TO REPAIR') : 'NOT ENOUGH SCRAP',
+        sub: afford ? `${TUNING.base.repairCost} scrap` : `${TUNING.base.repairCost} needed`,
+        progress: repairHoldT / TUNING.base.repairHoldTime,
+      };
+    } else {
+      repairHoldT = 0;
+    }
+  }
+  interact.show(target, camera);
+}
+
+function inVRNow() { return !!(vrInput && vrInput.active); }
+
+// Every player the client knows about, including its own mirror, as
+// snapshot-shaped records. The host reads its own sim, a client its
+// replica, so the interaction layer does not care which it is.
+function remotePlayerPoses() {
+  const out = [];
+  if (role === 'client') {
+    const latest = replica && replica.latest;
+    if (latest && latest.players) {
+      for (const [id, p] of Object.entries(latest.players)) out.push([id, p]);
+    }
+  } else if (sim) {
+    for (const [id, p] of sim.players) {
+      out.push([id, {
+        p: p.pos.toArray(), down: p.down, rv: p.reviveT || 0, name: p.name,
+      }]);
+    }
+  }
+  return out;
+}
+
 // Base integrity readout + the repair prompt, refreshed on wall events and
 // once per frame while the prompt could change.
 let baseAlarmT = 0;
@@ -1365,7 +1445,10 @@ function updateBaseHud() {
   if (!wall) { hud.setBase(null); hud.setRepairPrompt(false); return; }
   const integrity = wall.integrity();
   hud.setBase(integrity);
-  hud.setRepairPrompt(!!nearestRepairTarget(), TUNING.base.repairCost);
+  // The prompt itself is world-space now (see updateInteractions), so it
+  // reaches a VR player too. The DOM row stays only as a reminder that
+  // repairing is a thing during prep.
+  hud.setRepairPrompt(false);
   // A pulse that speeds up as the perimeter fails: the emergency has to
   // be audible from anywhere in the base, including with your back to it.
   if (integrity < TUNING.base.warnAt && lastWave && lastWave.ph === 'night') {
@@ -2738,6 +2821,7 @@ renderer.setAnimationLoop(() => {
       if (lastWave && lastWave.ph !== presentedPhase) presentPhase(lastWave.ph);
       updateWaveHud(lastWave);
       updateBaseHud();
+      updateInteractions(dt);
       updateVrReadouts();
     }
     updateDayNight();
@@ -3168,6 +3252,28 @@ window.__zhr = {
     grips: vrInput.grips.length,
   } : null),
   debugDown: () => myDown,
+  // What the interaction layer is currently offering, as the player sees
+  // it. "Actionable, not just announced" is a claim that needs a test.
+  debugInteraction: () => {
+    if (!interact) return null;
+    return {
+      promptVisible: interact.prompt.visible,
+      label: interact._labelKey.split('|')[0] || '',
+      ringVisible: interact.ring.visible,
+      highlightVisible: interact.highlight.visible,
+      beacons: interact.beacons.size,
+    };
+  },
+  debugRepairHold: (down) => { repairHeld = !!down; },
+  debugDamageWall: (index, amount) => {
+    if (sim && level.baseWall) sim.damageBaseWall(index, amount);
+  },
+  debugWallSeg: (index) => {
+    const w = level.baseWall;
+    if (!w) return null;
+    const s = w.segments[index];
+    return s ? { x: s.x, z: s.z, hp: s.hp, maxHp: s.maxHp } : null;
+  },
   reloading: () => arsenal.reloading,
   debugEndRun: () => { if (sim) { sim.wave.phase = 'gameover'; sim.wave.t = 0; for (const p of sim.players.values()) { p.down = true; p.hp = 0; } } },
   debugSetDowned: (v) => setDowned(v),
