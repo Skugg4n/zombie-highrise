@@ -60,7 +60,7 @@ action.
 | 17 | Elevator shop | **PENDING** the shop is a DOM panel | **PENDING** | |
 | 18 | Level transitions | arrival card is DOM only; the wrist carries the objective | board by standing on the plate | partial |
 | 19 | Tactical map and drone | **PENDING** the map is DOM and disabled in VR | **PENDING** | |
-| 20 | Teammate presence | **PENDING** avatars are a gas bottle with no arms | n/a | |
+| 20 | Teammate presence | head and both hands from the headset and controllers, arms solved by IK, name tag, own colour | n/a | headset |
 
 Rows marked **PENDING** are known gaps, listed here so they are tracked
 rather than rediscovered. A pending row is an unfinished feature.

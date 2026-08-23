@@ -11,7 +11,7 @@ import { resolveCircle } from './game/collision.js';
 import { LOCO, moveAndCollide, blockingFor } from './game/locomotion.js';
 import { NavGrid } from './game/navgrid.js';
 import { InteractionLayer } from './world/interact.js';
-import { makeAvatarMesh, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
+import { makeAvatarMesh, makeNameTag, AVATAR_COLORS, SHARED_MATERIALS } from './world/actors.js';
 import { applyPhotomode, PHOTO_ZOMBIES } from './views/photomode.js';
 import { FEEL_CLIPS } from './views/feelclips.js';
 import { Net } from './net/net.js';
@@ -322,44 +322,131 @@ function updateZombieVisuals(rows, dt) {
 // ---- Remote player avatars ----------------------------------------------
 const avatars = new Map();   // playerId -> mesh group
 let avatarColorIdx = 0;
-function ensureAvatar(id) {
+function ensureAvatar(id, name) {
   let a = avatars.get(id);
   if (!a) {
-    a = makeAvatarMesh(AVATAR_COLORS[avatarColorIdx++ % AVATAR_COLORS.length]);
+    const colour = AVATAR_COLORS[avatarColorIdx++ % AVATAR_COLORS.length];
+    a = makeAvatarMesh(colour);
+    a.userData.colour = colour;
     avatars.set(id, a);
     scene.add(a);
   }
+  // The name tag is rebuilt only when the name changes, which is once.
+  if (name && a.userData.tagName !== name) {
+    a.userData.tagName = name;
+    if (a.userData.tag) removeAndDispose(a.userData.tag);
+    const tag = makeNameTag(name, a.userData.colour);
+    a.add(tag);
+    a.userData.tag = tag;
+  }
   return a;
 }
+
+// Two-bone IK. Point the upper segment so that the chain from `root` can
+// reach `goal`, bending at the elbow. This is what turns a head and two
+// tracked hands into something that reads as a person: without it the
+// hands float in formation beside a torso and the illusion never lands.
+const IK_A = new THREE.Vector3();
+const IK_B = new THREE.Vector3();
+function solveTwoBone(upper, fore, goalLocal, upperLen, foreLen) {
+  IK_A.copy(goalLocal).sub(upper.position);
+  const dist = Math.min(IK_A.length(), (upperLen + foreLen) * 0.999);
+  if (dist < 1e-4) return;
+  IK_A.normalize();
+  // Law of cosines for the shoulder angle off the straight line to the goal.
+  const cos = Math.max(-1, Math.min(1,
+    (upperLen * upperLen + dist * dist - foreLen * foreLen) / (2 * upperLen * dist)));
+  const bend = Math.acos(cos);
+  // Aim the whole chain at the goal, then swing the upper bone out by the
+  // bend angle around an axis that puts the elbow behind and below.
+  upper.lookAt(IK_B.copy(upper.position).add(IK_A));
+  upper.rotateX(bend);
+  // The forearm closes the remaining angle back toward the goal.
+  const cos2 = Math.max(-1, Math.min(1,
+    (upperLen * upperLen + foreLen * foreLen - dist * dist) / (2 * upperLen * foreLen)));
+  fore.position.set(0, 0, -upperLen);
+  fore.rotation.set(-(Math.PI - Math.acos(cos2)), 0, 0);
+}
+// Stand-in avatars a probe has asked to keep alive. Empty in a real game.
+const debugKeepAvatars = new Set();
 function pruneAvatars(keepIds) {
   for (const [id, a] of avatars) {
-    if (!keepIds.has(id)) { removeAndDispose(a); avatars.delete(id); }
+    if (keepIds.has(id) || debugKeepAvatars.has(id)) continue;
+    removeAndDispose(a);
+    avatars.delete(id);
   }
 }
-function updateAvatar(id, p) {
-  const a = ensureAvatar(id);
+const UPPER_LEN = 0.26, FORE_LEN = 0.26;
+function updateAvatar(id, p, dt = 1 / 60) {
+  const a = ensureAvatar(id, p.name);
   const parts = a.userData.parts;
   a.position.fromArray(p.p);
   a.rotation.y = p.ry || 0;
   parts.head.rotation.x = p.rx || 0;
   // Downed players lie flat.
   a.rotation.x = p.down ? -Math.PI / 2 * 0.9 : 0;
+  if (a.userData.tag) {
+    // The tag stays upright and faces the reader whatever the body does.
+    a.userData.tag.quaternion.copy(camera.getWorldQuaternion(tmpQ));
+    a.userData.tag.position.y = p.down ? 0.7 : 1.92;
+  }
+
   const isVR = !!(p.vr && p.h);
-  parts.handL.visible = isVR && !!p.hl;
-  parts.handR.visible = isVR && !!p.hr;
   if (isVR) {
     a.updateMatrixWorld(true);
-    parts.head.position.y = Math.max(0.4, (p.h.p[1] - p.p[1]));
-    parts.body.scale.y = Math.max(0.5, parts.head.position.y / 1.55);
-    for (const [hand, data] of [[parts.handL, p.hl], [parts.handR, p.hr]]) {
-      if (!data) continue;
-      hand.position.copy(a.worldToLocal(tmpV.fromArray(data.p)));
-      a.getWorldQuaternion(tmpQ).invert();
-      hand.quaternion.fromArray(data.q).premultiply(tmpQ);
+    // Head height comes from the headset, and the torso stretches to meet
+    // it, so a crouching teammate reads as crouching.
+    const headY = Math.max(0.6, p.h.p[1] - p.p[1]);
+    parts.head.position.y = headY;
+    parts.body.position.y = headY - 0.49;
+    parts.collar.position.y = headY - 0.17;
+    parts.strap.position.y = headY - 0.41;
+    a.getWorldQuaternion(tmpQ).invert();
+    for (const side of ['L', 'R']) {
+      const arm = parts.arms[side];
+      const data = side === 'L' ? p.hl : p.hr;
+      arm.upper.position.y = headY - 0.23;
+      if (!data) {
+        // Untracked hand: rest the arm at the side rather than leaving it
+        // pointing wherever it happened to be.
+        arm.upper.rotation.set(-Math.PI / 2, 0, 0);
+        arm.fore.rotation.set(0, 0, 0);
+        arm.fore.position.set(0, 0, -UPPER_LEN);
+        arm.hand.position.set(side === 'L' ? -0.22 : 0.22, arm.upper.position.y - 0.5, 0);
+        arm.hand.quaternion.identity();
+        continue;
+      }
+      arm.hand.position.copy(a.worldToLocal(tmpV.fromArray(data.p)));
+      arm.hand.quaternion.fromArray(data.q).premultiply(tmpQ);
+      solveTwoBone(arm.upper, arm.fore, arm.hand.position, UPPER_LEN, FORE_LEN);
     }
   } else {
     parts.head.position.y = 1.55;
-    parts.body.scale.y = 1;
+    parts.body.position.y = 1.06;
+    parts.collar.position.y = 1.38;
+    parts.strap.position.y = 1.14;
+    // A flat player has no tracked hands, so the arms swing with the walk.
+    const moved = tmpV.fromArray(p.p).distanceTo(parts.lastPos);
+    parts.lastPos.fromArray(p.p);
+    const speed = Math.min(1, moved / (dt * 4.5));
+    parts.strideT += dt * (2 + speed * 7);
+    const swing = Math.sin(parts.strideT) * 0.7 * speed;
+    for (const [side, sign] of [['L', 1], ['R', -1]]) {
+      const arm = parts.arms[side];
+      arm.upper.rotation.set(-Math.PI / 2 + swing * sign * 0.5, 0, 0);
+      arm.fore.rotation.set(0.45 + Math.max(0, swing * sign) * 0.4, 0, 0);
+      arm.fore.position.set(0, 0, -UPPER_LEN);
+      arm.hand.position.set(0, 0, 0);
+      arm.hand.quaternion.identity();
+      arm.upper.updateMatrixWorld(true);
+      arm.fore.localToWorld(tmpV.set(0, 0, -FORE_LEN));
+      arm.hand.position.copy(a.worldToLocal(tmpV));
+    }
+    for (const [side, sign] of [['L', 1], ['R', -1]]) {
+      const leg = parts.legs[side];
+      leg.thigh.rotation.set(-Math.PI / 2 + swing * sign * 0.75, 0, 0);
+      leg.shin.rotation.set(-Math.max(0, swing * sign) * 0.9, 0, 0);
+    }
   }
 }
 
@@ -2776,8 +2863,9 @@ renderer.setAnimationLoop(() => {
         if (id === 'H') continue;
         keep.add(id);
         updateAvatar(id, {
-          p: p.pos.toArray(), ry: p.ry, rx: p.rx, vr: p.vr, down: p.down, h: p.h, hl: p.hl, hr: p.hr,
-        });
+          p: p.pos.toArray(), ry: p.ry, rx: p.rx, vr: p.vr, down: p.down,
+          h: p.h, hl: p.hl, hr: p.hr, name: p.name,
+        }, dt);
       }
       pruneAvatars(keep);
     } else if (role === 'client' && net && net.connected) {
@@ -2792,7 +2880,7 @@ renderer.setAnimationLoop(() => {
         for (const [id, p] of Object.entries(s.players || {})) {
           if (id === net.myId) continue;
           keep.add(id);
-          updateAvatar(id, p);
+          updateAvatar(id, p, dt);
         }
         pruneAvatars(keep);
         updateZombieVisuals(s.zs || [], dt);
@@ -3265,6 +3353,28 @@ window.__zhr = {
     };
   },
   debugRepairHold: (down) => { repairHeld = !!down; },
+  // Two stand-in teammates so avatars can be looked at without a second
+  // headset in the room: one flat and walking, one with tracked hands.
+  debugFakeMates: () => {
+    const c = level.baseCentre || { x: 0, z: 0 };
+    debugKeepAvatars.add('FAKE1').add('FAKE2');
+    let t = 0;
+    setInterval(() => {
+      t += 0.05;
+      updateAvatar('FAKE1', {
+        p: [c.x - 1.5, 0, c.z + 0.4 + Math.sin(t) * 0.7], ry: 0.3, rx: 0,
+        vr: false, down: false, name: 'OLA',
+      }, 0.05);
+      updateAvatar('FAKE2', {
+        p: [c.x + 1.3, 0, c.z + 0.6], ry: -0.2, rx: -0.1, vr: true,
+        name: 'MATE',
+        h: { p: [c.x + 1.3, 1.62, c.z + 0.6], q: [0, 0, 0, 1] },
+        hl: { p: [c.x + 0.9, 1.15 + Math.sin(t * 1.7) * 0.22, c.z + 0.1], q: [0, 0, 0, 1] },
+        hr: { p: [c.x + 1.7, 1.30 + Math.cos(t * 1.3) * 0.2, c.z + 0.0], q: [0, 0, 0, 1] },
+      }, 0.05);
+    }, 50);
+    return true;
+  },
   debugDamageWall: (index, amount) => {
     if (sim && level.baseWall) sim.damageBaseWall(index, amount);
   },

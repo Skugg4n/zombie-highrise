@@ -91,30 +91,118 @@ export function makeZombieMesh(type = 'walker') {
 
 // Remote player avatar. Flat players: capsule body + visor head that pitches.
 // VR players: floating head + two hands driven by tracked poses.
+// A PLAYER, as your teammates see you.
+//
+// Ola, co-op VR playtest: "players currently render as a gas bottle with
+// no arms or legs. In co-op VR, seeing your teammates as people is most of
+// the social presence, so this matters more here than on flat."
+//
+// It was a capsule with a box head and two floating hand blocks. Now it is
+// a person: torso, head, two upper arms and two forearms that reach for
+// wherever the hands actually are, and legs that stride when the body
+// moves. In VR the head and both hands come straight from the headset and
+// controllers, and the ARMS ARE INFERRED from them by two-bone IK, which
+// is what makes a tracked player read as a body rather than as three
+// objects floating in formation.
 export function makeAvatarMesh(colorHex) {
   const g = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.7 });
   const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a2c30, roughness: 0.6 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0x8d6a4f, roughness: 0.9 });
 
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.75, 4, 8), bodyMat);
-  body.position.y = 0.85;
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.52, 4, 8), bodyMat);
+  body.position.y = 1.06;
+  // A collar and a strap so the torso has a front, which is what tells you
+  // at a glance which way a teammate is facing.
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.09, 10), darkMat);
+  collar.position.y = 1.38;
+  const strap = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.07, 0.03), darkMat);
+  strap.position.set(0, 1.14, 0.18);
+  strap.rotation.z = 0.35;
 
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.24, 0.28), bodyMat);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.25, 0.27), bodyMat);
   head.position.y = 1.55;
   const visor = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.04), darkMat);
   visor.position.set(0, 0.02, 0.15);
   head.add(visor);
 
-  const handL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.16), darkMat);
-  const handR = handL.clone();
-  handL.visible = handR.visible = false;
+  // Arms as two bones each. Each segment is modelled along -Z from its
+  // own origin so it can simply look at the next joint.
+  const seg = (len, r, mat) => {
+    const m = new THREE.Group();
+    const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(r, len - r * 2, 3, 6), mat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.z = -len / 2;
+    m.add(mesh);
+    return m;
+  };
+  const arms = {};
+  for (const side of ['L', 'R']) {
+    const sx = side === 'L' ? -0.22 : 0.22;
+    const upper = seg(0.26, 0.055, bodyMat);
+    upper.position.set(sx, 1.32, 0);
+    const fore = seg(0.26, 0.048, bodyMat);
+    upper.add(fore);
+    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.13), skinMat);
+    arms[side] = { upper, fore, hand };
+    g.add(upper, hand);
+  }
+
+  // Legs: two bones each, driven by a stride cycle rather than IK. Nobody
+  // tracks their feet, and a plausible walk beats a wrong one.
+  const legs = {};
+  for (const side of ['L', 'R']) {
+    const sx = side === 'L' ? -0.1 : 0.1;
+    const thigh = seg(0.4, 0.07, darkMat);
+    thigh.position.set(sx, 0.82, 0);
+    thigh.rotation.x = -Math.PI / 2;     // hang downward at rest: a segment
+                                         // runs along -Z, so -PI/2 about X
+                                         // points it at the floor, not the sky
+    const shin = seg(0.42, 0.06, darkMat);
+    shin.position.z = -0.4;
+    thigh.add(shin);
+    legs[side] = { thigh, shin };
+    g.add(thigh);
+  }
 
   const shadow = makeBlobShadow(0.4);
   shadow.position.y = 0.02;
 
-  g.add(body, head, handL, handR, shadow);
-  g.userData.parts = { body, head, handL, handR, shadow };
+  g.add(body, collar, strap, head, shadow);
+  g.userData.parts = {
+    body, collar, strap, head, shadow, arms, legs,
+    handL: arms.L.hand, handR: arms.R.hand,
+    lastPos: new THREE.Vector3(), strideT: 0,
+  };
   return g;
+}
+
+// A floating name tag. In co-op the first question is always "who is
+// that", and a colour alone stops answering it once you have four
+// players and a horde.
+export function makeNameTag(name, colorHex) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = 'rgba(10,12,16,0.72)';
+  x.beginPath();
+  x.roundRect(2, 2, 252, 60, 14);
+  x.fill();
+  x.strokeStyle = '#' + colorHex.toString(16).padStart(6, '0');
+  x.lineWidth = 4;
+  x.stroke();
+  x.fillStyle = '#e8e4da';
+  x.font = 'bold 34px system-ui, sans-serif';
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillText((name || 'PLAYER').slice(0, 12).toUpperCase(), 128, 34);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.44, 0.11),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.position.y = 1.92;
+  return m;
 }
 
 export const AVATAR_COLORS = [0xe0a33c, 0x7fb069, 0x5c9ead, 0xb669b6, 0xd1653e, 0x8a8f98];

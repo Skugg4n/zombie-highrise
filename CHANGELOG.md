@@ -1,5 +1,34 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.15.1 - 2026-08-23 - your teammates are people
+
+Ola: "players currently render as a gas bottle with no arms or legs. In
+co-op VR, seeing your teammates as people is most of the social presence,
+so this matters more here than on flat."
+
+An avatar was a capsule, a box head and two floating hand blocks. It is a
+body now: torso with a collar and a strap so it has a front you can read at
+a glance, head, two-bone arms, two-bone legs, and a name tag that stays
+upright and faces you.
+
+- **In VR** the head and both hands come straight from the headset and
+  controllers, and the **arms are inferred from them by two-bone IK**. That
+  is what makes a tracked player read as a person rather than as three
+  objects floating in formation. The torso stretches to the real head
+  height, so a crouching teammate reads as crouching, and an untracked
+  hand rests the arm at the side instead of leaving it pointing wherever
+  it last was.
+- **Flat players** get a stride: arms swing and legs walk at a rate driven
+  by how fast they are actually moving. Nobody tracks their feet, and a
+  plausible walk beats a wrong one.
+- **A name tag** in the player's own colour. The first question in co-op is
+  always "who is that", and a colour alone stops answering it once there
+  are four players and a horde.
+
+One bug found by looking rather than reasoning: every limb pointed at the
+sky. A segment is modelled along -Z, so rotating it +90 degrees about X
+aims it up, not down. Both arms and both legs were scarecrowed.
+
 ## v0.15.0 - 2026-08-23 - objectives you can act on
 
 Ola: "'OBJECTIVE: REPAIR WALL' tells the player nothing about how. Every
