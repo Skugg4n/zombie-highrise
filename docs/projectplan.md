@@ -79,57 +79,73 @@ expensive.
       reload, impact, empty click, enemy sounds, wave stingers)
       synthesized in code so there are no asset downloads
 
-## Phase 3.5 - Depth and replayability (added per Ola's ambition brief:
-## Quest 2 caps rendering only; feel, content depth and functional quality
-## are judged against full commercial titles. Boredom is a bug.)
+## THE REBUILD (2026-08-23) - authority: docs/level-design.md
 
-- [x] Enemy roster expansion (readable silhouettes + distinct behavior):
-      SPITTER (ranged acid arc, forces repositioning, fragile),
-      CRAWLER (low fast silhouette, ducks under sightlines, lunges),
-      SCREAMER (support: scream summons a burst wave, priority target)
-- [x] BOSS floor (floor 12, the run's final peak): the BUTCHER guards the elevator
-      (heavy charge attack, stagger windows, weak-point back plate,
-      scrap jackpot). Boss floor = difficulty peak by design.
-- [x] Night modifiers rolled per night and announced at countdown (fog
-      night, frenzy, blackout, swarm of weaklings, loot night) so floors
-      6+ differ structurally, not just numerically
-- [ ] Day-phase events with real decisions: SUPPLY DROP (rich crate lands
-      OUTSIDE the walls: risk/reward run), GENERATOR (dark levels: find
-      and start it to keep the lights on all night)
-- [x] Hazards: explosive barrels (shootable, chain into the horde)
-- [ ] Upgrade paths as late-game scrap sinks: weapon tier upgrades
-      (damage/magazine, 2 tiers per gun), armor vest (absorbs damage,
-      breaks), bandolier (carry caps up)
-- [ ] Weapon role audit: every weapon has a distinct moment where it is
-      the right choice; no strict dominance (tuning + playtest critic)
-- [x] Difficulty curve with peaks and breathers: surge nights every 3rd
-      night, calmer post-surge days with bonus loot, wagon floors as
-      breathers, boss floors as peaks
-- [ ] Playtest critic loop: an autopilot bot (?autoplay=1) plays a full
-      multi-floor session headless at accelerated speed, logging pacing
-      metrics (night lengths, damage, economy flow, idle time); a
-      SEPARATE critic sub-agent reviews the session log + periodic
-      screenshots and reports where it got bored, confused or frustrated;
-      loop on its findings like the visual and feel critics (6-round cap
-      per pass)
-- [ ] Final placeholder purge: every sound, animation, reaction,
-      transition and UI state deliberate; nothing left as scaffold
+Ola's v0.9.3 playtest replaced the high-rise concept with two alternating
+level archetypes. docs/level-design.md is the authority on level
+structure; this plan follows its build order. Phases 0-3 below stay as
+history: their systems (netcode, arsenal, audio, feel, ending) survive
+the rebuild. What changes is the LEVELS.
 
-## Run status (2026-08-23)
+### Step 1 - Foundation bugs (nothing else matters until these are fixed)
 
-Phases 0-3 are complete and the game has a real ending. Phase 3.5 items
-that remain open (day-phase events, upgrade paths, weapon role audit,
-autoplay playtest critic) were deliberately left for a future session
-when the spend limit resets. See HANDOFF.md.
+- [ ] **Enemy navigation.** Zombies get stuck, jitter, walk into geometry
+      and cannot escape, and are harmless. Implement a navigation grid
+      over the level with real pathfinding plus agent separation. They
+      must route around obstacles, find breaches, and never freeze.
+- [ ] **Ground and collision ignore height.** Players walk up and down the
+      sides of a ramp as if the world were flat and cannot step onto its
+      last step ("no gravity, absence of natural laws"). Implement proper
+      ground sampling, step-up and slope limits, and real falling.
+- [ ] **VR weapon aim is 45 degrees off.** The pistol points up and away
+      from the controller forward axis. Fix the weapon-to-controller
+      transform and verify in headset.
+- [x] Reload needs a readable animation (done in v0.9.2)
+- [ ] The elevator sometimes faces the wrong way. It becomes the base's
+      lift plate, so orientation derives from the base, never placed
+      independently.
+
+### Step 2 - ONE holdout level, proven fun
+
+- [ ] Build L1 exactly to the sketch (docs/sketches/L1-holdout.jpg):
+      open daylight field 60-80 m, small base in it, low wall + sandbags,
+      interior crates, a ramp to a snipe platform, the elevator plate with
+      its control panel, 4 player spawns.
+- [ ] Field: fog/haze hiding the far ground, sight blockers (ridge, lone
+      tree, burnt-out cars, rock/house, a building), zombie spawns ALWAYS
+      behind a sight blocker and never in view of the base.
+- [ ] Players cannot leave the base; the low wall is the boundary.
+- [ ] The base takes damage: zombies attack the wall and sandbags,
+      breaches open, repairable during the day, losing the base is a fail
+      state.
+- [ ] The drone becomes a real tool: affordable, obvious effect, and it
+      flies OUT to place traps where players cannot reach. More trap
+      types for it to drop.
+- [ ] Mines priced as a staple, not a luxury.
+- [ ] **STOP. Ola plays it. Iterate until this single level is genuinely
+      fun on its own before building anything else.**
+
+### Step 3 - ONE traverse level, same treatment
+
+- [ ] Build L2 to the sketch (docs/sketches/L2-traverse.jpg): 10x10 m
+      dark route, elevator/spawn in one corner, slide door with a button,
+      a chasm to route around, a fence, zombie holes in walls and ground,
+      a weapon locker, the exit lift in the opposite corner.
+- [ ] Drone explicitly unavailable underground, stated in fiction and UI.
+- [ ] Stop, playtest, iterate.
+
+### Step 4 - The campaign
+
+- [ ] More variants of each archetype (holdout on a rooftop, in a walled
+      yard, inside a house shooting out of windows; longer traverses with
+      more doors and real hazards)
+- [ ] RIDE maps: the squad stands on a moving vehicle, danger arrives
+      along the path
+- [ ] The BUTCHER boss as a holdout with one huge threat
+- [ ] Finale and win state (the roof extraction survives from v0.8.0)
 
 ## Phase 4 - Release
 
 - [x] GitHub Pages deploy documented in README
 - [ ] Playtest with the whole crew, bugs into LESSONS.md
 - [ ] Cross-city test: Quest 2 + Quest 3 + desktop + mobile from different homes
-
-## Future (parked in docs/TODO.md)
-
-- Co-located VR: several headsets in the same physical room (gym hall),
-  with the alignment ritual it requires
-- Host migration, voice chat, PvP horde mode, roof finale

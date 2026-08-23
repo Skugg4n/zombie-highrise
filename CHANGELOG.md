@@ -1,5 +1,29 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.10.0 - 2026-08-23 - THE REBUILD begins
+
+Direction change from Ola's v0.9.3 playtest, captured in the new
+docs/level-design.md (now the authority on level structure) and his two
+sketches in docs/sketches/. The high-rise concept is dropped: it never
+became real fiction, and every level collapsed into wave defense in a box
+because levels were generated to fit the physical play area.
+
+Two alternating archetypes replace it:
+- HOLDOUT: a small base (5x5 to 8x8 m) in a big open daylight field
+  (60-80 m). Players cannot leave the base; the base itself can be
+  damaged and lost. Zombies cross open ground from behind distant sight
+  blockers, so you always see them coming.
+- TRAVERSE: a dark underground route 10x10 to 20x20 m, spawn in one
+  corner, reach the exit in the other. Moving forward is the objective.
+
+Later: RIDE maps (the squad on a moving vehicle).
+
+The elevator survives as the transition device only: a metal plate inside
+the base that becomes the lift when the area is cleared, keeping its
+three jobs (rebuild the world, run the shop, re-centre roomscale VR).
+
+docs/vision.md and docs/projectplan.md updated to match.
+
 ## v0.9.3 - 2026-08-23 - Ola's playtest pass
 
 Everything here comes from real playtest feedback, which outranks every

@@ -2375,6 +2375,11 @@ window.__zhr = {
     return true;
   },
   items: () => [...itemVisuals.keys()],
+  debugHeal: () => {
+    if (!sim) return;
+    const p = sim.players.get('H');
+    if (p) { p.hp = TUNING.player.maxHp; p.down = false; myHp = p.hp; myDown = false; }
+  },
   debugGrant: (w) => {
     if (!sim) return;
     const p = sim.players.get('H');

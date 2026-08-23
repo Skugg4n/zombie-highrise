@@ -1,43 +1,59 @@
 # ZOMBIE HIGH RISE - Vision
 
 Working title: **ZOMBIE HIGH RISE**
-Tagline: *One elevator. Every floor is a last stand.*
+Tagline: *Hold the ground. Then move.*
+
+> **Level structure is defined by docs/level-design.md, which supersedes
+> this file wherever they disagree.** The high-rise conceit was dropped
+> after the v0.9.3 playtest: it never became real fiction and every level
+> collapsed into "wave defense in a box".
 
 ## The concept in one sentence
 
-A co-op zombie wave defense game set in and around a tall, narrow building,
-where VR players move physically (room scale, up to gym-hall size) or play
-stationary from home, mobile and desktop players play classic FPS or a
-tactical map view, and the elevator between levels lets us rebuild the
-layout of the same physical play area for every level.
+A co-op zombie survival game across a wasteland landscape, where the squad
+alternates between holding a small base against a horde crossing open
+daylight, and pushing through dark underground routes to reach the next
+place; VR players move physically inside the base, or play stationary from
+home, while mobile and desktop players play classic FPS or a tactical view.
 
-## The core trick: the elevator
+## The two archetypes
 
-The physical play area is limited (the player picks their space in the
-lobby, from a 2x2 m living room up to a gym hall). Every level is designed
-to fit inside that area. When a level is cleared the squad steps into the
-elevator. During the ride:
+The campaign alternates between them, and the alternation IS the rhythm.
 
-1. The next level is rebuilt behind the scenes (new layout on the same physical footprint)
-2. The upgrade shop is shown (the elevator IS the shop)
-3. The world quietly re-centers around the VR player's position
+**HOLDOUT.** An open daylight field 60 to 80 m across. The squad's base is
+small (5x5 to 8x8 m) and sits in it. Players CANNOT leave the base: the low
+wall is the boundary. Zombies cross the open ground from far away, emerging
+from fog and from behind sight blockers (a ridge, a lone tree, burnt-out
+cars, a rock, a house). You see them coming, and that long approach is the
+tension. The base itself can be damaged: zombies attack the wall and the
+sandbags, breaches open, and losing the base is a fail state alongside
+losing the players.
 
-The elevator goes UP and DOWN, which is the key to variety:
+**TRAVERSE.** A dark underground or interior route, 10x10 to 20x20 m. You
+spawn in one corner and must reach the exit in the opposite corner. Doors
+that must be opened, a chasm or fence that shapes the route, holes in walls
+and floors that the horde comes through. Moving forward is the objective,
+not surviving a timer: waves come because you advance.
 
-- **Basement levels:** cramped corridors, flashlight, dread. Claustrophobia on purpose.
-- **Ground levels (roughly every 3rd level):** the doors open onto daylight.
-  You defend a fortified base and shoot OUT across open ground, roads and
-  fields as the horde walks in from far away. Air, sun, long sightlines.
-- **Upper floors:** balconies, window positions, verticality, sniping down
-  at the street.
+Emerging somewhere NEW after every traverse is what sells the journey. The
+player is travelling across a landscape, not riding a lift in one building.
 
-Between some levels: trench and walkway sections connecting structures,
-and moving platforms (a train car, a wagon, a freight lift) that carry
-players through the world while they stand still physically.
+Planned map types beyond these two: **ride maps**, where the squad stands
+on a moving vehicle and danger arrives along the path.
+
+## The elevator
+
+The elevator survives as the transition device, not as a building. It is a
+metal plate inside the base that becomes the lift once the area is cleared.
+It keeps its three jobs: rebuild the world for the next level, run the
+upgrade shop during the ride, and quietly re-centre roomscale VR.
 
 ## Shoot far, walk near
 
-Players can never WALK far, but they can always SEE and SHOOT far. Windows,
+Players can never WALK far, but they can always SEE and SHOOT far. On
+holdout levels this is literal: the base is the whole walkable world and
+the field is the whole shootable one. The DRONE is the only thing that
+reaches the field, which is what makes it a core tool. Windows,
 balconies, shafts, doorways onto open ground. The building always feels
 bigger than the floor you stand on, and the outside world is always present.
 

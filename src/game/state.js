@@ -12,6 +12,7 @@ import { CONFIG } from '../config.js';
 import { TUNING } from './tuning.js';
 import { resolveCircle, segmentBlocked } from './collision.js';
 import { levelTypeFor, FINAL_LEVEL, LEVEL_SIZE } from '../world/levelgen.js';
+import { NavGrid } from './navgrid.js';
 
 export const ZOMBIE_TYPES = ['walker', 'runner', 'brute', 'spitter', 'crawler', 'screamer', 'butcher'];
 export const ITEM_KINDS = ['ammo_shotgun', 'ammo_smg', 'pack', 'grenade'];
@@ -56,6 +57,7 @@ export class HostSim {
     this.drones.clear();
     this.clouds.length = 0;
     this.fires.length = 0;
+    this.level.nav = null;   // rebuild navigation for the new level
     this._seedBarrels();
     let i = 0;
     for (const p of this.players.values()) {
@@ -785,6 +787,7 @@ export class HostSim {
     if (idx >= 0) this.level.colliders.splice(idx, 1);
     this.level.collidersTall = null;   // cached lists are stale now
     this.level.collidersZ = null;
+    this.level.nav = null;             // a popped barrel opens a route
     this.events.push({ e: 'bboom', id: b.id, p: b.pos.toArray() });
     const R = TUNING.economy.barrel.blastRadius;
     for (const z of [...this.zombies.values()]) {
@@ -958,15 +961,20 @@ export class HostSim {
       + ((wave.dayQueue && wave.dayQueue.length) || 0);
   }
 
+  // ---- The horde brain --------------------------------------------------
+  // Rebuilt after the playtest. Every agent follows a real A* path over the
+  // level's navigation grid, re-planned on a budget, with string-pulling so
+  // movement looks like walking rather than grid-stepping, plus separation
+  // so a crowd spreads across a breach instead of jamming into one point.
   _stepZombies(dt) {
+    this._planBudget = 6;   // A* searches allowed per frame (cost control)
     for (const z of this.zombies.values()) {
       const stats = TUNING.enemies[z.type];
-      // Stunned (shotgun impact / post-charge recovery): stand and take it.
       if (z.stunT > 0) { z.stunT -= dt; continue; }
-      // Type-specific brains first; they may skip the default chase.
       if (z.type === 'spitter' && this._stepSpitter(z, stats, dt)) continue;
       if (z.type === 'screamer' && this._stepScreamer(z, stats, dt)) continue;
       if (z.type === 'butcher' && this._stepButcher(z, stats, dt)) continue;
+
       // Aggro: nearest standing player, re-evaluated every 2 s.
       z.retargetT -= dt;
       let target = z.targetId ? this.players.get(z.targetId) : null;
@@ -981,27 +989,9 @@ export class HostSim {
       }
       if (!target) continue;
 
-      // Routing: when the straight line to the target crosses a tall wall,
-      // or the zombie is outside a ground level's base, head for the best
-      // entry first. Low colliders block movement via pushout (slide).
-      let goal = target.pos;
-      const losBlocked = segmentBlocked(z.pos.x, z.pos.z, target.pos.x, target.pos.z, this._tall());
-      // Outside a walled compound: route to a gate/entry first. Level
-      // size, NOT the physical play area, defines "outside".
-      const half = LEVEL_SIZE / 2;
-      const outsideGround = this.level.type === 'ground'
-        && (Math.abs(z.pos.x) > half || Math.abs(z.pos.z) > half);
-      if ((losBlocked || outsideGround) && this.level.entries.length) {
-        let best = null, bd = Infinity;
-        for (const ePos of this.level.entries) {
-          const d = z.pos.distanceToSquared(ePos) + ePos.distanceToSquared(target.pos);
-          if (d < bd) { bd = d; best = ePos; }
-        }
-        if (best && z.pos.distanceToSquared(best) > 1.0) goal = best;
-      }
-
       const dist = z.pos.distanceTo(target.pos);
-      // Crawlers lunge when close: a burst of speed under the sightlines.
+      const losBlocked = segmentBlocked(z.pos.x, z.pos.z, target.pos.x, target.pos.z, this._tall());
+
       let speedMult = this._cloudSlowAt(z.pos);
       if (z.daylight) speedMult *= TUNING.pacing.dayRaid.speedMult;
       if (z.type === 'crawler' && dist < stats.lungeRange) {
@@ -1010,41 +1000,148 @@ export class HostSim {
       if (z.type === 'runner' && this.mod === 'frenzy') {
         speedMult *= TUNING.modifiers.frenzy.runnerSpeedMult;
       }
+
       const reach = stats.radius + 0.55;
-      // Bites require line of sight: a wall between mouth and target means
-      // keep walking, never chew through the masonry.
-      const canBite = goal === target.pos && dist <= reach && !losBlocked;
-      if (!canBite) {
-        const before = z.pos.clone();
-        const to = goal.clone().sub(z.pos); to.y = 0;
-        if (to.lengthSq() > 1e-6) {
-          to.normalize().multiplyScalar(stats.speed * speedMult * dt);
-          z.pos.add(to);
-          resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
-        }
-        z.biteT = 0;
-        // Failsafe against any residual stuck case (pinned on geometry far
-        // from everyone): after 8 s of no progress, re-enter via a doorway.
-        const moved = z.pos.distanceToSquared(before);
-        if (moved < (stats.speed * dt * 0.25) ** 2 && dist > 3) {
-          z.stuckT += dt;
-          if (z.stuckT > 8 && this.level.entries.length) {
-            z.stuckT = 0;
-            z.pos.copy(this.level.entries[Math.floor(Math.random() * this.level.entries.length)]);
-          }
-        } else {
-          z.stuckT = 0;
-        }
-      } else {
+      // Attack whatever is in front: the player if reachable, otherwise
+      // the barricade in the way (bases are meant to be broken into).
+      if (dist <= reach && !losBlocked) {
         z.biteT += dt;
+        z.path = null;
         if (z.biteT >= stats.biteInterval) {
           z.biteT = 0;
-          this.events.push({ e: 'bite', id: z.id });   // visible lunge
+          this.events.push({ e: 'bite', id: z.id });
           this.damagePlayer(z.targetId, stats.biteDamage);
         }
+        continue;
       }
+      z.biteT = 0;
+
+      const steer = this._navSteer(z, stats, target.pos, dt);
+      if (!steer) continue;
+
+      // Separation: push apart from close neighbours so the horde spreads
+      // along a wall or through a breach instead of stacking on one cell.
+      let sx = 0, sz = 0;
+      const sepR = stats.radius * 2.1;
+      for (const o of this.zombies.values()) {
+        if (o === z) continue;
+        const dx = z.pos.x - o.pos.x, dz = z.pos.z - o.pos.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > sepR * sepR || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2);
+        const push = (sepR - d) / sepR;
+        sx += (dx / d) * push;
+        sz += (dz / d) * push;
+      }
+      const sepLen = Math.hypot(sx, sz);
+      if (sepLen > 0) {
+        sx = (sx / sepLen) * Math.min(1, sepLen);
+        sz = (sz / sepLen) * Math.min(1, sepLen);
+      }
+
+      // Blend path direction with separation, then move.
+      const SEP_W = 0.55;
+      let mx = steer.x + sx * SEP_W;
+      let mz = steer.z + sz * SEP_W;
+      const mlen = Math.hypot(mx, mz);
+      if (mlen < 1e-6) continue;
+      mx /= mlen; mz /= mlen;
+
+      const step = stats.speed * speedMult * dt;
+      const beforeX = z.pos.x, beforeZ = z.pos.z;
+      z.pos.x += mx * step;
+      z.pos.z += mz * step;
+      resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
       z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+
+      // Stuck detection: if pushout keeps eating the movement, force a
+      // replan; if that fails too, sidestep. An agent must NEVER freeze.
+      const moved = Math.hypot(z.pos.x - beforeX, z.pos.z - beforeZ);
+      if (moved < step * 0.3) {
+        z.stuckT += dt;
+        if (z.stuckT > 0.5) {
+          z.path = null; z.pathT = 0;
+          // Slide along the wall rather than grinding into it.
+          z.pos.x += -mz * step * 0.9;
+          z.pos.z += mx * step * 0.9;
+          resolveCircle(z.pos, stats.radius * 0.8, this._zColliders());
+          z.pos.y = this.level.heightAt(z.pos.x, z.pos.z);
+        }
+        if (z.stuckT > 4) {
+          // Last resort: teleport to the nearest legal cell. Being briefly
+          // wrong is better than a zombie welded to a corner forever.
+          z.stuckT = 0;
+          const nav = this._nav();
+          if (nav) {
+            const [cx, cz] = nav.nearestFree(z.pos.x, z.pos.z);
+            z.pos.x = nav.worldX(cx);
+            z.pos.z = nav.worldZ(cz);
+          }
+        }
+      } else {
+        z.stuckT = 0;
+      }
     }
+  }
+
+  // The level's navigation grid, built lazily and cached on the level.
+  _nav() {
+    if (this.level.nav) return this.level.nav;
+    if (!NavGrid) return null;
+    const half = (this.level.navSize || LEVEL_SIZE) / 2 + 4;
+    const b = this.level.navBounds || { minX: -half, maxX: half, minZ: -half, maxZ: half };
+    const nav = new NavGrid(b, 0.6);
+    nav.build(this.level.colliders, 0.4);
+    this.level.nav = nav;
+    return nav;
+  }
+
+  // Returns a unit direction to move this frame, from the agent's path.
+  _navSteer(z, stats, goalPos, dt) {
+    const nav = this._nav();
+    if (!nav) {
+      const dx = goalPos.x - z.pos.x, dz = goalPos.z - z.pos.z;
+      const l = Math.hypot(dx, dz);
+      return l > 1e-6 ? { x: dx / l, z: dz / l } : null;
+    }
+    z.pathT = (z.pathT || 0) - dt;
+    const goalMoved = !z.pathGoal
+      || (z.pathGoal.x - goalPos.x) ** 2 + (z.pathGoal.z - goalPos.z) ** 2 > 4;
+    // Replan when the path is gone, stale, or the target has walked off.
+    if ((!z.path || !z.path.length || z.pathT <= 0 || goalMoved) && this._planBudget > 0) {
+      this._planBudget--;
+      z.path = nav.findPath(z.pos.x, z.pos.z, goalPos.x, goalPos.z);
+      z.pathGoal = { x: goalPos.x, z: goalPos.z };
+      z.pathT = 0.7 + Math.random() * 0.5;   // stagger replans across agents
+    }
+    if (!z.path || !z.path.length) {
+      // No path yet this frame: keep drifting toward the goal so the agent
+      // never stands still waiting for the planner.
+      const dx = goalPos.x - z.pos.x, dz = goalPos.z - z.pos.z;
+      const l = Math.hypot(dx, dz);
+      return l > 1e-6 ? { x: dx / l, z: dz / l } : null;
+    }
+    // String-pulling: skip every waypoint we can already see straight to,
+    // so the agent cuts corners like a walker instead of tracing cells.
+    let idx = 0;
+    for (let i = Math.min(z.path.length - 1, 6); i >= 0; i--) {
+      if (nav.lineClear(z.pos.x, z.pos.z, z.path[i].x, z.path[i].z)) { idx = i; break; }
+    }
+    if (idx > 0) z.path.splice(0, idx);
+    const wp = z.path[0];
+    let dx = wp.x - z.pos.x, dz = wp.z - z.pos.z;
+    let l = Math.hypot(dx, dz);
+    if (l < 0.35) {
+      z.path.shift();
+      if (!z.path.length) {
+        const gx = goalPos.x - z.pos.x, gz = goalPos.z - z.pos.z;
+        const gl = Math.hypot(gx, gz);
+        return gl > 1e-6 ? { x: gx / gl, z: gz / gl } : null;
+      }
+      dx = z.path[0].x - z.pos.x; dz = z.path[0].z - z.pos.z;
+      l = Math.hypot(dx, dz);
+    }
+    return l > 1e-6 ? { x: dx / l, z: dz / l } : null;
   }
 
   // ---- Special enemy brains --------------------------------------------
