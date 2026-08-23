@@ -1748,6 +1748,14 @@ let mapActive = false;
 let mapMode = 'ping';
 let mapSavedFog = null;
 
+// There used to be a second button here, MINE, which teleported a mine
+// onto the map for 12 scrap. Ola: "MINE and DRONE:MINE read as
+// duplicates." They were worse than duplicates. The drone carried the
+// same mine to the same place for 10, so the plain button was more
+// expensive AND less interesting, and nothing on screen said what the
+// difference was, because there wasn't one. Remote mine delivery is the
+// drone's job now, which is also what makes the drone worth owning.
+//
 // The drone button doubles as the payload selector: click it again to
 // cycle what it will carry. One button, no submenu, and the price is
 // always on the label.
@@ -1774,18 +1782,15 @@ function refreshDroneButton() {
     : dronePayload === 'fetch'
       ? 'DRONE: FETCH LOOT - free'
       : `DRONE: ${PAYLOAD_LABEL[dronePayload]} - ${cost}`;
-  $('btn-map-mine').textContent = `MINE - ${TUNING.economy.minePlacementFromMap}`;
 }
 
 function setMapMode(mode) {
   mapMode = mode;
   $('btn-map-ping').classList.toggle('on', mode === 'ping');
-  $('btn-map-mine').classList.toggle('on', mode === 'mine');
   $('btn-map-drone').classList.toggle('on', mode === 'drone');
   refreshDroneButton();
 }
 $('btn-map-ping').addEventListener('click', () => setMapMode('ping'));
-$('btn-map-mine').addEventListener('click', () => setMapMode('mine'));
 $('btn-map-drone').addEventListener('click', () => {
   if (mapMode === 'drone') {
     dronePayload = DRONE_PAYLOADS[(DRONE_PAYLOADS.indexOf(dronePayload) + 1) % DRONE_PAYLOADS.length];
@@ -1916,12 +1921,6 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   const p = o.clone().addScaledVector(d, t);
   if (mapMode === 'ping') {
     dispatchAction({ t: 'ping', p: p.toArray() });
-  } else if (mapMode === 'mine') {
-    if (scrap < TUNING.economy.minePlacementFromMap) {
-      showToast('Not enough scrap (' + TUNING.economy.minePlacementFromMap + ' needed)', 2000);
-      return;
-    }
-    dispatchAction({ t: 'placeMine', p: p.toArray(), via: 'map' });
   } else if (mapMode === 'drone') {
     if (level.droneAllowed === false) {
       showToast('No signal down here. The drone stays topside.', 2200);
@@ -4034,6 +4033,33 @@ window.__zhr = {
     const out = [];
     for (const [id, g] of barrelVisuals) out.push({ id, pos: g.position.toArray() });
     return out;
+  },
+  // What a PLAYER can see of the minefield: the meshes on the ground, not
+  // the simulation's bookkeeping. A probe that reads sim.mines would pass
+  // while the visuals were left behind as ghosts.
+  mines: () => {
+    const out = [];
+    for (const [id, g] of mineVisuals) out.push({ id, pos: g.position.toArray() });
+    return out;
+  },
+  // Place a mine at a spot through the real action path, so the phase
+  // gates, inventory and host validation all apply exactly as they do for
+  // a player pressing the button.
+  debugPlaceMineAt: (x, z) => {
+    if (!sim) return false;
+    const before = mineVisuals.size;
+    actions.mineAt(new THREE.Vector3(x, level.heightAt(x, z), z));
+    return before;
+  },
+  // Where the body actually is, and what the health bar actually reads.
+  playerPos: () => rig.group.position.toArray(),
+  debugHealth: () => myHp,
+  debugGiveMines: (n) => {
+    const p = sim && sim.players.get('H');
+    if (!p) return false;
+    p.inv.m = n;
+    arsenal.syncFromHost(p.inv);
+    return true;
   },
   debugShootAt: (x, y, z) => {
     const o = camera.getWorldPosition(new THREE.Vector3());

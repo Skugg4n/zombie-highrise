@@ -1,5 +1,45 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.18.2 - 2026-08-24 - explosives that talk to each other
+
+**The two MINE buttons were worse than duplicates.** Ola: "MINE and
+DRONE:MINE read as duplicates. If there is no real difference, remove the
+plain MINE." There was no difference, and the plain one was the bad deal:
+it teleported a mine onto the map for 12 scrap, while the drone carried
+the same mine to the same place for 10 and was more fun doing it. The
+plain button is gone. Remote mine delivery is the drone's job, which is
+also part of what makes the drone worth owning.
+
+**A mine could only ever be set off by a zombie standing on it.** Shooting
+one did nothing. A barrel going off beside it did nothing. It could not
+hurt the person who laid it. That is furniture, not a hazard. Detonation
+is one code path now and everything in range is affected:
+
+- Armed mines are in the hit test, so you can set your trap off from
+  cover. The target is a deliberate 0.3 m so it is a shot you meant to
+  take, and unarmed mines are ignored so you cannot shoot one out of your
+  own hand while placing it.
+- Mines chain into mines, mines set off barrels, and barrel blasts take
+  the minefield with them. Bounded to four levels of chaining so a mine
+  laid against a barrel stack cannot recurse away.
+- Your own blast hurts you inside 70% of its radius, which is the rule
+  barrels already followed.
+
+**Mines were unusable underground.** Hand placement required the day or
+countdown phase, and a traverse level has neither, so on L2 the mines in
+your inventory did nothing and nothing said why. The phase gate is gone:
+the one-second arming delay is what keeps a mine a trap rather than a
+grenade. Noted in OPEN-QUESTIONS.md as a deliberate balance change.
+
+**The probe assertion overhaul starts here** (QUALITY.md). The old
+barrelprobe printed numbers and exited 0 no matter what they said, so it
+could not fail. It is now EXPLOSIVES: nine assertions, all on things a
+player would see happen, and falsified by disabling the chain on purpose
+to watch it go red. It also waits for the mine to appear on the ground
+rather than reading the count on the next line, because placement is an
+action that goes to the host and comes back, and a probe that ignores
+that is measuring latency instead of gameplay.
+
 ## v0.18.1 - 2026-08-24 - stop guessing where the wrist is, stop stacking the HUD
 
 **The wrist display, third attempt, but this time with a ruler.** Two

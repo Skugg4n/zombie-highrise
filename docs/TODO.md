@@ -54,9 +54,11 @@ doing the bookkeeping. That is my job.
       checks every visible box against every other at five window sizes
       with all boxes forced visible, and it found two more overlaps on a
       phone that nobody had reported yet.
-- [ ] MINE and DRONE:MINE read as duplicates. If there is no real
-      difference, remove the plain MINE. If there is, make the label say
-      what it is.
+- [x] (v0.18.2) MINE and DRONE:MINE read as duplicates. If there is no
+      real difference, remove the plain MINE. If there is, make the label
+      say what it is. There was no difference: the drone carried the same
+      mine to the same place for 10 scrap while the plain button charged
+      12. The plain button is gone; remote delivery is the drone's job.
 
 ### Feel and animation
 - [ ] The VR reload is a slow quarter turn left and back, and it is
@@ -65,9 +67,13 @@ doing the bookkeeping. That is my job.
       need an attack animation that reads from across the field.
 
 ### Mechanics
-- [ ] Shooting a mine should detonate it.
-- [ ] Mines and barrels should damage each other, so chain reactions are
-      possible and trap placement becomes a real tactical puzzle.
+- [x] (v0.18.2) Shooting a mine should detonate it. Armed mines are in
+      the hit test now, on a deliberately small 0.3 m target so it is
+      never a stray hit.
+- [x] (v0.18.2) Mines and barrels damage each other, so chain reactions
+      are possible and trap placement becomes a real tactical puzzle. One
+      detonation path for mines now, so anything that can set one off sets
+      off everything in range: shots, zombies, other mines, barrels.
 
 ## Open: Ola's L2 playtest and process notes (2026-08-23)
 

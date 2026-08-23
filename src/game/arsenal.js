@@ -212,7 +212,8 @@ export class Arsenal {
     this.onHudChange();
   }
 
-  // Hand-placed mine at a world position (prep phases only, host enforces).
+  // Hand-placed mine at a world position. Any live phase, any archetype:
+  // the arming delay is what keeps it a trap rather than a grenade.
   placeMine(pos) {
     if (this.mines <= 0) return;
     this.mines--;

@@ -1,5 +1,35 @@
 # QUALITY - scoreboard and open flaws
 
+## Probe assertion overhaul (running, from v0.18.2)
+
+Ola: "probes must assert what a PLAYER would notice, not what a variable
+does." Three probes had already passed while the thing they claimed to
+check was broken, so this is a pass over the whole suite. Each probe gets
+rewritten once, listed here with what was wrong and what it asserts now.
+
+A probe is done when it satisfies three rules:
+
+1. **It fails.** Break the feature on purpose and watch the probe go red
+   before believing it. Every entry below has been falsified this way.
+2. **It goes through the real path.** No calling handlers directly, no
+   setting flags the sim owns, no debug shortcut into the state under
+   test.
+3. **It asserts the visible thing.** The mesh on the ground, the number on
+   the HUD, the health that dropped. Not the simulation's bookkeeping,
+   which can be right while the screen is wrong.
+
+| Probe | Was | Is |
+|---|---|---|
+| `barrelprobe` (now EXPLOSIVES) | Printed counts and exited 0 whatever they were. It could not fail. | 9 assertions on visible outcomes: a shot barrel disappears, a shot mine detonates, a row of mines chains, a barrel blast takes the minefield with it, your own blast costs you health, and a mine can be laid underground. Falsified by disabling the chain: goes red. |
+| `smoke` HUD layout | No layout check existed; the overlap was found by eye in a headset. | Every visible HUD box checked against every other at five window sizes, with normally-hidden boxes forced visible first. The first version passed on a screen the base bar was not even on, which found nothing; with the boxes visible it immediately found two unreported collisions. |
+| `vrprobe` game over | Reached game over by a debug shortcut and pressed A by calling the handler. | Dies the way a player dies and presses A through the real gamepad loop. (v0.18.0) |
+| `gymprobe` | Written this way from the start: asserts arrival, not intent. | Found 7 real movement bugs on its first run. (v0.17.0) |
+
+Still to convert: `holdoutprobe`, `traverseprobe`, `interactprobe`,
+`droneprobe`, `navprobe`, `rampprobe`, `groundprobe`, `recoilprobe`,
+`endingprobe`, `pacingprobe`, `perfprobe`, `shotprobe`, `lookprobe`,
+`modprobe`, `pressureprobe`, `vraimprobe`.
+
 ## Critic loop scoreboard
 
 Visual critic (photomode views, target 9+):

@@ -209,21 +209,22 @@ export class HostSim {
     }
   }
 
-  // Mines: hand-placed from inventory during prep (day/countdown), or
-  // remote-placed from the tactical map any time for a scrap premium.
+  // Mines are hand-placed from inventory, wherever you are standing,
+  // whenever the world is running.
+  //
+  // This used to require the day or countdown phase, which meant a mine
+  // could not be laid on a traverse level at all: a route has neither
+  // phase, so the item sat in the inventory doing nothing and nothing
+  // said why. The old rule was there to keep mines a preparation tool,
+  // but the one-second arming delay already does that job, and laying a
+  // mine in the corridor ahead of you is the whole tactic underground.
+  // Noted in OPEN-QUESTIONS.md as a deliberate balance change.
   _actPlaceMine(id, p, m) {
     if (!Array.isArray(m.p)) return;
     const pos = new THREE.Vector3().fromArray(m.p);
     pos.y = this.level.heightAt(pos.x, pos.z);
-    if (m.via === 'map') {
-      const cost = TUNING.economy.minePlacementFromMap;
-      if (p.inv.s < cost) return;
-      p.inv.s -= cost;
-    } else {
-      const prep = this.wave.phase === 'day' || this.wave.phase === 'countdown';
-      if (!prep || (p.inv.m || 0) <= 0) return;
-      p.inv.m--;
-    }
+    if ((p.inv.m || 0) <= 0) return;
+    p.inv.m--;
     const mid = this.nextMid++;
     this.mines.set(mid, { id: mid, pos, armT: 1.0, owner: id });
     this.events.push({ e: 'mined', id: mid, by: id, p: pos.toArray() });
@@ -1156,6 +1157,28 @@ export class HostSim {
         return null;
       }
     }
+    // Mines are shootable, once armed. A trap you can set off from cover
+    // is a tool; one that only a zombie standing on it can trigger is a
+    // gamble. Unarmed mines are ignored so you cannot shoot one out of
+    // your own hand as you place it. Small target on purpose: 0.3 m, so
+    // this is a deliberate shot and never a stray one.
+    let mineHit = null, mineT = Infinity;
+    for (const mn of this.mines.values()) {
+      if (mn.armT > 0) continue;
+      const centre = mn.pos.clone(); centre.y += 0.14;
+      const oc = centre.sub(o);
+      const t = oc.dot(d);
+      if (t < 0 || t > 200) continue;
+      if (oc.lengthSq() - t * t > 0.3 * 0.3) continue;
+      if (t < mineT) { mineT = t; mineHit = mn; }
+    }
+    if (mineHit && mineT < (best ? bestT : Infinity)) {
+      const hp = o.clone().addScaledVector(d, mineT);
+      if (!segmentBlocked(o.x, o.z, hp.x, hp.z, this._tall())) {
+        this.detonateMine(mineHit, byId);
+        return null;
+      }
+    }
     if (!best) return null;
     const hit = o.clone().addScaledVector(d, bestT);
     const tall = this._tall();
@@ -1252,11 +1275,16 @@ export class HostSim {
       if (dist < R * 0.7) this.damagePlayer(pid, Math.round(20 * (1 - dist / (R * 0.7))));
     }
     // Chain reaction (bounded depth so a barrel farm cannot recurse away).
+    // Mines count: a barrel going off next to a minefield sets the whole
+    // field off, which is the point of putting them there.
     if (depth < 4) {
       for (const other of [...this.barrels.values()]) {
         if (other.pos.distanceTo(b.pos) <= R * 1.1) {
           this._damageBarrel(other, 99, byId, depth + 1);
         }
+      }
+      for (const mine of [...this.mines.values()]) {
+        if (mine.pos.distanceTo(b.pos) <= R) this.detonateMine(mine, byId, depth + 1);
       }
     }
   }
@@ -2134,11 +2162,46 @@ export class HostSim {
       for (const z of this.zombies.values()) {
         if (z.pos.distanceToSquared(mine.pos) < M.triggerRadius * M.triggerRadius) { tripped = true; break; }
       }
-      if (!tripped) continue;
-      this.mines.delete(mine.id);
-      this.events.push({ e: 'boom', p: mine.pos.toArray() });
-      for (const z of [...this.zombies.values()]) {
-        if (z.pos.distanceTo(mine.pos) <= M.blastRadius) this.damageZombie(z, M.damage, false, mine.owner);
+      if (tripped) this.detonateMine(mine, mine.owner);
+    }
+  }
+
+  // ONE detonation path. A mine used to explode inline inside the step
+  // loop, which meant only a zombie could ever set one off: shooting one
+  // did nothing, a barrel going off beside it did nothing, and it could
+  // not hurt the person who laid it. An explosive that only some things
+  // can trigger is furniture, not a hazard.
+  //
+  // Everything in the blast is affected: zombies, players (inside the
+  // inner radius, exactly like a barrel), other mines, and barrels. Depth
+  // is bounded so a minefield laid against a barrel stack cannot recurse
+  // away.
+  detonateMine(mine, byId = null, depth = 0) {
+    if (!this.mines.has(mine.id)) return;
+    this.mines.delete(mine.id);
+    const M = TUNING.economy.mine;
+    this.events.push({ e: 'boom', p: mine.pos.toArray() });
+    for (const z of [...this.zombies.values()]) {
+      if (z.pos.distanceTo(mine.pos) <= M.blastRadius) {
+        this.damageZombie(z, M.damage, false, byId || mine.owner);
+      }
+    }
+    // Your own trap is a hazard to you, the same way a barrel is.
+    for (const [pid, p] of this.players) {
+      if (p.down) continue;
+      const dist = p.pos.distanceTo(mine.pos);
+      const inner = M.blastRadius * 0.7;
+      if (dist < inner) this.damagePlayer(pid, Math.max(1, Math.round(M.damage * 0.6 * (1 - dist / inner))));
+    }
+    if (depth >= 4) return;
+    for (const other of [...this.mines.values()]) {
+      if (other.pos.distanceTo(mine.pos) <= M.blastRadius) {
+        this.detonateMine(other, byId, depth + 1);
+      }
+    }
+    for (const b of [...this.barrels.values()]) {
+      if (b.pos.distanceTo(mine.pos) <= M.blastRadius) {
+        this._damageBarrel(b, 99, byId, depth + 1);
       }
     }
   }

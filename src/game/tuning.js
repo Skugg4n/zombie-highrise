@@ -262,7 +262,6 @@ export const TUNING = {
     pickupRadius: 1.25,
     lootFallsInsideWithin: 7,
     droneFetchRadius: 6,
-    minePlacementFromMap: 12,      // hand-placed mines are a staple, not a luxury      // remote placement pays a small premium
     mine: { triggerRadius: 0.6, blastRadius: 2.5, damage: 12 },
     // Explosive barrels: level furniture, free damage if you aim well and
     // a liability if the horde reaches you while standing next to one.

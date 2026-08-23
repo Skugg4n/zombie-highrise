@@ -33,3 +33,16 @@ reversible; say the word and I change it.
 9. **Broker loss mid-game:** treated as non-fatal (current players keep
    playing, new joins blocked, auto-reconnect attempts). Fatal errors only
    before a session is established.
+10. **Mines are no longer restricted to prep phases (v0.18.2):** hand
+   placement required the day or countdown phase, which meant a mine could
+   not be laid on a traverse level at all, because a route has neither. I
+   removed the phase gate rather than adding 'route' to it: the
+   one-second arming delay already stops a mine being used as a grenade,
+   and laying one in the corridor ahead of you is the tactic underground.
+   Balance effect: you can now drop a mine mid-fight on a holdout too. If
+   that turns out to trivialise a night, the fix is a placement cooldown
+   rather than a phase list.
+11. **Your own mine hurts you (v0.18.2):** it did not before, while
+   barrels always did. Now it does, inside 70% of the blast radius, which
+   matches the barrel rule. Roughly 3 to 7 damage at close range, so it
+   stings without being a death sentence.
