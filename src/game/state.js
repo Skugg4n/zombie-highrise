@@ -87,7 +87,9 @@ export class HostSim {
     // asking the OLD level whether the NEW one has an objective. This is
     // the first moment the answer is knowable.
     if (this.level.objective === 'reach-exit') {
-      if (this.wave.phase !== 'route') this._enterRoute();
+      // Unconditional: setLevel only runs on a level CHANGE, and a new
+      // route deserves a fresh start, fresh supplies and zero progress.
+      this._enterRoute();
     } else if (this.wave.phase === 'route') {
       this._enterDay(false);
     }
@@ -626,10 +628,37 @@ export class HostSim {
     // on the ground beside the bed and trench loot inside dirt).
     const count = this.dayBonus ? 4 : 2;   // richer morning after a surge
     const spawns = this.level.playerSpawns;
+    // ON A ROUTE, SUPPLIES ARE SPREAD ALONG THE WAY. Dumping them at the
+    // arrival plate meant they were inside the pickup radius the instant
+    // you landed and vanished into your pockets before you saw them.
+    // Something to find as you advance is worth more than a free handful.
+    const route = this.level.objective === 'reach-exit' && this.level.exitZone
+      ? { from: this.level.playerSpawns[0], to: this.level.exitZone } : null;
     for (let i = 0; i < count; i++) {
       const kind = pool[Math.floor(Math.random() * pool.length)];
+      let pos;
+      if (route) {
+        // Spaced down the diagonal, never in the first fifth of it.
+        const t = 0.25 + 0.6 * ((i + 0.5) / count);
+        pos = new THREE.Vector3(
+          route.from.x + (route.to.x - route.from.x) * t,
+          0,
+          route.from.z + (route.to.z - route.from.z) * t);
+        pos.x += (Math.random() * 2 - 1) * 1.4;
+        pos.z += (Math.random() * 2 - 1) * 1.4;
+        const nav = this._nav();
+        if (nav) {
+          const [cx, cz] = nav.nearestFree(pos.x, pos.z);
+          pos.x = nav.worldX(cx);
+          pos.z = nav.worldZ(cz);
+        }
+        resolveCircle(pos, 0.5, this.level.colliders);
+        pos.y = this.level.heightAt(pos.x, pos.z);
+        this.spawnItem(kind, pos);
+        continue;
+      }
       const base = spawns[Math.floor(Math.random() * spawns.length)];
-      const pos = base.clone().add(new THREE.Vector3(
+      pos = base.clone().add(new THREE.Vector3(
         (Math.random() * 2 - 1) * 1.6, 0, (Math.random() * 2 - 1) * 1.6));
       resolveCircle(pos, 0.5, this.level.colliders);
       if (!this._reachable(pos)) pos.copy(this._nearestReachable(pos));
@@ -1262,9 +1291,17 @@ export class HostSim {
     }
   }
 
-  // Can a player stand here? Levels that confine the squad say so; on any
-  // level without a boundary everything is reachable.
+  // Can a player walk to this? Only a level that CONFINES the squad has
+  // unreachable ground, and only a holdout does that: its wall is the
+  // boundary and the drone is how you touch the field beyond it.
+  //
+  // ARCHETYPE PARITY: this used to answer from baseCentre and
+  // playableHalf, which a traverse also sets. So on a traverse a kill in
+  // the corner of the room dropped a FIELD CRATE, which only a drone can
+  // fetch, and the drone cannot fly underground. The loot was gone
+  // forever and nothing said why.
   _reachable(pos) {
+    if (!this.level.confined) return true;
     const c = this.level.baseCentre;
     const half = this.level.playableHalf;
     if (!c || !half) return true;
@@ -1318,6 +1355,10 @@ export class HostSim {
     wave.reached = 0;            // furthest fraction of the route reached
     wave.exitT = 0;
     this.mod = null;
+    // ARCHETYPE PARITY: supplies are handed out by _enterDay, and a route
+    // level has no day. Without this a traverse started you with whatever
+    // you walked in with and offered nothing on the floor.
+    this._spawnDayLoot();
     this.events.push({ e: 'route' });
   }
 

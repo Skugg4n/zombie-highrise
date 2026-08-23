@@ -151,6 +151,9 @@ export function holdoutFrame(level, spec, ctx, { makeElevator, quality }) {
   // sim uses it to decide whether a loot drop is reachable, and the pocket
   // check floods it looking for places a player can be pinned.
   level.playableHalf = hb;
+  // The squad CANNOT leave. This is what makes field crates and the drone
+  // meaningful, and it is what a traverse must not claim.
+  level.confined = true;
   level.playBounds = {
     minX: BX - hb - 0.4, maxX: BX + hb + 0.4,
     minZ: BZ - hb - 0.4, maxZ: BZ + hb + 0.4,

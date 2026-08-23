@@ -1,5 +1,38 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.17.1 - 2026-08-23 - archetype parity
+
+Ola named the pattern: "something built for the first variant is only
+partly ported to the second. Flat was built first and VR got a partial
+port. Holdout was built first and traverse is now getting a partial port."
+
+`docs/archetype-parity.md` is the same idea as the VR parity checklist, on
+a different axis: 23 behaviours, a status per archetype, and the rule that
+"it inherits that" is not an answer until you have checked what it
+inherits.
+
+Walking the list found four real failures, every one of them a traverse
+silently inheriting or missing something written for a holdout:
+
+- **A route level handed out no supplies at all.** Loot is given by
+  `_enterDay`, and a route has no day. You started with whatever you
+  walked in with and found nothing on the floor. Supplies are now spread
+  along the route rather than dumped at the arrival plate, which is better
+  anyway: at the plate they were inside the pickup radius the moment you
+  landed and vanished into your pockets before you saw them.
+- **Loot on a traverse became uncollectable.** A drop outside the
+  "reachable" area becomes a FIELD CRATE that only a drone can fetch, and
+  the drone cannot fly underground. But "reachable" was answered from
+  `baseCentre` and `playableHalf`, which a traverse also sets, so a kill in
+  a corner of the room dropped a crate nobody could ever collect and
+  nothing said why. Only a level that CONFINES the squad has unreachable
+  ground, and only a holdout does.
+- The wave director running on a route, and enemies never being stepped at
+  all, both fixed in the two previous versions and recorded here.
+
+A duplicate `sim.setLevel` call fell out of testing the first fix: the
+first call handed out the supplies and the second cleared them.
+
 ## v0.17.0 - 2026-08-23 - a real character controller, and a gym to keep it honest
 
 Ola's diagnosis, and it was right: clipping through a ramp from the side,

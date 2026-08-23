@@ -210,6 +210,7 @@ export function traverseFrame(level, spec, ctx, { makeElevator, quality }) {
   level.voids = [];
   level.doors = [];
   level.playableHalf = Math.max(hw, hd);
+  level.confined = false;      // the whole room is yours; walk to your loot
   level.playBounds = {
     minX: RX - hw + 0.1, maxX: RX + hw - 0.1,
     minZ: RZ - hd + 0.1, maxZ: RZ + hd - 0.1,

@@ -3247,10 +3247,10 @@ window.__zhr = {
   },
   debugGotoLevel: (n) => {
     if (sim) sim.wave.level = n;
+    // loadLevel already calls sim.setLevel, which picks the phase. Calling
+    // it a second time here cleared the supplies the first call had just
+    // handed out.
     loadLevel(n);
-    // An objective level runs its own phase machine; jumping straight to
-    // one must land in that phase, not leave it on the day/night clock.
-    if (sim) sim.setLevel(level);   // setLevel picks the right phase
   },
   // Jump straight to the final floor's boss night (ending test hook).
   debugGotoFinal: () => {
@@ -3758,6 +3758,17 @@ window.__zhr = {
     };
   },
   debugStations: () => (level.gymStations || []),
+  // Archetype parity surface: is loot on this level actually collectable?
+  debugLoot: () => {
+    if (!sim) return null;
+    const items = [...sim.items.values()];
+    return {
+      total: items.length,
+      field: items.filter((i) => i.field).length,
+      confined: !!level.confined,
+      droneAllowed: level.droneAllowed !== false,
+    };
+  },
 
   debugRamps: () => (level.ramps || []).map((r) => ({
     x: +r.x.toFixed(2), z: +r.z.toFixed(2), top: +r.top.toFixed(2),

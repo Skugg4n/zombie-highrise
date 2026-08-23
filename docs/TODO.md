@@ -64,18 +64,6 @@ doing the bookkeeping. That is my job.
 
 ## Open: Ola's L2 playtest and process notes (2026-08-23)
 
-### The leveraged fix
-- [ ] **Archetype parity audit.** Three of four L2 bugs were the same
-      organisational failure: something built for the first variant is only
-      partly ported to the second. Flat first, VR partial. Holdout first,
-      traverse partial. Go through every gameplay behaviour and confirm it
-      works in BOTH archetypes: enemy attack and aggro, enemy spawning and
-      entrances, pickups and loot, objectives and prompts, downed and
-      revive, the shop, level completion, audio cues, the drone's disabled
-      state. Write `docs/archetype-parity.md` with a status per archetype,
-      and add probe assertions where cheap. Do it BEFORE level 3, because
-      ride maps will otherwise repeat it a fourth time.
-
 ### Probes must measure players, not variables
 - [ ] Go through EVERY probe assertion and make each assert what a player
       would notice, not what a variable does. Where one checks a state name
@@ -113,6 +101,15 @@ doing the bookkeeping. That is my job.
 ## Done
 
 Ticked with the version that shipped it.
+
+### Archetype parity (Ola, 2026-08-23)
+- [x] (v0.17.1) `docs/archetype-parity.md`: 23 behaviours, status per
+      archetype, and what to do when adding one. Found four real parity
+      failures, all of them a traverse silently inheriting or missing
+      something written for a holdout: no supplies at all on a route
+      level, loot that turned into field crates a grounded drone could
+      never fetch, the wave director running, and enemies never being
+      stepped. Probe assertions added for the first two.
 
 ### The movement foundation (Ola, 2026-08-23)
 - [x] (v0.17.0) ONE authoritative movement system, swept so nothing is

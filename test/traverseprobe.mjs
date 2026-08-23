@@ -44,6 +44,15 @@ check(!!r && r.phase === 'route', 'it runs its own route phase, not a day/night 
   r && r.phase);
 check(!!r && r.doors.length === 1 && !r.doors[0].open, 'the door starts closed');
 
+// ARCHETYPE PARITY: a route level must hand out supplies like any other,
+// and none of its loot may need a drone that cannot fly down here.
+const loot = await page.evaluate(() => window.__zhr.debugLoot());
+check(loot && loot.total > 0, 'a route level puts supplies on the floor',
+  loot && `${loot.total} items`);
+check(loot && loot.field === 0,
+  'and none of them need a drone that cannot fly underground',
+  loot && `${loot.field} field crates, drone ${loot.droneAllowed ? 'on' : 'off'}`);
+
 // The whole walkable area must be free of places a player can be pinned.
 const pockets = await page.evaluate(() => window.__zhr.debugPockets());
 check(pockets && pockets.stuck.length === 0,
