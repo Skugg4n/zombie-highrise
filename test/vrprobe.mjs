@@ -56,6 +56,30 @@ check(hands && hands.includes('light'), 'the off hand carries the flashlight',
 check(hands && hands.filter((h) => h === 'light').length === 1,
   'exactly one hand carries the flashlight');
 
+// ---- 2a2. The wrist display is on the ARM, not under the hand ----
+// Ola, twice: "det sitter på handens undersida, upp och ner." Then:
+// "om du kan lista ut var fan pistolen pekar och vad som är upp och ner
+// på den lär du ju fan kunna lista ut var displayen ska sitta."
+//
+// So this checks the display against the WEAPON's frame, which is the one
+// known to be right, instead of against numbers I typed. In grip space
+// the barrel is -Z and the top of the gun is +Y. A watch therefore sits
+// at +Z (toward the elbow) and +Y (on top of the arm), with its face
+// pointing +Y. Both previous versions had both signs wrong.
+{
+  const f = await page.evaluate(() => window.__zhr.debugWristFrame());
+  check(!!f, 'there is a wrist display to measure', JSON.stringify(f));
+  check(f && f.onTopOfArm > 0.01,
+    'it sits ON TOP of the forearm, not under the hand',
+    f ? `local y ${f.onTopOfArm}` : '');
+  check(f && f.towardElbow > 0.05,
+    'and back toward the elbow, not out over the hand',
+    f ? `local z ${f.towardElbow}` : '');
+  check(f && f.agreesWithGunUp > 0.7,
+    'and its face points the same way as the top of the gun',
+    f ? `dot ${f.agreesWithGunUp}, want > 0.7` : '');
+}
+
 // ---- 2b. The torch has a switch, and it is not on your face ----
 // Ola in the headset: "the flashlight in the hand does not toggle on the
 // trigger" and "there is also a headlamp that should not exist yet."
@@ -209,6 +233,79 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   check(sent.st.target !== null, 'and the panel marks where it was sent',
     JSON.stringify(sent.st.target));
 
+  // ---- IS IT BLACK? ----
+  // Ola: "den är HELT svart." Inside a WebXR session, render(scene, cam)
+  // ignores the camera it is given and draws the session's own view into
+  // the session's own framebuffer, so the map pass produced nothing. This
+  // reads pixels back off the panel rather than trusting that a draw call
+  // was issued.
+  const pix = await page.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugStrategyOpen(true);
+    for (let i = 0; i < 30; i++) await new Promise((r) => requestAnimationFrame(r));
+    return D.debugStrategyPixels();
+  });
+  check(!!pix, 'the panel can be sampled', JSON.stringify(pix));
+  check(pix && pix.litFraction > 0.5,
+    'the map on the panel is not black',
+    pix ? `${(pix.litFraction * 100).toFixed(0)}% of sampled pixels lit` : '');
+  check(pix && pix.xrRestored === true,
+    'and the pass puts the headset renderer back the way it found it',
+    pix ? `xr.enabled ${pix.xrRestored}` : '');
+  await page.evaluate(() => window.__zhr.debugStrategyOpen(false));
+
+  // ---- THE WAY OUT. Ola: "den går inte att ta bort igen! Så man måste
+  // DÖ för att få bort den!" Nothing in this game may require dying to
+  // dismiss, so every face button closes it, and each one is checked.
+  // Y is the payload cycler while the panel is open, and the panel says
+  // so on itself, so it is checked separately below. Every OTHER face
+  // button closes.
+  for (const [hand, btn, name] of [['right', 4, 'A'], ['right', 5, 'B'],
+    ['left', 4, 'X']]) {
+    const closed = await page.evaluate(async ([h, b]) => {
+      const D = window.__zhr;
+      D.debugStrategyOpen(true);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const wasOpen = D.debugStrategy().open;
+      D.debugVrFaceButton(h, b);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return { wasOpen, nowOpen: D.debugStrategy().open };
+    }, [hand, btn]);
+    check(closed.wasOpen === true, `${name}: the panel was open to close`);
+    check(closed.nowOpen === false, `${name} closes the strategy panel`);
+  }
+
+  // Y is the one button that does something else, and it must do that
+  // something rather than nothing: a button advertised on the panel that
+  // does not work is how you end up mashing everything.
+  const cycled = await page.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugStrategyOpen(true);
+    await new Promise((r) => requestAnimationFrame(r));
+    D.debugStrategyPointAt(0.5, 0.5);
+    const before = D.debugStrategy().label;
+    D.debugVrFaceButton('left', 5);
+    await new Promise((r) => requestAnimationFrame(r));
+    D.debugStrategyPointAt(0.5, 0.5);
+    return { before, after: D.debugStrategy().label, open: D.debugStrategy().open };
+  });
+  check(cycled.open === true, 'Y leaves the panel open, as the panel says');
+  check(cycled.before !== cycled.after, 'and cycles the drone payload',
+    `${cycled.before} -> ${cycled.after}`);
+
+  // Looking away must close it too, since that is how it opens.
+  const lookedAway = await page.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugStrategyOpen(true);
+    await new Promise((r) => requestAnimationFrame(r));
+    const before = D.debugStrategy().open;
+    D.debugLookAway();
+    for (let i = 0; i < 90; i++) await new Promise((r) => requestAnimationFrame(r));
+    return { before, after: D.debugStrategy().open };
+  });
+  check(lookedAway.before && !lookedAway.after,
+    'and turning away from it folds it', JSON.stringify(lookedAway));
+
   await page.evaluate(() => window.__zhr.debugStrategyOpen(false));
 }
 
@@ -286,6 +383,56 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   // over, with two short sharp moves at the ends.
   check(peak > 0.3 && atPeak > 0.45 && atPeak < 0.9,
     `the gun snaps over and holds rather than sweeping (peak ${peak.toFixed(2)}, held ${(atPeak * 100).toFixed(0)}% of frames)`);
+}
+
+// ---- 2f. Akimbo is one gun per hand, not two ----
+// Ola: "köper man 2 pistoler i VR så får man två i varje hand!" The
+// akimbo MESH is two pistols side by side, because a flat viewmodel has
+// to show both in one object. Handing that to each hand is four guns.
+{
+  const akimbo = await page.evaluate(() => {
+    const D = window.__zhr;
+    D.debugGrant('akimbo');
+    D.debugSwitch('akimbo');
+    D.debugRedressHands();
+    return { hands: D.debugHands(), barrels: D.debugBarrelCount() };
+  });
+  check(akimbo.hands.filter((h) => h && h !== 'light').length === 2,
+    'akimbo arms both hands', JSON.stringify(akimbo.hands));
+  check(akimbo.barrels === 2,
+    'with exactly two guns in total, not four',
+    `${akimbo.barrels} pistols on the controllers`);
+  await page.evaluate(() => { window.__zhr.debugSwitch('pistol'); window.__zhr.debugRedressHands(); });
+}
+
+// ---- 2g. The holster is where a hip is ----
+// It used to be pinned near the RIG ORIGIN, and in roomscale the player
+// walks away from that: the camera moves, the rig does not. So it sat
+// wherever the level started, often metres behind, and reaching for your
+// own hip found nothing. Ola: "det går inte att sätta fast någon pistol i
+// hölster."
+{
+  const at = await page.evaluate(() => window.__zhr.debugHolsterPlace());
+  check(!!at, 'the holster can be located', JSON.stringify(at));
+  check(at && at.horizontal < 0.4,
+    'it is beside your body, not across the room',
+    at ? `${at.horizontal} m from the head, horizontally` : '');
+  check(at && at.heightFraction > 0.4 && at.heightFraction < 0.75,
+    'and at hip height for whoever is wearing it',
+    at ? `${(at.heightFraction * 100).toFixed(0)}% of eye height` : '');
+
+  // And it follows you. This is the actual bug: walk, and check the hip
+  // came too.
+  const moved = await page.evaluate(async () => {
+    const D = window.__zhr;
+    const p = D.playerPos();
+    D.debugTeleport(p[0] + 6, p[2] + 6);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return D.debugHolsterPlace();
+  });
+  check(moved && moved.horizontal < 0.4,
+    'and it comes with you when you move',
+    moved ? `${moved.horizontal} m from the head after walking 8 m` : '');
 }
 
 // ---- 3. Manual reload works in VR (regression guard) ----
@@ -393,6 +540,26 @@ const gave = await page.evaluate(async () => {
 });
 check(gave.after !== gave.before, 'and picking an action actually does it',
   `${gave.before} -> ${gave.after}`);
+
+// ---- LAST: dying must not trap you behind the map ----
+// This is the literal thing Ola had to do to escape the panel, and the
+// downed panel appears in the same space, so the map must be gone before
+// it arrives. Run last, because it ends the run.
+{
+  const onDeath = await page.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugHeal();
+    D.debugStrategyOpen(true);
+    await new Promise((r) => requestAnimationFrame(r));
+    const before = D.debugStrategy().open;
+    D.debugHurt(999);
+    for (let i = 0; i < 20; i++) await new Promise((r) => requestAnimationFrame(r));
+    return { before, after: D.debugStrategy().open, downed: D.debugDown() };
+  });
+  check(onDeath.before && onDeath.downed && !onDeath.after,
+    'going down closes the map instead of burying you behind it',
+    JSON.stringify(onDeath));
+}
 
 console.log(fails === 0 ? '\nVR PARITY GREEN' : `\nVR PARITY: ${fails} FAILURES`);
 console.log('errors:', errors.length ? errors.slice(0, 3).join(' | ') : 'none');

@@ -44,6 +44,7 @@ export class StrategyView {
     this.label = '';
     this.hint = '';
     this.blocked = false;
+    this.painted = false;            // has a map ever landed on it?
 
     // The map image. 640 is enough to read a level from a metre away and
     // cheap enough to re-render several times a second on a Quest 2.
@@ -145,14 +146,32 @@ export class StrategyView {
     this._mapT += dt;
     if (this._mapT < 0.1) return false;  // ~10 Hz
     this._mapT = 0;
+    // THE PANEL WAS BLACK IN THE HEADSET. Ola: "den är HELT svart."
+    //
+    // Inside a WebXR session, renderer.render(scene, camera) IGNORES the
+    // camera it is given and uses the session's own stereo camera, and it
+    // draws into the session's framebuffer. So this pass rendered the
+    // player's own viewpoint, into the wrong buffer, and what landed on
+    // the panel was nothing. On a flat screen the same code works, which
+    // is exactly why it shipped: the only place it is broken is the only
+    // place the feature is for.
+    //
+    // Turning xr off for the pass makes the renderer behave like the flat
+    // one for that one draw: it honours the camera and the render target.
+    // It goes back on immediately, and setRenderTarget(null) then means
+    // "the session's framebuffer" again rather than "the canvas".
+    const wasXr = this.renderer.xr.enabled;
     const prevTarget = this.renderer.getRenderTarget();
     // The panel must not photograph itself.
     this.group.visible = false;
+    this.renderer.xr.enabled = false;
     this.renderer.setRenderTarget(this.rt);
     this.renderer.clear();
     this.renderer.render(scene, mapCam);
     this.renderer.setRenderTarget(prevTarget);
+    this.renderer.xr.enabled = wasXr;
     this.group.visible = true;
+    this.painted = true;
     return true;
   }
 
@@ -181,7 +200,7 @@ export class StrategyView {
     const key = [
       this.cursor ? `${this.cursor.u.toFixed(3)},${this.cursor.v.toFixed(3)}` : '-',
       this.target ? `${this.target.u.toFixed(3)},${this.target.v.toFixed(3)}` : '-',
-      this.label, this.hint, this.blocked ? 'x' : '',
+      this.label, this.hint, this.blocked ? 'x' : '', this.painted ? 'p' : '',
     ].join('|');
     if (key === this._key) return;
     this._key = key;
@@ -231,6 +250,23 @@ export class StrategyView {
       c.fill();
     }
 
+    // IF NO MAP HAS LANDED YET, SAY SO. A panel that is simply black
+    // gives the player nothing to act on: they cannot tell a broken
+    // render from an empty level from a frozen game, and the one thing
+    // they need to know (how to get out) is not on it either.
+    if (!this.painted) {
+      c.fillStyle = 'rgba(10,14,20,0.92)';
+      c.fillRect(0, 0, OVER_W, OVER_H - 96);
+      c.fillStyle = COL.dim;
+      c.font = '30px system-ui, sans-serif';
+      c.textAlign = 'center';
+      c.fillText('map not available', OVER_W / 2, OVER_H / 2 - 20);
+      c.fillStyle = COL.text;
+      c.font = 'bold 34px system-ui, sans-serif';
+      c.fillText('PRESS A OR B TO CLOSE', OVER_W / 2, OVER_H / 2 + 34);
+      c.textAlign = 'left';
+    }
+
     // What this will do, and how to do it. Bottom strip, always the same
     // place, so it can be read without hunting.
     c.fillStyle = 'rgba(6,10,14,0.82)';
@@ -243,6 +279,13 @@ export class StrategyView {
     c.fillStyle = COL.dim;
     c.font = '26px system-ui, sans-serif';
     c.fillText(this.hint || '', 28, OVER_H - 26);
+    // The way out, always on screen. This is the line that was missing
+    // when Ola had to die to dismiss the panel.
+    c.textAlign = 'right';
+    c.fillStyle = COL.text;
+    c.font = 'bold 26px system-ui, sans-serif';
+    c.fillText('A OR B TO CLOSE', OVER_W - 28, OVER_H - 44);
+    c.textAlign = 'left';
     this.tex.needsUpdate = true;
   }
 

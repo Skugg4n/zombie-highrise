@@ -26,6 +26,14 @@ const PULSE_SECONDS = 1.4;              // how long an announcement plays
 // rotation back toward the eyes.
 const TILTS = [0, 0.35, 0.7, 1.05, 1.4];
 
+// The derived home position, in GRIP space. Exported so a probe can check
+// it against the weapon's frame rather than against a number I typed.
+export const WRIST_HOME = {
+  y: 0.038,          // ON TOP of the forearm, not under it
+  z: 0.115,          // back toward the elbow, clear of the hand
+  tilt: -(Math.PI / 2 - 0.34),   // face up, tipped back toward the eyes
+};
+
 // A single character on a dark chip, for the bracelet.
 function glyphTexture(ch, colour) {
   const c = document.createElement('canvas');
@@ -184,17 +192,21 @@ export class WristDisplay {
 
   // Place the display at bracelet coordinates: a pip number 1..12 and a
   // tilt letter A..E.
+  // Position 1A is the DERIVED home: on top of the forearm, facing up and
+  // tipped back toward the eyes. The other positions walk around the arm
+  // from there, so calibrating is nudging a right answer rather than
+  // hunting for one.
   setCalibration(pipIndex, tiltIndex) {
     this.calPip = ((pipIndex % 12) + 12) % 12;
     this.calTilt = Math.max(0, Math.min(TILTS.length - 1, tiltIndex));
     const a = (this.calPip / 12) * Math.PI * 2;
     const r = 0.055;
-    this.group.position.set(Math.sin(a) * r, Math.cos(a) * r, 0.115);
-    // Face outward from the arm, then tilt back toward the eyes by the
-    // chosen amount.
+    // Pip 1 is straight up (+Y), the same place attachTo() puts it.
+    this.group.position.set(Math.sin(a) * r, Math.cos(a) * r, WRIST_HOME.z);
+    // Face outward from the arm axis, then tip back toward the eyes.
     this.group.rotation.set(0, 0, 0);
     this.group.lookAt(this.group.position.clone().multiplyScalar(4));
-    this.group.rotateX(TILTS[this.calTilt]);
+    this.group.rotateX(-(Math.PI / 2) + TILTS[this.calTilt] + 0.34);
     this._key = '';
     return this.label();
   }
@@ -222,11 +234,39 @@ export class WristDisplay {
   // the hand and -Z is the direction a held object points. So the palm
   // side is -Y and the elbow side is +Z, and the screen has to face -Y,
   // tilted back toward the eyes so a partial turn is enough.
+  // WHERE A WATCH GOES, DERIVED RATHER THAN GUESSED.
+  //
+  // Ola, after two wrong guesses: "om du kan lista ut var fan pistolen
+  // pekar och vad som är upp och ner på den lär du ju fan kunna lista ut
+  // var displayen ska sitta." He is right, and it is the whole answer.
+  //
+  // The weapon's frame is KNOWN GOOD, because he can see the gun and aim
+  // it. In grip space the barrel points along -Z (see `_muzzle`, which
+  // fires along (0,0,-1) of the weapon holder) and the top of the gun is
+  // +Y. From that, with no guessing left to do:
+  //
+  //   the forearm runs BACKWARD from the hand   -> +Z
+  //   the back of the wrist faces the same way
+  //     as the top of the gun                   -> +Y
+  //
+  // So the display sits at +Z (toward the elbow), at +Y (on TOP of the
+  // arm), with its face pointing +Y.
+  //
+  // Both previous versions had the sign wrong on both axes: y was
+  // NEGATIVE, which is under the arm, and the rotation was +PI/2, which
+  // turns a plane's +Z normal into -Y, which is face-down. Ola: "det
+  // sitter på handens undersida, upp och ner." That is exactly what those
+  // two signs say. Not a subtle ergonomics problem, two flipped signs.
+  //
+  // A plane's normal is +Z, and rotating by t about X sends it to
+  // (0, -sin t, cos t). t = -PI/2 gives straight up; a little less than
+  // that tips the face back toward the elbow, which is where your eyes
+  // are when you raise your forearm to read a watch.
   attachTo(grip) {
     if (!grip || this.group.parent === grip) return;
     grip.add(this.group);
-    this.group.position.set(0.0, -0.032, 0.115);
-    this.group.rotation.set(Math.PI / 2 - 0.34, 0, 0);
+    this.group.position.set(0.0, WRIST_HOME.y, WRIST_HOME.z);
+    this.group.rotation.set(WRIST_HOME.tilt, 0, 0);
   }
 
   // ---- Announcing ----
@@ -422,6 +462,131 @@ export class WeaponAmmoTag {
       c.font = 'bold 82px system-ui, sans-serif';
       c.fillText(String(mag), AMMO_W / 2, AMMO_H / 2 + 4);
     }
+    this.tex.needsUpdate = true;
+  }
+}
+
+// THE CALIBRATION CARD.
+//
+// Ola, having spent a session unable to see the calibration bracelet:
+// "sätt fucking armbandet som du satt fucking ficklampan! Rakt jävla
+// fram! Sätt nummer runt och bokstäver i vinkel."
+//
+// He is right twice over. The bracelet was attached to the same grip with
+// the same wrong orientation as the display, so the tool built to fix the
+// display inherited the display's bug and sat where he could not see it.
+// A calibration aid you cannot see is not an aid.
+//
+// So the aid goes where the debug menu goes: floating in front of the
+// face, at a distance he has already proved he can read. Twelve numbers
+// in a ring for the position around the arm, five letters for the angle,
+// the current one lit. He steps it and watches the display on his arm
+// move at the same time.
+export class CalibrationCard {
+  constructor() {
+    const W = 768, H = 512;
+    this.W = W; this.H = H;
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = W;
+    this.canvas.height = H;
+    this.c = this.canvas.getContext('2d');
+    this.tex = new THREE.CanvasTexture(this.canvas);
+    this.tex.colorSpace = THREE.SRGBColorSpace;
+    this.mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.42, 0.28),
+      new THREE.MeshBasicMaterial({
+        map: this.tex, transparent: true, depthTest: false, toneMapped: false,
+      }));
+    this.mesh.renderOrder = 1001;
+    this.mesh.visible = false;
+    // Below the eyeline, so it does not sit on top of whatever you are
+    // trying to look at while you calibrate: your own forearm.
+    this.mesh.position.set(0, -0.16, -0.78);
+    this.mesh.rotation.x = 0.22;
+    this._key = '';
+  }
+
+  attachTo(camera) {
+    if (this.mesh.parent !== camera) camera.add(this.mesh);
+  }
+
+  show(on) {
+    this.mesh.visible = on;
+    this._key = '';
+  }
+
+  get visible() { return this.mesh.visible; }
+
+  draw(pip, tilt, label) {
+    if (!this.mesh.visible) return;
+    const key = `${pip}|${tilt}|${label}`;
+    if (key === this._key) return;
+    this._key = key;
+    const { c, W, H } = this;
+    c.clearRect(0, 0, W, H);
+    c.fillStyle = 'rgba(10,12,16,0.95)';
+    c.fillRect(0, 0, W, H);
+    c.strokeStyle = '#2c3843';
+    c.lineWidth = 3;
+    c.strokeRect(4, 4, W - 8, H - 8);
+
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = '#e0a33c';
+    c.font = 'bold 30px system-ui, sans-serif';
+    c.fillText('WRIST DISPLAY', W / 2, 40);
+    c.fillStyle = '#8d9aa5';
+    c.font = '20px system-ui, sans-serif';
+    c.fillText('watch your arm while you step it', W / 2, 72);
+
+    // The ring: twelve positions AROUND the arm, 1 at the top because the
+    // top of the forearm is where a watch goes.
+    const cx = 250, cy = 300, r = 100;
+    c.strokeStyle = '#2c3843';
+    c.lineWidth = 2;
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.stroke();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+      const on = i === pip;
+      c.beginPath();
+      c.arc(x, y, on ? 24 : 17, 0, Math.PI * 2);
+      c.fillStyle = on ? '#e0a33c' : 'rgba(255,255,255,0.07)';
+      c.fill();
+      c.fillStyle = on ? '#17140f' : '#8d9aa5';
+      c.font = `${on ? 'bold ' : ''}${on ? 26 : 20}px system-ui, sans-serif`;
+      c.fillText(String(i + 1), x, y + 1);
+    }
+    c.fillStyle = '#5c9ead';
+    c.font = '17px system-ui, sans-serif';
+    c.fillText('AROUND THE ARM', cx, cy + r + 46);
+    c.fillStyle = '#8d9aa5';
+    c.fillText('1 = on top', cx, cy - r - 30);
+
+    // The angle: five tilts, drawn as actual tilted bars so the letter
+    // means something before you have tried it.
+    const bx = 560;
+    c.font = '17px system-ui, sans-serif';
+    c.fillStyle = '#5c9ead';
+    c.fillText('ANGLE', bx, 150);
+    for (let i = 0; i < 5; i++) {
+      const y = 200 + i * 52;
+      const on = i === tilt;
+      c.save();
+      c.translate(bx - 40, y);
+      c.rotate(-TILTS[i]);
+      c.fillStyle = on ? '#e0a33c' : 'rgba(255,255,255,0.18)';
+      c.fillRect(-26, -4, 52, 8);
+      c.restore();
+      c.fillStyle = on ? '#e0a33c' : '#8d9aa5';
+      c.font = `${on ? 'bold 28' : '22'}px system-ui, sans-serif`;
+      c.fillText('ABCDE'[i], bx + 40, y);
+    }
+
+    // The answer, big, on the thing he is already looking at.
+    c.fillStyle = '#e8e4da';
+    c.font = 'bold 46px system-ui, sans-serif';
+    c.fillText(label, W / 2, H - 46);
     this.tex.needsUpdate = true;
   }
 }

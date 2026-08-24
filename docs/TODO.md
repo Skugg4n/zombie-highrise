@@ -14,13 +14,65 @@ doing the bookkeeping. That is my job.
 
 ---
 
+## Open: Ola's v0.21 VR playtest (2026-08-24) - ANGRY, AND RIGHT
+
+### Blocking bugs
+- [x] (v0.22.0) THE DRONE MAP IS BLACK AND WILL NOT CLOSE. "Den är HELT svart och den
+      går inte att ta bort igen! Så man måste DÖ för att få bort den!"
+      Two bugs in one: the panel renders black, and there is no way out of
+      it. Nothing in this game may ever require dying to dismiss.
+      Fixed: inside a WebXR session renderer.render ignores the camera it
+      is given and draws into the session's framebuffer, so the map pass
+      produced nothing. And A, B, X, the stick, looking away, going down
+      and changing level all close it now. The panel says the way out on
+      itself.
+- [x] (v0.22.0) The pistol cannot be put in the holster at all.
+      It was pinned near the rig origin, which in roomscale is not where
+      you are standing. It follows the body now, at hip height derived
+      from eye height, lights up when a hand is near, and the squeeze
+      checks the holster first for either hand.
+- [x] (v0.22.0) Buying two pistols gives TWO IN EACH HAND. Four guns.
+
+### The wrist, for the third time, and the actual answer
+      The akimbo MESH is two pistols in one object. Each VR hand gets a
+      single pistol now.
+- [x] (v0.22.0) Ola: "Om du kan lista ut var fan pistolen pekar och vad som är upp
+      och ner på den lär du ju fan kunna lista ut var displayen ska
+      sitta!" He is right, and this is the fix: DERIVE the display's
+      transform from the weapon's, which is known-good because he can see
+      the gun pointing the right way. Stop guessing offsets.
+      Done. Two sign errors: y was negative (under the arm) and the
+      rotation was +PI/2 (facing down). Derived from the weapon frame
+      now, and the probe checks it against the weapon's axes.
+- [x] (v0.22.0) The calibration bracelet inherited the exact bug it was built to
+      solve: it was attached to the same grip with the same wrong
+      orientation, so it sat under the arm where he could barely see it.
+      Ola: "Sätt fucking armbandet som du satt fucking ficklampan! Rakt
+      jävla fram! Sätt nummer runt och bokstäver i vinkel." The
+      calibration UI must be somewhere he cannot fail to see it.
+      The readout is a card in front of your face now, at the debug
+      menu's distance, with a ring of twelve and five angle bars.
+- [x] (v0.22.0) "Den skriver ut sin position på sig själv" is useless advice when
+      the thing printing it is the thing you cannot see.
+
+### Method
+      The card in front of your face carries the coordinate.
+- [x] (v0.22.0) Ola: "Använd critics för att kontrollera att fucking funktionerna
+      blir bättre och inte bara annorlunda!" Every VR fix in this round
+      gets checked by a critic pass before it is called done, not just a
+      probe that says the variable changed.
+
 ## Open: Ola's v0.15.x VR playtest
 
 ### Wrist display, still wrong
-- [ ] It sits on the UNDERSIDE of the hand, upside down. It must be on the
-      FOREARM like a watch: same side as the back of the hand, angled so a
-      natural turn of the forearm brings it to the eyes, and NOT attached
-      to the hand itself.
+- [x] (v0.22.0) It sits on the UNDERSIDE of the hand, upside down. It must
+      be on the FOREARM like a watch: same side as the back of the hand,
+      angled so a natural turn of the forearm brings it to the eyes, and
+      NOT attached to the hand itself. It was two sign errors: y was
+      negative, which is under the arm, and the rotation was +PI/2, which
+      faces a plane down. Derived from the weapon's frame now, and the
+      probe checks it against the weapon's axes rather than against
+      numbers typed by hand.
 - [x] (v0.18.1) Build the calibration aid instead of guessing again: a
       bracelet around the forearm with numbers in a ring and letters
       marking the angle, so Ola can read off the coordinates that work.

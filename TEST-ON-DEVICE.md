@@ -4,7 +4,45 @@ Live build: https://skugg4n.github.io/zombie-highrise/
 Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw".
 
-## v0.19.0 - THE STRATEGY VIEW, THE HOLSTER, THE TORCH (START HERE, VR)
+## v0.22.0 - THE FOUR THINGS YOU REPORTED (START HERE)
+
+Each of these is a thing you told me was broken. If any of them is still
+wrong, say which and I will not treat it as a matter of taste again.
+
+**The wrist display.** It was two sign errors, not ergonomics: it was
+below the arm and facing down. It is derived from the gun's own axes now.
+
+- [ ] It sits on TOP of your forearm, like a watch, facing up.
+- [ ] Raising your forearm naturally brings it to your eyes.
+- [ ] If it is still off, open the debug menu (Y). A card now floats in
+      FRONT OF YOUR FACE with twelve numbers in a ring and five angle
+      bars, and it moves as you step it. Read the coordinate off THAT,
+      not off your arm. "Wrist: BACK TO DEFAULT" undoes any mess.
+
+**The drone map.**
+
+- [ ] It shows the level, not a black rectangle. If it is still black it
+      should now say "map not available" in words.
+- [ ] A, B or X closes it. So does clicking a stick. So does turning
+      away. So does going down. You should never have to die again.
+- [ ] It should NOT open by itself while you are shooting.
+- [ ] Y still cycles the drone payload while it is open.
+
+**The holster.**
+
+- [ ] The loop is beside your right hip and comes with you when you walk.
+      It used to sit where the level started.
+- [ ] It LIGHTS UP when your hand is close enough to use it.
+- [ ] Squeeze there to stow the pistol, squeeze there again to draw.
+      Squeeze anywhere else and you still reload.
+
+**Two pistols.**
+
+- [ ] Buy akimbo. You should have ONE pistol in each hand, two in total.
+- [ ] With both hands full, X toggles the flashlight, since no hand is
+      carrying it.
+
+## v0.19.0 - THE STRATEGY VIEW, THE HOLSTER, THE TORCH
 
 Everything in this block is new since your last headset session. The
 first two answer "the drone is unusable in VR" and the rest are your

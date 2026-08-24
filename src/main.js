@@ -269,6 +269,10 @@ function startHotReload() {
 }
 
 function loadLevel(idx) {
+  // The map belongs to the level it was opened on. Carrying it across a
+  // level change leaves a picture of somewhere you are no longer standing
+  // in front of your face.
+  if (strategy && strategy.open) toggleStrategy(false);
   disposeLevel(scene, level);
   clearZombieVisuals();
   clearTransientVisuals();
@@ -2339,6 +2343,11 @@ function onNetError(text, fatal) {
 
 function setDowned(down) {
   myDown = down;
+  // NEVER LEAVE A PANEL BETWEEN THE PLAYER AND THEIR OWN EMERGENCY. Ola
+  // had to die to get rid of the strategy map; dying must not be able to
+  // leave him behind it either, since the downed panel appears in the
+  // same space.
+  if (down && strategy && strategy.open) toggleStrategy(false);
   // Solo runs have no teammates; never promise a revive that cannot come.
   $('downed-note').textContent = role === 'solo'
     ? 'DOWNED' : 'DOWNED - a teammate close to you revives you';
@@ -3042,6 +3051,10 @@ function getDebugMenu() {
     { label: 'Floor 12: THE BUTCHER', run: () => window.__zhr.debugGotoFinal() },
     { label: 'Repair the base', run: () => { window.__zhr.debugRepairAll(); showToast('Base repaired', 1200); } },
     // ---- Wrist calibration. Read the two characters out loud. ----
+    // The wrist display's home position is DERIVED now (see wrist.js), so
+    // these are a nudge rather than a search. The card they drive floats
+    // in front of your face, because the last version put the readout on
+    // the arm, which is the thing you could not see.
     { label: 'Wrist: move AROUND the arm', run: () => {
       if (!vrInput) return;
       showToast(`Wrist at ${vrInput.calibrateWrist('pip', 1)}`, 2200);
@@ -3050,7 +3063,11 @@ function getDebugMenu() {
       if (!vrInput) return;
       showToast(`Wrist at ${vrInput.calibrateWrist('tilt', 1)}`, 2200);
     } },
-    { label: 'Wrist: done, hide the bracelet', run: () => {
+    { label: 'Wrist: BACK TO DEFAULT', run: () => {
+      if (!vrInput) return;
+      showToast(`Wrist reset to ${vrInput.resetWrist()}`, 2600);
+    } },
+    { label: 'Wrist: done, hide the card', run: () => {
       if (!vrInput) return;
       showToast(`Saved: wrist at ${vrInput.finishWristCalibration()}`, 3000);
     } },
@@ -3981,6 +3998,17 @@ window.__zhr = {
     };
   },
   debugVrPress: (key) => (vrInput && vrInput.panel ? vrInput.panel.press(key) : false),
+  // Press a face button through the real gamepad loop, by hand and index.
+  debugVrFaceButton: (hand, index) => (vrInput ? vrInput.debugPressButton(hand, index) : false),
+  // Turn the head away from whatever it is looking at, so a "look away"
+  // rule can be tested without pretending to be the gesture code.
+  debugLookAway: () => {
+    rig.yaw += Math.PI;
+    rig.group.rotation.y = rig.yaw;
+    camera.rotation.y = 0;
+    camera.updateMatrixWorld(true);
+    return rig.yaw;
+  },
   // Press it the way a controller does: through the gamepad loop, which
   // is the only route a player has.
   debugVrButtonA: () => (vrInput ? vrInput.debugPressButton('right', 4) : false),
@@ -4027,6 +4055,65 @@ window.__zhr = {
   },
   // The holster and the strategy view, as a player would meet them.
   debugReachHolster: () => (vrInput ? vrInput.debugReachHolster() : null),
+  // The wrist display measured against the WEAPON's frame, which is the
+  // one known to be right because Ola can see the gun and aim it.
+  // Re-dress the VR hands after a weapon change, the way the game does.
+  debugRedressHands: () => {
+    if (!vrInput) return false;
+    vrInput.setWeaponModel(arsenal.active);
+    return true;
+  },
+  // How many gun BARRELS are actually on the controllers. The akimbo bug
+  // was invisible to a count of hands: both hands held "a weapon", and
+  // each of those weapons was two pistols.
+  debugBarrelCount: () => {
+    if (!vrInput) return 0;
+    // Which MESH each armed hand is showing. The akimbo mesh is two
+    // pistols in one object, so a hand showing it is a hand holding two
+    // guns; that is the bug, and it is invisible to a count of hands.
+    let n = 0;
+    for (const holder of vrInput.gripWeapons) {
+      const shown = holder.userData.shown;
+      if (!shown || shown === 'light') continue;
+      n += shown === 'akimbo' ? 2 : 1;
+    }
+    return n;
+  },
+  debugWristFrame: () => {
+    if (!vrInput || !vrInput.wrist) return null;
+    const g = vrInput.wrist.group;
+    const grip = g.parent;
+    if (!grip) return null;
+    grip.updateWorldMatrix(true, true);
+    g.updateWorldMatrix(true, false);
+    // In GRIP space: where it sits, and which way its face points.
+    const localPos = g.position.clone();
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(g.quaternion);
+    // The weapon in the same hand, for comparison. Its barrel is -Z and
+    // its top is +Y, and those are the axes the display must agree with.
+    return {
+      pos: [+localPos.x.toFixed(3), +localPos.y.toFixed(3), +localPos.z.toFixed(3)],
+      normal: [+normal.x.toFixed(3), +normal.y.toFixed(3), +normal.z.toFixed(3)],
+      // Positive = the face points the same way as the top of the gun.
+      agreesWithGunUp: +normal.dot(new THREE.Vector3(0, 1, 0)).toFixed(3),
+      // Positive = it sits behind the hand, toward the elbow.
+      towardElbow: +localPos.z.toFixed(3),
+      onTopOfArm: +localPos.y.toFixed(3),
+    };
+  },
+  // Is the holster where a hip is, relative to the head?
+  debugHolsterPlace: () => {
+    if (!vrInput || !vrInput.holster) return null;
+    vrInput.holster.updateWorldMatrix(true, false);
+    const h = vrInput.holster.getWorldPosition(new THREE.Vector3());
+    const eye = camera.getWorldPosition(new THREE.Vector3());
+    const floor = rig.group.position.y;
+    return {
+      horizontal: +Math.hypot(h.x - eye.x, h.z - eye.z).toFixed(3),
+      heightFraction: +((h.y - floor) / Math.max(0.1, eye.y - floor)).toFixed(3),
+      lit: !!vrInput._holsterLit,
+    };
+  },
   debugHolster: () => (vrInput ? {
     exists: !!vrInput.holster,
     visible: !!(vrInput.holster && vrInput.holster.visible),
@@ -4060,6 +4147,28 @@ window.__zhr = {
     return strategy.cursor ? [+strategy.cursor.u.toFixed(2), +strategy.cursor.v.toFixed(2)] : null;
   },
   debugStrategyClick: () => actions.strategyClick(),
+  // IS THE PANEL ACTUALLY BLACK? Reads pixels back off the panel's own
+  // render target, which is the thing the player is looking at. Ola:
+  // "den är HELT svart." Nothing in the code said so; the map camera was
+  // being ignored and the pass was drawing into the wrong buffer.
+  debugStrategyPixels: () => {
+    if (!strategy || !strategy.open) return null;
+    const w = 24, h = 24;
+    const buf = new Uint8Array(w * h * 4);
+    renderer.readRenderTargetPixels(strategy.rt,
+      (strategy.rt.width - w) / 2, (strategy.rt.height - h) / 2, w, h, buf);
+    let lit = 0, sum = 0;
+    for (let i = 0; i < buf.length; i += 4) {
+      const v = (buf[i] + buf[i + 1] + buf[i + 2]) / 3;
+      sum += v;
+      if (v > 12) lit++;
+    }
+    return {
+      litFraction: +(lit / (w * h)).toFixed(3),
+      meanBrightness: +(sum / (w * h)).toFixed(1),
+      xrRestored: renderer.xr.enabled,
+    };
+  },
   // Hot reload, from the outside: how many rebuilds have happened, and
   // whether the last import complained.
   debugColliderCount: () => (level.colliders || []).length,

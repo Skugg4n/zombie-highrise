@@ -1,5 +1,73 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.22.0 - 2026-08-24 - four VR bugs, and the wrist derived instead of guessed
+
+Ola's v0.21 headset session, and he was right about all of it.
+
+**The wrist display was two sign errors, not an ergonomics problem.** He
+had already said it twice: "det sitter på handens undersida, upp och ner."
+Then he said the thing that solved it: "om du kan lista ut var fan
+pistolen pekar och vad som är upp och ner på den lär du ju fan kunna lista
+ut var displayen ska sitta."
+
+He is right. The weapon's frame is known good, because he can see the gun
+and aim it: in grip space the barrel points along -Z and the top of the
+gun is +Y. From that there is nothing left to guess. The forearm runs
+backward from the hand, so +Z. The back of the wrist faces the same way as
+the top of the gun, so +Y. The display sits at +Z toward the elbow, at +Y
+on top of the arm, facing +Y.
+
+The old values were `y: -0.032` and `rotation.x: +PI/2`. Negative y is
+under the arm. Plus PI/2 turns a plane's normal to face down. That is
+literally "under the hand, upside down", which is what he said both times,
+and I spent two versions treating it as a matter of taste. The probe now
+checks the display against the WEAPON's axes rather than against numbers I
+typed, so it cannot be wrong again in a way a test would not notice.
+
+**The calibration aid had inherited the bug it existed to fix.** It was
+pinned to the same grip with the same orientation, so the tool for finding
+the display sat exactly where the display was: out of sight. Ola: "sätt
+fucking armbandet som du satt fucking ficklampan! Rakt jävla fram!" The
+readout is now a card floating in front of your face, at the distance the
+debug menu already uses, with the twelve positions in a ring and the five
+angles drawn as actual tilted bars. There is a BACK TO DEFAULT entry too,
+because a calibration with no way back is a trap.
+
+**The drone map was black and you had to die to escape it.** Two separate
+failures:
+
+- Black, because inside a WebXR session `renderer.render(scene, camera)`
+  ignores the camera you give it and draws the session's own view into the
+  session's own framebuffer. So the map pass rendered the player's
+  viewpoint into the wrong buffer and nothing landed on the panel. On a
+  flat screen the identical code works, which is why it shipped: the only
+  place it was broken was the only place the feature is for.
+- Inescapable, because the only exits were looking away and a trigger
+  click on a panel he could not see. A, B and X all close it now, so does
+  clicking the stick, so does turning away, going down closes it, and
+  changing level closes it. The panel says "A OR B TO CLOSE" on itself,
+  and if no map has landed it says so in words instead of being a black
+  rectangle. Nothing in this game may ever require dying to dismiss.
+- It also no longer unfolds itself while you are shooting or within a
+  second of a shot. The display is now correctly on top of the forearm,
+  which is a place a shooting stance can bring into view.
+
+**Buying two pistols gave you four.** The `akimbo` mesh is two pistols in
+one object, because a flat viewmodel has to show both. Handing that mesh
+to each hand is two hands holding two guns each. In VR akimbo is one
+pistol per hand.
+
+**The holster could not be reached.** It was pinned near the rig origin,
+and in roomscale the player walks away from the rig origin: the camera
+moves, the play space does not. So the loop sat wherever the level had
+started, often several metres behind him. It follows the body now, at hip
+height derived from eye height rather than assumed, with a more forgiving
+grab radius, and it lights up when a hand is close enough to use it. The
+squeeze also checks the holster FIRST and for either hand, because
+reaching to your own hip can only sensibly mean one thing, and the old
+branch order sent it to reload whenever the runtime had not told us which
+hand was which.
+
 ## v0.21.1 - 2026-08-24 - the plan catches up with the code
 
 Bookkeeping, and it was overdue. Six items in docs/projectplan.md had been
