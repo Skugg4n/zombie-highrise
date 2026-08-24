@@ -3648,7 +3648,21 @@ window.__zhr = {
     for (const [id, v] of zombieStates) out.push({ id, type: v.type, pos: [v.x, v.y, v.z] });
     return out;
   },
-  debugMove: (dx, dz) => { rig.group.position.x += dx; rig.group.position.z += dz; },
+  // Move the local player the way a player moves: through the character
+  // controller, which decides whether the step is legal.
+  //
+  // DEAD SINCE v0.17.0. This wrote straight into rig.group.position, and
+  // since the controller took ownership of the body it copies its own
+  // position over the rig on the next frame. Every write was silently
+  // undone: groundprobe walked at a ramp for 22 steps without moving a
+  // centimetre and reported "could not reach the top", and the pressure
+  // bot's kiting had not happened for as long.
+  debugMove: (dx, dz) => {
+    const dt = 1 / 60;
+    controller.step(level, dt, dx / dt, dz / dt);
+    rig.group.position.copy(controller.pos);
+    return controller.pos.toArray();
+  },
   // Teleports go through the same door, so a probe cannot put the player
   // somewhere the controller does not know about.
   debugTeleport: (x, z) => placePlayer(x, z),
@@ -4049,6 +4063,7 @@ window.__zhr = {
   // Hot reload, from the outside: how many rebuilds have happened, and
   // whether the last import complained.
   debugColliderCount: () => (level.colliders || []).length,
+  debugSpawnCount: () => (level.zombieSpawns || []).length,
   debugScrapNow: () => scrap,
   debugHot: () => ({
     on: HOT, reloads: hotCount, error: hotError,

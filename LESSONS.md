@@ -280,3 +280,27 @@ which GitHub Pages does.
 **The general shape:** any path used by two different APIs is a path that
 needs to be absolute. The failure is quiet because both APIs happily
 accept the string.
+
+## A debug hook can die quietly when the code under it changes (v0.21.0)
+
+**Symptom.** `groundprobe` reported that the player could not climb a ramp.
+The ramp was fine. The player had not moved at all.
+
+**Cause.** `debugMove` added a delta straight to `rig.group.position`. In
+v0.17.0 the character controller took ownership of the body and started
+copying `controller.pos` over the rig every frame, so every write was
+undone before anything could observe it. Nothing errored, nothing warned;
+the function ran and did nothing.
+
+**Where it really hurt.** `pressureprobe` drives a bot that kites, and
+kiting is the core skill the probe exists to simulate. It had not kited
+for four versions, and the probe reported its numbers with a straight face.
+
+**Solution.** `debugMove` steps the controller, exactly as a player's
+input does. Test seams must go through the same door as the real thing,
+which is the same rule as "no calling handlers directly" and fails the
+same way when broken.
+
+**How to spot the family:** any debug hook that WRITES state the game also
+writes. When ownership of a piece of state moves, every writer of it needs
+checking, and a probe is a writer nobody thinks about.

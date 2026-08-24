@@ -5,6 +5,8 @@
 // snipe ramp and flags any frame where the ground is not where the ramp
 // says it should be.
 import { chromium } from 'playwright';
+import { probe } from './assert.mjs';
+const P = probe('RAMP');
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -22,7 +24,7 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, r));
 const browser = await chromium.launch();
 const page = await browser.newPage();
-const errors = [];
+const errors = P.errors;
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`http://localhost:${server.address().port}/index.html?seed=5`);
 await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
@@ -64,9 +66,8 @@ for (const [label, x0, z0, x1, z1] of LINES) {
     + (worstAt ? ` at ${worstAt[0]},${worstAt[2]}` : '')
     + (fell ? '  FALL' : '  ok'));
 }
-console.log(bad === 0
-  ? 'OK: the ramp is solid from every approach'
-  : `FAIL: ${bad}/${LINES.length} lines fall through the ramp`);
+P.check(bad === 0, 'the ramp is solid from every approach',
+  `${bad}/${LINES.length} lines fall through it`);
 
 // The step profile itself: every step must be climbable and every drop
 // walkable, or the surface is not continuous.
@@ -82,9 +83,9 @@ for (let i = 1; i < prof.length; i++) {
 }
 console.log(`\nsurface profile along the ramp: biggest height change between two `
   + `points 10 cm apart is ${maxStep.toFixed(2)} m at z=${stepAt}`);
-console.log(maxStep <= 0.45
-  ? 'OK: every step is within step-up, so the surface is continuous'
-  : 'FAIL: there is a lip on the ramp taller than the player can step');
-console.log('errors:', errors.length ? errors.slice(0, 3).join(' | ') : 'none');
+P.check(maxStep <= 0.45,
+  'every step is within step-up, so the surface is continuous',
+  `biggest lip ${maxStep.toFixed(2)} m, limit 0.45`);
 await browser.close();
 server.close();
+P.finish();

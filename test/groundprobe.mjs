@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { chromium } from 'playwright';
+import { probe } from './assert.mjs';
+const P = probe('GROUND');
 const ROOT = resolve('.');
 const server = createServer(async (req, res) => {
   try {
@@ -17,7 +19,7 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+const errs = P.errors; page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(`http://127.0.0.1:${server.address().port}/?seed=4`);
 await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
 await page.click('#btn-solo');
@@ -35,11 +37,31 @@ for (let i = 0; i < 22; i++) {
   trace.push({ x: +p[0].toFixed(2), z: +p[2].toFixed(2), y: +p[1].toFixed(2) });
 }
 const ys = trace.map(t => t.y);
-console.log('path (x,z -> y):', trace.slice(0, 12).map(t => `${t.x},${t.z}->${t.y}`).join(' '));
-console.log('walking up the ramp, Y samples:', ys.join(' '));
+P.note(`walking up the ramp, Y samples: ${ys.join(' ')}`);
 const peak = Math.max(...ys);
-console.log('start Y', ys[0], '-> highest reached', peak,
-  '| platform top is 1.4 m |', peak >= 1.39 ? 'OK: stepped onto the platform'
-    : 'FAIL: could not reach the top');
-console.log('errors:', errs.length ? errs.slice(0,3) : 'none');
+const walked = Math.abs(trace[trace.length - 1].z - trace[0].z);
+
+// This has to come first, because everything after it is meaningless if
+// the body did not move. `debugMove` wrote straight into the rig and the
+// character controller silently overwrote it every frame from v0.17.0
+// onwards: this probe walked at a ramp for 22 steps without moving a
+// centimetre and reported "could not reach the top", which read like a
+// ramp bug and was a dead debug hook.
+P.check(walked > 3, 'the probe actually walks somewhere',
+  `moved ${walked.toFixed(2)} m along the ramp`);
+
+// The bug this exists for: the LAST step of a ramp was unreachable,
+// because the platform's own collider ejected you at the edge. You could
+// walk the whole thing and be stopped one step from the top, which looks
+// like the ramp working right up until it does not.
+P.check(peak >= 1.39, 'you can step onto the platform at the top of the ramp',
+  `reached ${peak.toFixed(2)} m, platform top is 1.40`);
+
+// And the way up is a climb, not a snap: a jump straight to the top would
+// pass the check above while meaning the collision is wrong the other way.
+let biggestRise = 0;
+for (let i = 1; i < ys.length; i++) biggestRise = Math.max(biggestRise, ys[i] - ys[i - 1]);
+P.check(biggestRise <= 0.46, 'and you climb it rather than snapping to the top',
+  `biggest single rise ${biggestRise.toFixed(2)} m, step-up limit 0.45`);
 await browser.close(); server.close();
+P.finish();

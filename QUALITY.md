@@ -1,6 +1,6 @@
 # QUALITY - scoreboard and open flaws
 
-## Probe assertion overhaul (running, from v0.18.2)
+## Probe assertion overhaul (DONE, v0.18.2 to v0.21.0)
 
 Ola: "probes must assert what a PLAYER would notice, not what a variable
 does." Three probes had already passed while the thing they claimed to
@@ -29,10 +29,65 @@ A probe is done when it satisfies three rules:
 | `vrprobe` reload |  No check existed; Ola read the animation in the headset and said it was unreadable. | Films 110 frames of a real reload and asserts what you would see: the magazine leaves, there is a beat where the well is empty, a fresh one seats, and the gun snaps over and HOLDS rather than sweeping. The held fraction is measured over the animation, not the sampling window, because trailing idle frames were making a correct animation look slow. |
 | `vrprobe` torch | No check existed; Ola found the dead switch in the headset. | Pulls the real trigger through the real listener, on a dark level, and watches the beam rather than the flag. Both new checks first ran on the WRONG LEVEL (see LESSONS.md) and now assert they arrived before asserting anything else. |
 
-Still to convert: `holdoutprobe`, `traverseprobe`, `interactprobe`,
-`droneprobe`, `navprobe`, `rampprobe`, `groundprobe`, `recoilprobe`,
-`endingprobe`, `pacingprobe`, `perfprobe`, `shotprobe`, `lookprobe`,
-`modprobe`, `pressureprobe`, `vraimprobe`.
+All 21 probes converted. `node test/all.mjs` runs the suite and exits
+non-zero if anything is red; a green run is twenty lines, a red one prints
+the failing assertions.
+
+**Twelve of the twenty-one could not fail at all.** They printed numbers,
+sometimes with the word FAIL in the string, and exited 0 regardless. A red
+run and a green run were indistinguishable to anything reading an exit
+code, which includes a person scrolling past.
+
+| Probe | Was | Is |
+|---|---|---|
+| `navprobe` | Printed "tracked / closed / frozen" per level. | Asserts the horde reaches you and that nobody is STRANDED. The first version checked "did not move", which failed the game for zombies that were standing still because they were biting the player. Stranded is not-moving AND far away, which is the "1 left forever" bug that has actually shipped. |
+| `groundprobe` | Printed Y samples and an OK/FAIL string. | Asserts the probe walked at all (see below), that the top step is reachable, and that the way up is a climb rather than a snap. |
+| `rampprobe` | Two OK/FAIL strings. | Same two claims, now able to fail. |
+| `recoilprobe` | Four OK/FAIL strings among the numbers. | Spamming costs you the shot, the pattern repeats, the sight comes home, and the SMG still beats the pistol on sustained damage (Ola asked for that last one directly). |
+| `endingprobe` | A chain of `waitForFunction` calls whose only failure was an uncaught timeout and a stack trace. | Each beat of the ending is its own named check, so a missing one says which. |
+| `pacingprobe` | Printed "dead air: N/60". | Asserts something to shoot at turns up within 25 s and that the level is not mostly empty. |
+| `lookprobe` | Screenshots plus a draw-call count per level. | Screenshots stay (a person has to look at those), plus four checks per floor: ground under your feet, not falling out of the world, somewhere for the horde to come from, inside the draw budget. 24 checks across six floors, including ones nobody plays by hand. |
+| `modprobe` | Printed which modifiers rolled and which enemies spawned. | Asserts modifiers actually roll and that a late night is not still walkers and runners. It skips the roster question on a `swarm` night, because swarm is all walkers by design and asking anyway made the probe fail at random. |
+| `pressureprobe` | Printed survival time, peak alive and lowest HP. | The bot has perfect aim, perfect kiting and infinite ammo, so asserting on its health was measuring the instrument. It now asserts REACHABILITY with the trigger held: can the horde catch a player running away. Stable at 0.0 to 0.1 m against a 2.5 m threshold. |
+| `vraimprobe` | Printed the angle and appended OK or FAIL. | Six checks: at three controller tilts the gun points where you aim and the bullet goes there. This guards the 45-degree bug and had no guard. |
+| `droneprobe` | Printed what landed and one OK/FAIL. | Nine checks: a drone goes up, each of the four payloads lands, every trap has a mesh to look at, the drone flies home, and the flare pulls part of the horde. |
+| `perfprobe` | Printed a JSON blob. | Asserts the horde filled up to measure, and that draw calls and triangles are inside the budgets from technical-spec.md. Those are hard requirements and nothing was checking them. |
+| `shotprobe` | Saved a screenshot. | Still a capture (a muzzle flash is a judgement call), but it now asserts a shot was actually fired, so the screenshot cannot be a picture of a gun not going off. |
+
+### What the overhaul found
+
+Four real bugs, none of which any probe had reported:
+
+1. **`debugMove` had been dead since v0.17.0.** It wrote straight into
+   `rig.group.position`, and the character controller has copied its own
+   position over the rig every frame since it took ownership of the body.
+   Every write was silently undone. `groundprobe` walked at a ramp for 22
+   steps without moving a centimetre and reported "could not reach the
+   top", which reads like a ramp bug; and the pressure bot's kiting, the
+   thing that probe exists to simulate, had not happened for four
+   versions.
+2. **The enemy mix went negative from night 7.** Walker is the remainder
+   after the other five caps, and those caps add up to more than 1 from
+   night 7 on. Walkers vanished entirely and the spawn budget was
+   over-allocated by the overflow. Clamped and normalised.
+3. **The host ran a column behind its own clients** (v0.19.1), found by
+   the new base-attack check.
+4. **Two probes were testing floor 1 while claiming to test floor 2**
+   (v0.18.3), because `?level=2` is not a parameter that exists.
+
+### The three rules, restated
+
+Every check written from here on:
+
+1. **Must be able to fail.** Break the feature on purpose and watch it go
+   red before believing it.
+2. **Goes through the real path.** No calling handlers directly, no
+   setting flags the sim owns, no debug shortcut into the state under
+   test.
+3. **Asserts the visible thing.** The mesh on the ground, the number on
+   the HUD, the health that dropped. And it must be a claim about the
+   GAME, not about the instrument: the pressure bot's health was the
+   clearest example of measuring the wrong body.
 
 ## Critic loop scoreboard
 

@@ -1,5 +1,55 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.21.0 - 2026-08-24 - twelve tests that could not fail
+
+Ola's rule: "probes must assert what a PLAYER would notice, not what a
+variable does." Walking the whole suite to apply it turned up something
+worse than badly-phrased assertions.
+
+**Twelve of the twenty-one probes could not fail at all.** They printed
+numbers, sometimes with the word FAIL inside the string, and exited 0
+whatever the numbers said. A red run and a green run were
+indistinguishable to anything reading an exit code, which includes a
+person scrolling past a wall of output. They are all converted, listed
+one by one in QUALITY.md with what each was and what it now proves.
+`node test/all.mjs` runs the lot.
+
+**It found four real bugs.** Two are in earlier versions this week; these
+two are new:
+
+**`debugMove` had been dead since v0.17.0.** It wrote straight into the
+rig's position, and the character controller has copied its own position
+over the rig every frame since it took ownership of the body. Every write
+was silently undone. `groundprobe` walked at a ramp for 22 steps without
+moving a centimetre and reported "could not reach the top", which reads
+like a ramp bug rather than a dead hook. Worse, the pressure probe's
+kiting bot, the whole point of that probe, has not moved for four
+versions. This is the same family as the reload gesture that was
+changelogged as shipped and never wired up.
+
+**The enemy mix went negative from night 7.** Walker is the remainder
+after the other five types take their capped share, and from night 7 those
+caps add up to more than 1. Walkers vanished entirely and the spawn budget
+was over-allocated by the overflow. Clamped and normalised, so the walker
+thins out to nothing instead of going into debt.
+
+**Three assertions I had to correct after writing them**, which is the
+lesson worth keeping:
+
+- "No zombie stands still" failed the game for zombies that were standing
+  still because they were BITING THE PLAYER. The real bug it was reaching
+  for is stranding: not moving AND far away.
+- "The bot takes damage on a hard night" was measuring the instrument.
+  That bot has perfect aim, perfect kiting and infinite ammo; it walking
+  away untouched says nothing about the game. It now asks whether the
+  horde can catch a player running away, with the trigger held.
+- "Night 9 spawns more than walkers" failed at random, because `swarm` is
+  all walkers on purpose.
+
+An assertion about the wrong thing is not better than no assertion. It is
+worse, because it goes red for reasons that are not bugs and trains you to
+ignore it.
+
 ## v0.20.0 - 2026-08-24 - edit a number, see it happen
 
 **Hot reload of level data: `?hot=1`.** Ola asked for it and the reason is

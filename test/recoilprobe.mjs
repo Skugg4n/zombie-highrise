@@ -7,6 +7,8 @@
 //   2. Is the vertical climb repeatable across bursts?
 //   3. Does the pistol's magazine and reload keep the SMG worth buying?
 import { chromium } from 'playwright';
+import { probe } from './assert.mjs';
+const P = probe('RECOIL');
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -24,7 +26,7 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, r));
 const browser = await chromium.launch();
 const page = await browser.newPage();
-const errors = [];
+const errors = P.errors;
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(`http://localhost:${server.address().port}/index.html?seed=5`);
 await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
@@ -89,10 +91,16 @@ for (const [w, label] of [['pistol', 'PISTOL'], ['shotgun', 'SHOTGUN'], ['smg', 
   // "spam" for heat to punish. Only judge the fast weapons on this.
   const rateLimited = cd > 0.3;
   const ratio = s.rise / Math.max(1, t.rise);
-  console.log(rateLimited
-    ? `  rate-limited by the action itself (${(1 / cd).toFixed(1)} shots/s max), `
-      + `so the climb is per-shot and not cumulative`
-    : `  ${ratio > 2.2 ? 'OK' : 'FAIL'}: spamming costs ${ratio.toFixed(1)}x the vertical climb`);
+  if (rateLimited) {
+    P.note(`rate-limited by the action itself (${(1 / cd).toFixed(1)} shots/s max), `
+      + 'so the climb is per-shot and not cumulative');
+  } else {
+    // Ola's whole request: "you CAN shoot super quick but you will
+    // probably miss." If spamming does not cost you noticeably more
+    // vertical climb than pacing your shots, there is no decision.
+    P.check(ratio > 2.2, `${label}: spamming costs you the shot`,
+      `${ratio.toFixed(1)}x the climb of paced fire, want > 2.2`);
+  }
 }
 
 // LEARNABILITY. Compare the STEP between consecutive shots, not the
@@ -123,9 +131,8 @@ for (let i = 0; i < n; i++) {
 console.log(`\nlearnability: across 3 identical 12-shot SMG bursts, the step from one`);
 console.log(`  shot to the next varies by at most ${worstStep.toFixed(1)} cm at ${RANGE} m`
   + ` (${(worstRel * 100).toFixed(0)}% of the step itself)`);
-console.log(worstRel < 0.55
-  ? 'OK: the shape repeats, so a player can pull against it'
-  : 'FAIL: too random to compensate for');
+P.check(worstRel < 0.55, 'the recoil shape repeats, so you can pull against it',
+  `worst step-to-step variation ${(worstRel * 100).toFixed(0)}%, limit 55%`);
 
 // The sight must come all the way home when you stop, or aim drifts up
 // permanently over a long fight.
@@ -144,8 +151,8 @@ const settle = await page.evaluate(async () => {
 const residueCm = Math.abs(settle.after - settle.before) * 20 * 100;
 console.log(`\nsettle: after a 20-round burst and 1.8 s of stillness, the aim sits `
   + `${residueCm.toFixed(1)} cm from where it started, at 20 m`);
-console.log(residueCm < 12 ? 'OK: the sight comes home'
-  : 'FAIL: recoil leaves permanent drift');
+P.check(residueCm < 12, 'the sight comes home after a burst',
+  `${residueCm.toFixed(1)} cm left at range, limit 12`);
 
 // Sustained damage: does the SMG still earn its price?
 const dps = await page.evaluate(() => {
@@ -168,10 +175,14 @@ for (const [w, v] of Object.entries(dps)) {
   console.log(`  ${w.padEnd(8)} ${v.burstPerSec}/s burst, empties in ${v.emptyIn}s, `
     + `sustained ${v.sustainedDps} dmg/s`);
 }
-console.log(dps.smg.sustainedDps > dps.pistol.sustainedDps * 1.5
-  ? 'OK: the SMG is still clearly worth buying'
-  : 'FAIL: the pistol has made the SMG pointless');
+// Ola asked for this one directly: "the pistol has infinite reserve, so
+// if it can now fire fast, make sure the SMG still has a reason to
+// exist." Sustained damage is the honest measure, because the magazine
+// and the reload are what actually limit a fast trigger finger.
+P.check(dps.smg.sustainedDps > dps.pistol.sustainedDps * 1.5,
+  'the SMG is still clearly worth buying',
+  `SMG ${dps.smg.sustainedDps} vs pistol ${dps.pistol.sustainedDps} dmg/s sustained`);
 
-console.log('\nerrors:', errors.length ? errors.slice(0, 3).join(' | ') : 'none');
 await browser.close();
 server.close();
+P.finish();

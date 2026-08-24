@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { chromium } from 'playwright';
+import { probe } from './assert.mjs';
+const P = probe('NAV');
 const ROOT = resolve('.');
 const server = createServer(async (req, res) => {
   try {
@@ -17,13 +19,16 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-const errs = []; page.on('pageerror', (e) => errs.push(e.message));
+const errs = P.errors; page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(`http://127.0.0.1:${server.address().port}/?seed=4`);
 await page.waitForFunction(() => !!window.__zhr, null, { timeout: 10000 });
 await page.click('#btn-solo');
 await page.waitForFunction(() => window.__zhr.state() === 'playing', null, { timeout: 5000 });
 
-for (const [lvl, name] of [[1,'ground'],[2,'basement'],[3,'upper']]) {
+// The names follow the campaign, not the old hand-built level types:
+// floor 2 has been the traverse level since v0.16.0 and this still called
+// it "basement".
+for (const [lvl, name] of [[1, 'floor 1 holdout'], [2, 'floor 2 traverse'], [3, 'floor 3 holdout']]) {
   await page.evaluate((l) => window.__zhr.debugGotoLevel(l), lvl);
   await page.waitForTimeout(250);
   await page.evaluate(() => { window.__zhr.debugClearNight(); window.__zhr.forceNight(6); });
@@ -46,18 +51,43 @@ for (const [lvl, name] of [[1,'ground'],[2,'basement'],[3,'upper']]) {
     }));
   });
   const byId = new Map(first.map((z) => [z.id, z]));
-  let closed = 0, frozen = 0, tracked = 0, gone = 0;
+  let closed = 0, stranded = 0, tracked = 0, gone = 0, arrived = 0;
   for (const z of second) {
     const a = byId.get(z.id);
     if (!a) continue;
     tracked++;
     const moved = Math.hypot(z.p[0]-a.p[0], z.p[2]-a.p[2]);
-    if (moved < 0.5) frozen++;
+    if (z.d < 2.5) arrived++;
+    // STRANDED is not "did not move". A zombie standing still on top of
+    // you is biting you, which is the system working. The bug that has
+    // actually shipped is "NIGHT 1 - 1 left" forever: something a long
+    // way off that is not getting any closer. That is both conditions
+    // together, and the first version of this check only had the first
+    // one, so it failed the game for zombies that were mid-bite.
+    if (moved < 0.5 && z.d > 6) stranded++;
     if (z.d < a.d - 1.0) closed++;
   }
   gone = first.length - tracked;
   const ph = await page.evaluate(() => window.__zhr.wave()?.ph);
-  console.log(`${name}: [phase ${ph}] tracked ${tracked} | closed distance ${closed} | frozen ${frozen} | despawned/killed ${gone}`);
+  P.note(`${name}: [phase ${ph}] tracked ${tracked} | closed ${closed} | `
+    + `arrived ${arrived} | stranded ${stranded} | gone ${gone}`);
+
+  // What a player would notice, in order of how badly it ruins the game:
+  //
+  //   Nothing arrives            -> the level cannot be finished.
+  //   Something stands still     -> "1 left" forever, which has happened.
+  //   Nobody gets closer         -> the horde is decoration.
+  //
+  // These were printed as three numbers and read by eye, which means they
+  // were checked exactly as often as somebody happened to look.
+  P.check(tracked > 0, `${name}: there is a horde to navigate at all`,
+    `${tracked} tracked`);
+  P.check(tracked === 0 || closed > 0 || arrived > 0,
+    `${name}: the horde reaches you`,
+    `${closed} closed, ${arrived} already on top of you`);
+  P.check(stranded === 0,
+    `${name}: nobody is stranded out of reach`,
+    `${stranded} sat still more than 6 m away for 9 s`);
 }
-console.log('errors:', errs.length ? errs.slice(0,2) : 'none');
 await browser.close(); server.close();
+P.finish();

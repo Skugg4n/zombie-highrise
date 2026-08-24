@@ -18,8 +18,19 @@ export const TUNING = {
       const spitter = Math.min(0.16, Math.max(0, 0.07 * (night - 3)));  // from night 4
       const crawler = Math.min(0.16, Math.max(0, 0.07 * (night - 4)));  // from night 5
       const screamer = Math.min(0.10, Math.max(0, 0.05 * (night - 5))); // from night 6
-      const walker = 1 - runner - brute - spitter - crawler - screamer;
-      return { walker, runner, brute, spitter, crawler, screamer };
+      // Walker is the REMAINDER, and from night 7 the caps above add up
+      // to more than 1, so the remainder went negative: walkers vanished
+      // entirely and the budget was over-allocated by the overflow.
+      // Clamp and normalise, so the mix always sums to 1 and the walker
+      // simply thins out to nothing instead of going into debt.
+      const rest = runner + brute + spitter + crawler + screamer;
+      const walker = Math.max(0, 1 - rest);
+      const total = walker + rest;
+      const k = 1 / total;
+      return {
+        walker: walker * k, runner: runner * k, brute: brute * k,
+        spitter: spitter * k, crawler: crawler * k, screamer: screamer * k,
+      };
     },
     // Peaks and breathers: every 3rd night surges; the day after a surge
     // is longer and richer (see state.js).

@@ -102,12 +102,15 @@ doing the bookkeeping. That is my job.
 ## Open: Ola's L2 playtest and process notes (2026-08-23)
 
 ### Probes must measure players, not variables
-- [ ] Go through EVERY probe assertion and make each assert what a player
-      would notice, not what a variable does. Where one checks a state name
-      or a flag, replace or supplement it with the observable consequence.
-      List in `QUALITY.md` which assertions changed and what each now
-      proves. (The restart assertion is done; the rest of the suite is not
-      audited yet.)
+- [x] (v0.21.0) Go through EVERY probe assertion and make each assert what
+      a player would notice, not what a variable does. All 21 probes done,
+      listed in `QUALITY.md`. Twelve of them could not fail at all: they
+      printed numbers and exited 0 whatever the numbers said. Found four
+      real bugs in the process, including a debug hook that had been dead
+      since v0.17.0 (and had been silently disabling the pressure bot's
+      movement) and an enemy mix that went negative from night 7.
+      `node test/all.mjs` runs the lot. (The restart assertion was done
+      earlier; the rest of the suite is now done too.)
 
 ### Tooling to make future levels fast
 - [x] (v0.20.0) Hot reload of level data files in dev, so changing a

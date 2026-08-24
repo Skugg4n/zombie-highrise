@@ -29,7 +29,11 @@ Claude Code reads this file automatically. These rules apply every session.
 ## Working method
 
 - Steel thread first (Phase 0 in the project plan), polish last.
-- Run test/smoke.mjs after every change. A red smoke test stops everything else.
+- Run test/smoke.mjs after every change. A red smoke test stops everything
+  else. `node test/all.mjs` runs the full probe suite and exits non-zero on
+  any failure; `node test/all.mjs nav ramp` runs a subset by name.
+- Every new probe assertion must be able to FAIL: break the feature on
+  purpose and watch it go red before believing it. See QUALITY.md.
 - The performance budgets in docs/technical-spec.md are hard requirements.
   Quest 2 is the floor platform.
 - The lobby matrix {host, join} x {flat, VR} must never regress.
