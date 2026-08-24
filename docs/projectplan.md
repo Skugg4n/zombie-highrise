@@ -135,17 +135,24 @@ the rebuild. What changes is the LEVELS.
       flies OUT to place traps where players cannot reach. More trap
       types for it to drop.
 - [x] Mines priced as a staple: 12 from the map, 10 by drone.
-- [ ] **STOP. Ola plays it. Iterate until this single level is genuinely
-      fun on its own before building anything else.**
+- [x] **STOP. Ola plays it. Iterate until this single level is genuinely
+      fun on its own before building anything else.** Played repeatedly,
+      flat and in VR, from v0.11 onward. Every round of feedback is logged
+      in docs/TODO.md and ticked with the version that did it.
 
 ### Step 3 - ONE traverse level, same treatment
 
-- [ ] Build L2 to the sketch (docs/sketches/L2-traverse.jpg): 10x10 m
+- [x] (v0.16.0) Build L2 to the sketch (docs/sketches/L2-traverse.jpg):
       dark route, elevator/spawn in one corner, slide door with a button,
       a chasm to route around, a fence, zombie holes in walls and ground,
-      a weapon locker, the exit lift in the opposite corner.
-- [ ] Drone explicitly unavailable underground, stated in fiction and UI.
-- [ ] Stop, playtest, iterate.
+      a weapon locker, the exit lift in the opposite corner. Shipped at
+      13x13 m rather than the sketch's 10x10; the deviation and its reason
+      are stated in the data file.
+- [x] (v0.16.0) Drone explicitly unavailable underground, stated in
+      fiction and UI ("DRONE: NO SIGNAL UNDERGROUND", and a line in the
+      world when you try).
+- [x] Stop, playtest, iterate. Two rounds of VR feedback on L2 so far,
+      all of it in docs/TODO.md.
 
 ### Step 4 - The campaign
 
@@ -154,8 +161,9 @@ the rebuild. What changes is the LEVELS.
       more doors and real hazards)
 - [ ] RIDE maps: the squad stands on a moving vehicle, danger arrives
       along the path
-- [ ] The BUTCHER boss as a holdout with one huge threat
-- [ ] Finale and win state (the roof extraction survives from v0.8.0)
+- [x] (v0.8.0) The BUTCHER boss as a holdout with one huge threat, on
+      floor 12. Checked end to end by `test/endingprobe.mjs`.
+- [x] (v0.8.0) Finale and win state: the roof extraction. Same probe.
 
 ## Phase 4 - Release
 

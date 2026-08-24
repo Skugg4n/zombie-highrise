@@ -1,5 +1,18 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.21.1 - 2026-08-24 - the plan catches up with the code
+
+Bookkeeping, and it was overdue. Six items in docs/projectplan.md had been
+built and shipped versions ago while still showing as open: L2 to the
+sketch, the drone grounded underground, the Butcher boss, the roof
+extraction finale, and both "stop and playtest" gates, which Ola has in
+fact been through twice. Each is ticked with the version that did it and
+what verifies it.
+
+docs/TODO.md is down to one open item, and it is one only Ola can close:
+reading the wrist display's position off the calibration bracelet in the
+headset.
+
 ## v0.21.0 - 2026-08-24 - twelve tests that could not fail
 
 Ola's rule: "probes must assert what a PLAYER would notice, not what a
