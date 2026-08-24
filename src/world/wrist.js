@@ -197,16 +197,26 @@ export class WristDisplay {
   // from there, so calibrating is nudging a right answer rather than
   // hunting for one.
   setCalibration(pipIndex, tiltIndex) {
+    this.calibrated = true;
     this.calPip = ((pipIndex % 12) + 12) % 12;
     this.calTilt = Math.max(0, Math.min(TILTS.length - 1, tiltIndex));
     const a = (this.calPip / 12) * Math.PI * 2;
     const r = 0.055;
-    // Pip 1 is straight up (+Y), the same place attachTo() puts it.
     this.group.position.set(Math.sin(a) * r, Math.cos(a) * r, WRIST_HOME.z);
-    // Face outward from the arm axis, then tip back toward the eyes.
+    // ROLL AROUND THE FOREARM, then tilt. The previous version used
+    // lookAt(position * 4), and the position carries a Z of 0.115 along
+    // the arm, so the target was mostly DOWN THE ARM rather than out from
+    // it. The ring collapsed: at pip 7, which is meant to be the
+    // underside, the face still pointed along the arm and never
+    // downwards. Half the ring was the same direction, so the tool could
+    // not express the answer it was built to find.
+    //
+    // Rolling about the frame's Z (the forearm axis) and then tilting in
+    // the rolled frame does what the dial says it does, and pip 1 tilt A
+    // comes out identical to attachTo()'s home pose.
     this.group.rotation.set(0, 0, 0);
-    this.group.lookAt(this.group.position.clone().multiplyScalar(4));
-    this.group.rotateX(-(Math.PI / 2) + TILTS[this.calTilt] + 0.34);
+    this.group.rotateZ(-a);
+    this.group.rotateX(WRIST_HOME.tilt + TILTS[this.calTilt]);
     this._key = '';
     return this.label();
   }
@@ -265,8 +275,15 @@ export class WristDisplay {
   attachTo(grip) {
     if (!grip || this.group.parent === grip) return;
     grip.add(this.group);
-    this.group.position.set(0.0, WRIST_HOME.y, WRIST_HOME.z);
-    this.group.rotation.set(WRIST_HOME.tilt, 0, 0);
+    // ONLY set the home pose if nothing has chosen one. _placeWrist loads
+    // a saved calibration and THEN calls this, and on the first call the
+    // group has no parent yet so the early return above does not fire: it
+    // stamped the default straight over the thing the player had spent a
+    // session choosing, every single page load.
+    if (!this.calibrated) {
+      this.group.position.set(0.0, WRIST_HOME.y, WRIST_HOME.z);
+      this.group.rotation.set(WRIST_HOME.tilt, 0, 0);
+    }
   }
 
   // ---- Announcing ----
@@ -499,10 +516,15 @@ export class CalibrationCard {
       }));
     this.mesh.renderOrder = 1001;
     this.mesh.visible = false;
-    // Below the eyeline, so it does not sit on top of whatever you are
-    // trying to look at while you calibrate: your own forearm.
-    this.mesh.position.set(0, -0.16, -0.78);
-    this.mesh.rotation.x = 0.22;
+    // BELOW THE DEBUG MENU, not on top of it. The menu is 0.9 x 0.675 m
+    // at z -1.1, so its bottom edge is 17.1 degrees below the eyeline. At
+    // z -0.78 that is y -0.24, and the first version of this card sat at
+    // y -0.16 with a half-height of 0.14: it covered the menu from y -0.02
+    // down, which is exactly the rows that drive the calibration,
+    // including Close. He would have been stepping a highlight he could
+    // not see.
+    this.mesh.position.set(0, -0.42, -0.78);
+    this.mesh.rotation.x = 0.42;
     this._key = '';
   }
 
@@ -536,8 +558,11 @@ export class CalibrationCard {
     c.font = 'bold 30px system-ui, sans-serif';
     c.fillText('WRIST DISPLAY', W / 2, 40);
     c.fillStyle = '#8d9aa5';
-    c.font = '20px system-ui, sans-serif';
-    c.fillText('watch your arm while you step it', W / 2, 72);
+    // Nothing under 22px: a Quest 2 gives roughly 460 screen pixels
+    // across this card's 768, so a 17px label lands on 10 and turns to
+    // porridge.
+    c.font = '24px system-ui, sans-serif';
+    c.fillText('watch your arm while you step it', W / 2, 74);
 
     // The ring: twelve positions AROUND the arm, 1 at the top because the
     // top of the forearm is where a watch goes.
@@ -558,15 +583,15 @@ export class CalibrationCard {
       c.fillText(String(i + 1), x, y + 1);
     }
     c.fillStyle = '#5c9ead';
-    c.font = '17px system-ui, sans-serif';
-    c.fillText('AROUND THE ARM', cx, cy + r + 46);
+    c.font = 'bold 24px system-ui, sans-serif';
+    c.fillText('AROUND THE ARM', cx, cy + r + 48);
     c.fillStyle = '#8d9aa5';
-    c.fillText('1 = on top', cx, cy - r - 30);
+    c.fillText('1 = on top', cx, cy - r - 32);
 
     // The angle: five tilts, drawn as actual tilted bars so the letter
     // means something before you have tried it.
     const bx = 560;
-    c.font = '17px system-ui, sans-serif';
+    c.font = 'bold 24px system-ui, sans-serif';
     c.fillStyle = '#5c9ead';
     c.fillText('ANGLE', bx, 150);
     for (let i = 0; i < 5; i++) {

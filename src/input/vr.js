@@ -34,7 +34,10 @@ const SLIDE_TRAVEL = 0.032;
 
 // How far down -Z the barrel tip sits on each weapon model, so tracers and
 // muzzle flash leave the gun and not the player's wrist.
-const MUZZLE = { pistol: 0.16, akimbo: 0.14, smg: 0.39, shotgun: 0.48, ak: 0.52, machete: 0.45 };
+// Barrel length per weapon, for the muzzle position. `akimbo` is the same
+// as `pistol` in VR because each hand now holds a single pistol; the 0.14
+// here was measured off the two-guns-in-one-object flat viewmodel.
+const MUZZLE = { pistol: 0.16, akimbo: 0.16, smg: 0.39, shotgun: 0.48, ak: 0.52, machete: 0.45 };
 
 // Module scratch. Allocating vectors inside a per-frame gesture check is
 // how a headset finds its garbage collector.
@@ -49,6 +52,7 @@ export class VRInput {
     this.active = false;
     this.snapReady = { right: true };
     this.controllers = [];
+    this.armFrames = [];        // grip-parented, aligned like the weapon
     this.grips = [];
     this.gripWeapons = [];
     this.hands = { left: null, right: null };   // handedness -> grip (by connection order)
@@ -125,7 +129,13 @@ export class VRInput {
         // runtime (`this.hands` is filled in by a `connected` event that
         // does not always fire) the gesture went to the wrong branch and
         // reloaded instead.
-        if (this._handAtHolster(grip)) {
+        // ONLY THE GUN HAND USES THE HOLSTER. Checking either hand made
+        // the left grip's meaning depend on where it happened to be, and
+        // the left grip is the mine and the wall repair: standing at a
+        // damaged wall, squeezing to patch it, and having your pistol
+        // vanish instead is a worse bug than the one being fixed. Your
+        // off hand does not holster your gun.
+        if (grip === this.gripFor('right') && this._handAtHolster(grip)) {
           this.setHolstered(!this.holstered);
         } else if (this.gripFor('left') === grip) {
           // Left squeeze is contextual: HOLD it to patch the base wall if
@@ -144,6 +154,27 @@ export class VRInput {
       controller.addEventListener('squeezeend', () => {
         if (this.gripFor('left') === grip) ctx.actions.repairHold(false);
       });
+      // THE ARM FRAME. Same alignment as the weapon holder, and nothing
+      // else on top of it.
+      //
+      // This exists because of the wrist display, and because of an error
+      // worth writing down. The weapon's axes ARE known good: -Z is the
+      // barrel and +Y is the top of the gun, which is why the gun looks
+      // right in the hand and shoots where it points. But those axes are
+      // the HOLDER's, and the holder is not the grip: _alignWeapons sets
+      // holder = grip^-1 * targetRay precisely because the two differ,
+      // and on Oculus Touch they differ by about 47 degrees (LESSONS.md,
+      // "the VR weapon points about 45 degrees away from where it
+      // shoots"). Deriving the wrist display's placement from the
+      // weapon's axes and then applying it in GRIP space carries that
+      // whole 47 degrees straight into the answer.
+      //
+      // So the display gets the weapon's frame itself, rather than a
+      // description of it. The frame carries no reload cant and no recoil
+      // kick, because a watch does not jump when you fire.
+      const armFrame = new THREE.Group();
+      grip.add(armFrame);
+      this.armFrames.push(armFrame);
       const weaponHolder = new THREE.Group();
       weaponHolder.add(makeWeaponMesh('pistol'));
       grip.add(weaponHolder);
@@ -249,7 +280,12 @@ export class VRInput {
         if (want === 'light') {
           holder.add(makeFlashlightMesh());
         } else {
-          holder.add(makeWeaponMesh(kind));
+          // perHand, NOT kind. The whole point of perHand is that the
+          // 'akimbo' mesh is two pistols in one object, and this line was
+          // still asking for it, so each hand got both guns. The variable
+          // was computed, used for the label, and then dropped on the
+          // floor here: the fix existed everywhere except where it acts.
+          holder.add(makeWeaponMesh(perHand));
           // Ammo has to be readable without looking away from the fight,
           // so it rides on the gun itself.
           const tag = new WeaponAmmoTag();
@@ -261,6 +297,17 @@ export class VRInput {
       }
     }
     this._placeWrist();
+    // The dressing pass called holder.clear(), so anything parented into
+    // a holder is gone, and that includes the torch beam. Switching
+    // weapons on a dark level disconnected the light until you toggled it
+    // off and on again, and switching to akimbo did it every time
+    // because both hands change at once.
+    this._redressed = true;
+    if (this.handLightOn) {
+      const was = this.handLightOn;
+      this.handLightOn = null;
+      this.setHandLight(was);
+    }
   }
 
   // Is this controller's hand holding a weapon, as opposed to the torch?
@@ -290,7 +337,12 @@ export class VRInput {
       })();
       if (saved) this.wrist.setCalibration(saved.pip, saved.tilt);
     }
-    const left = this.gripFor('left');
+    // Mounted on the ARM FRAME, not the grip: see the comment where the
+    // arm frames are built. The grip and the frame the weapon uses differ
+    // by about 47 degrees on Touch controllers, and putting a
+    // weapon-derived offset in grip space carries all 47 into the result.
+    const leftGrip = this.gripFor('left');
+    const left = this.armFrames[this.grips.indexOf(leftGrip)] || leftGrip;
     if (left) {
       this.wrist.attachTo(left);
       if (this.wrist.bracelet) left.add(this.wrist.bracelet);
@@ -331,7 +383,10 @@ export class VRInput {
   // made things worse. There has to be a way back from a calibration.
   resetWrist() {
     if (!this.wrist) this._placeWrist();
-    const label = this.wrist.setCalibration(0, 2);
+    // 1A is the derived home, not 1C. The reset went to the middle of the
+    // tilt list, which is a different place from the one the code calls
+    // "the default" everywhere else.
+    const label = this.wrist.setCalibration(0, 0);
     const card = this.getCalCard();
     card.show(true);
     card.draw(this.wrist.calPip, this.wrist.calTilt, label);
@@ -436,6 +491,13 @@ export class VRInput {
       const facing = _v5.set(0, 0, 1).applyQuaternion(w.getWorldQuaternion(_q1));
       const looking = look.dot(toWrist);
       const presented = facing.dot(toWrist) < -0.45;
+      // NOT WHILE A MENU IS UP. The glance gesture runs before the input
+      // loop, so nothing else was stopping the map from unfolding on top
+      // of the debug menu, and the panel then eats A, B, X and the stick
+      // before the menu block sees them: the menu becomes unusable until
+      // the panel is closed. Most likely of all during calibration, when
+      // he is deliberately staring at his own wrist.
+      if (acts.debugMenuOpen && acts.debugMenuOpen()) { this.glanceT = 0; return; }
       // NOT WHILE YOU ARE FIGHTING. A map that unfolds itself because you
       // happened to raise your gun hand is worse than no map, and the
       // display now correctly sits on top of the forearm, which is a
@@ -540,8 +602,16 @@ export class VRInput {
     if (!this.holster) return;
     const cam = this.ctx.camera;
     const eye = cam.position;                 // local to the rig
+    // The camera matrix's third column IS its local +Z, and a camera
+    // looks along -Z, so e[8] = sin(yaw) and e[10] = cos(yaw). Negating
+    // both adds 180 degrees, which put the holster on the LEFT hip and
+    // four centimetres BEHIND it: out of reach of the right hand, and
+    // permanently inside the left hand's resting position, which turned
+    // the left grip into a random stow-the-pistol button. Verified
+    // numerically against the vendored three build rather than reasoned
+    // about a second time.
     const yaw = Math.atan2(
-      -cam.matrix.elements[8], -cam.matrix.elements[10]);   // heading only
+      cam.matrix.elements[8], cam.matrix.elements[10]);   // heading only
     const right = { x: Math.cos(yaw), z: -Math.sin(yaw) };
     const fwd = { x: -Math.sin(yaw), z: -Math.cos(yaw) };
     this.holster.position.set(
@@ -569,7 +639,10 @@ export class VRInput {
   // and getting a reload instead.
   _highlightHolster() {
     if (!this.holster) return;
-    const near = this.grips.some((g) => this._handAtHolster(g));
+    // Lit only for the hand that can actually use it, or the highlight
+    // promises something the squeeze will not do.
+    const gun = this.gripFor('right');
+    const near = !!gun && this._handAtHolster(gun);
     if (near === this._holsterLit) return;
     this._holsterLit = near;
     this.holster.traverse((o) => {
@@ -671,7 +744,13 @@ export class VRInput {
   // daylight is absurd, so holdout levels leave it dark and the hand just
   // carries the tool.
   setHandLight(on) {
-    if (this.handLightOn === on) return;
+    // `_redressed` is raised by _dressHands, which calls holder.clear()
+    // and therefore throws away the beam's parent. Without noticing that,
+    // this early return meant switching weapons on a dark level
+    // disconnected the torch until you turned it off and on again, and
+    // switching to akimbo did it every time because both hands change.
+    if (this.handLightOn === on && !this._redressed) return;
+    this._redressed = false;
     this.handLightOn = on;
     for (const holder of this.gripWeapons) {
       holder.traverse((o) => {
@@ -757,6 +836,11 @@ export class VRInput {
       // Both poses share rig.group as their parent, so local quaternions
       // compose directly: holderLocal = grip^-1 * targetRay.
       holder.quaternion.copy(this._q.copy(grip.quaternion).invert().multiply(ray.quaternion));
+      // The arm frame gets the same base alignment and stops there: no
+      // reload cant, no recoil. Anything mounted on the forearm rides
+      // this instead of the grip.
+      const arm = this.armFrames[i];
+      if (arm) arm.quaternion.copy(this._q);
       // Re-apply the reload cant on top of the aim alignment (the pose
       // pass writes rotation.z, which this copy would otherwise erase).
       if (holder.userData.reloadRoll) holder.rotateZ(holder.userData.reloadRoll);
@@ -1006,8 +1090,11 @@ export class VRInput {
       // måste DÖ för att få bort den!" Nothing in this game may ever
       // require dying to dismiss, so closing it is now bound to every
       // face button except the one that cycles the payload. Four ways
-      // out, on both hands, plus looking away, plus the trigger on the
-      // panel's own CLOSE button.
+      // out, on both hands, plus clicking a stick, plus looking away.
+      // (An earlier version of this comment also claimed a CLOSE button
+      // on the panel. There is no such button: hitTest has no close area
+      // and strategyClick never closes anything. Counting a way out that
+      // does not exist is how you end up believing a trap is escapable.)
       if (this.strategyOpen) {
         if (src.handedness === 'left' && pressed(BTN_BY)) {
           if (this.ctx.actions.strategyCyclePayload) this.ctx.actions.strategyCyclePayload();

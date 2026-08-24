@@ -1,5 +1,71 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.22.1 - 2026-08-24 - v0.22.0 claimed four fixes and shipped two
+
+Ola asked for critics: "använd critics för att kontrollera att fucking
+funktionerna blir bättre och inte bara annorlunda." One ran over v0.22.0
+and found that half of it was not fixed, and that three of my own probes
+were certifying the unfixed half as working. Every finding was verified in
+the code before acting on it.
+
+**Akimbo was not fixed at all.** The new code computed `perHand =
+'pistol'`, used it for the label, and then passed `kind` to
+`makeWeaponMesh` on the next line. Every hand still got the two-pistol
+mesh. Four guns, exactly as before. And the probe read the label rather
+than the geometry, so it reported "exactly two guns in total, not four"
+while standing next to the line that was wrong.
+
+**The holster was on the wrong hip.** `Math.atan2(-e[8], -e[10])` is the
+heading plus 180 degrees. The loop sat on the LEFT hip, four centimetres
+behind, out of reach of the gun hand, and permanently inside the resting
+position of the off hand, which would have turned the left grip into a
+random stow-your-pistol button and broken the mine and the wall repair.
+The probe measured distance from the head, which is the same number for
+either hip.
+
+**The wrist derivation was right in the wrong space.** The weapon's axes
+are the HOLDER's, and `_alignWeapons` exists precisely because the holder
+and the grip differ, by about 47 degrees on Touch controllers. The
+placement was derived from the weapon and then applied in grip space,
+carrying all 47 degrees into the answer. There is an `armFrame` per grip
+now, carrying the weapon's alignment and nothing else, and the display is
+mounted on that. So it uses the weapon's frame rather than a description
+of it.
+
+**And the calibration ring could not express the answer.** It oriented
+itself with `lookAt(position * 4)`, and the position includes the offset
+ALONG the arm, so the target was mostly down the arm rather than out from
+it. The ring collapsed: at position 7, meant to be the underside, the face
+still pointed along the arm. It rolls about the forearm axis now. 1A is
+exactly the derived home, 4A faces right, 7A faces down, 10A faces left.
+
+Also fixed, all found by the same pass:
+
+- The calibration was thrown away on every page load: `attachTo` stamped
+  the default over the loaded value, and on the first call the early
+  return could not fire because the group had no parent yet.
+- The calibration card covered the five debug menu rows that drive it,
+  including Close. It sits below the menu now, and the coordinate is a
+  status row on the menu itself, because every confirmation in that flow
+  went through a DOM toast and DOM does not exist in a headset.
+- Switching weapons on a dark level disconnected the torch, because the
+  dressing pass clears the holder the beam is parented to.
+- The strategy map could unfold on top of the debug menu and then eat its
+  buttons, most likely of all during calibration.
+- "map not available" could never appear, because `painted` was set
+  because a draw call happened rather than because anything landed.
+- A comment counted a way out of the panel that does not exist.
+
+**The three probes are rewritten to measure the thing.** Barrels are
+counted as geometry in space, the holster is reported as a signed offset
+in the head's own frame, and the display is compared against the real
+weapon holder with the controllers posed by `debugVRAim(45)` first,
+because headless controllers sit at identity and the divergence the check
+exists to catch is not there otherwise. All three were falsified by
+re-breaking the fix and watching them go red. Written up in LESSONS.md and
+QUALITY.md, which now has a fourth rule: the test must run where the bug
+can happen.
+
 ## v0.22.0 - 2026-08-24 - four VR bugs, and the wrist derived instead of guessed
 
 Ola's v0.21 headset session, and he was right about all of it.

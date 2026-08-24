@@ -304,3 +304,59 @@ same way when broken.
 **How to spot the family:** any debug hook that WRITES state the game also
 writes. When ownership of a piece of state moves, every writer of it needs
 checking, and a probe is a writer nobody thinks about.
+
+## Three tests that certified unfixed bugs, on the same day (v0.22.0)
+
+The probe overhaul in v0.21.0 wrote down three rules. Within hours I broke
+all three, and shipped a version claiming four VR fixes of which two were
+not fixed at all. A critic pass caught it before Ola did.
+
+**1. I measured a label I had just set.** The akimbo fix computed
+`perHand = 'pistol'`, used it for `userData.shown`, and then passed `kind`
+to `makeWeaponMesh` on the very next line. Every hand still got the
+two-pistol mesh. The probe read `userData.shown` and reported "exactly two
+guns in total, not four". It was reading the variable the buggy code had
+set correctly, next to the line that was wrong.
+
+*The rule:* a gun is geometry in space. Count geometry. `userData.shown`
+is a note the code writes to itself, and a note is not evidence.
+
+**2. I measured a magnitude when the error was a direction.** The holster
+yaw was 180 degrees out, putting it on the left hip and slightly behind.
+The probe measured `Math.hypot(dx, dz)` from the head, which is exactly
+the same number for the correct hip and the wrong one. It passed while the
+feature was completely unusable, which is the state Ola reported.
+
+*The rule:* if the bug can be a sign, the measurement cannot be a
+magnitude.
+
+**3. I compared two constants and called it a comparison.** The wrist
+display was supposedly derived from the weapon's frame. The check was
+`normal.dot(new THREE.Vector3(0, 1, 0))`, with a comment claiming it was
+measured against the weapon. There was no reference to the weapon in the
+function. It compared the constant I had written against another constant
+I had written.
+
+Worse, even after pointing it at the real weapon it still could not fail,
+because headless controllers sit at identity: the grip pose and the
+target-ray pose coincide, and the ~47 degrees between them on real
+hardware simply is not there. The probe has to call `debugVRAim(45)` to
+pose the controllers before the question means anything.
+
+*The rule:* a test that runs in a world where the bug cannot occur is not
+a test. Ask what condition makes this break, and reproduce that condition.
+
+## And the bug under all of it: the right axes in the wrong space
+
+The wrist display's placement was derived from a true statement: in the
+weapon's frame the barrel is -Z and the top of the gun is +Y. It was then
+applied in GRIP space. Those are not the same frame, and `_alignWeapons`
+exists precisely because they differ, by about 47 degrees on Touch
+controllers. The derivation was right and the space was wrong, which is
+harder to spot than a wrong derivation because every individual sentence
+in the reasoning is true.
+
+The fix is to stop describing the frame and use it: there is an
+`armFrame` per grip now, carrying the same alignment as the weapon holder
+and nothing else, and anything meant to sit on the forearm is mounted on
+that.

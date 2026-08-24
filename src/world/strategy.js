@@ -124,9 +124,30 @@ export class StrategyView {
     this.group.rotateX(-0.22);           // tilt the top away, like a desk
   }
 
+  // Does the panel have anything on it? A small sample from the middle,
+  // read back off the render target.
+  _hasContent() {
+    try {
+      const n = 8;
+      const buf = new Uint8Array(n * n * 4);
+      this.renderer.readRenderTargetPixels(this.rt,
+        (this.rt.width - n) / 2, (this.rt.height - n) / 2, n, n, buf);
+      for (let i = 0; i < buf.length; i += 4) {
+        if ((buf[i] + buf[i + 1] + buf[i + 2]) / 3 > 12) return true;
+      }
+      return false;
+    } catch {
+      // If the read is not available, assume it worked rather than
+      // covering a good map with an error message.
+      return true;
+    }
+  }
+
   show(camera) {
     this.placeFor(camera);
     this.open = true;
+    this.painted = false;
+    this._checkedPaint = false;
     this.group.visible = true;
     this._key = '';
     this._mapT = 99;                     // force a map render this frame
@@ -171,7 +192,15 @@ export class StrategyView {
     this.renderer.setRenderTarget(prevTarget);
     this.renderer.xr.enabled = wasXr;
     this.group.visible = true;
-    this.painted = true;
+    // DID ANYTHING ACTUALLY LAND? Setting this to true because a draw
+    // call was issued is how the "map not available" message could never
+    // appear in the one case it was written for. Checked once, on the
+    // first pass after opening, because reading pixels back is a stall
+    // and doing it ten times a second is not free.
+    if (!this._checkedPaint) {
+      this._checkedPaint = true;
+      this.painted = this._hasContent();
+    }
     return true;
   }
 

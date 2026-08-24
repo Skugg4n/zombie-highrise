@@ -75,6 +75,23 @@ Four real bugs, none of which any probe had reported:
 4. **Two probes were testing floor 1 while claiming to test floor 2**
    (v0.18.3), because `?level=2` is not a parameter that exists.
 
+### The rules were broken the same day they were written (v0.22.0)
+
+A critic pass on the v0.22.0 VR fixes found that three probes certified
+bugs which were completely unfixed: an akimbo check that read a label the
+buggy code had set correctly, a holster check that measured a magnitude
+when the error was a 180-degree sign, and a wrist check that compared two
+constants and then, once pointed at the real weapon, still could not fail
+because headless controllers sit at identity and the 47-degree grip
+divergence it exists to catch does not exist there. Written up in
+LESSONS.md. A fourth rule follows from it:
+
+4. **The test must run where the bug can happen.** Ask what condition
+   makes this break, and reproduce that condition. Half the VR suite runs
+   in a flat browser with identity controller poses and no XR session;
+   anything that only goes wrong under those conditions has to fabricate
+   them.
+
 ### The three rules, restated
 
 Every check written from here on:

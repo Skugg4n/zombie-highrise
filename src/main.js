@@ -3082,6 +3082,12 @@ function getDebugMenu() {
       ['downed', myDown ? 'YES' : 'no'],
       ['left', w.left === undefined ? '-' : String(w.left)],
       ['scrap', String(scrap)],
+      // The wrist coordinate lives HERE, on the surface he is already
+      // looking at to step it. Every confirmation in the calibration flow
+      // went through showToast, and a toast is DOM, and DOM does not
+      // exist inside a headset: the last step of the calibration said
+      // "Saved" to nobody.
+      ['wrist', vrInput && vrInput.wrist ? vrInput.wrist.label() : '-'],
     ];
   };
   debugMenu = new DebugMenu(actions, status);
@@ -4066,49 +4072,92 @@ window.__zhr = {
   // How many gun BARRELS are actually on the controllers. The akimbo bug
   // was invisible to a count of hands: both hands held "a weapon", and
   // each of those weapons was two pistols.
+  // COUNT THE GEOMETRY, NOT THE LABEL.
+  //
+  // The first version of this read `userData.shown`, which the dressing
+  // code sets to 'pistol' as its FIRST act. So it reported two guns while
+  // the very next line added the two-pistol mesh to each hand, and the
+  // probe cheerfully certified a bug that was completely unfixed. That is
+  // the exact failure QUALITY.md was written about, committed the same
+  // day. A gun is a barrel in space, so count barrels in space.
   debugBarrelCount: () => {
     if (!vrInput) return 0;
-    // Which MESH each armed hand is showing. The akimbo mesh is two
-    // pistols in one object, so a hand showing it is a hand holding two
-    // guns; that is the bug, and it is invisible to a count of hands.
     let n = 0;
     for (const holder of vrInput.gripWeapons) {
-      const shown = holder.userData.shown;
-      if (!shown || shown === 'light') continue;
-      n += shown === 'akimbo' ? 2 : 1;
+      if (holder.userData.shown === 'light') continue;
+      // Distinct X offsets among the long thin parts: one pistol sits on
+      // the holder's centre line, two sit either side of it.
+      const xs = new Set();
+      holder.traverse((o) => {
+        if (!o.geometry || o.geometry.type !== 'BoxGeometry') return;
+        const p = o.geometry.parameters;
+        if (p.depth < 0.1 || p.width > 0.06) return;    // barrels/slides only
+        xs.add(o.position.x.toFixed(2));
+      });
+      n += Math.max(1, xs.size);
     }
     return n;
   },
+  // THE DISPLAY MEASURED AGAINST THE ACTUAL GUN.
+  //
+  // The first version of this compared the display's normal against a
+  // hardcoded (0,1,0) while its own comment claimed it was checking
+  // against the weapon's frame. There was no reference to the weapon in
+  // it. It compared two constants and could not go red, which is exactly
+  // how a 47-degree error in the premise survived: the grip's +Y and the
+  // WEAPON's +Y are not the same direction, and the whole question is
+  // which one the display is aligned to.
+  //
+  // So: take the real weapon holder, in world space, and ask whether the
+  // display's face points the same way as the top of that gun.
   debugWristFrame: () => {
     if (!vrInput || !vrInput.wrist) return null;
     const g = vrInput.wrist.group;
-    const grip = g.parent;
-    if (!grip) return null;
-    grip.updateWorldMatrix(true, true);
+    const frame = g.parent;
+    if (!frame) return null;
+    frame.updateWorldMatrix(true, true);
     g.updateWorldMatrix(true, false);
-    // In GRIP space: where it sits, and which way its face points.
+    // The gun the player can actually see, in the hand that has one.
+    const gun = vrInput.gripWeapons.find((h) => h.userData.shown !== 'light')
+      || vrInput.gripWeapons[0];
+    if (!gun) return null;
+    gun.updateWorldMatrix(true, false);
+    const gunUp = new THREE.Vector3(0, 1, 0)
+      .applyQuaternion(gun.getWorldQuaternion(new THREE.Quaternion()));
+    const gunBarrel = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(gun.getWorldQuaternion(new THREE.Quaternion()));
+    const normal = new THREE.Vector3(0, 0, 1)
+      .applyQuaternion(g.getWorldQuaternion(new THREE.Quaternion()));
     const localPos = g.position.clone();
-    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(g.quaternion);
-    // The weapon in the same hand, for comparison. Its barrel is -Z and
-    // its top is +Y, and those are the axes the display must agree with.
     return {
       pos: [+localPos.x.toFixed(3), +localPos.y.toFixed(3), +localPos.z.toFixed(3)],
-      normal: [+normal.x.toFixed(3), +normal.y.toFixed(3), +normal.z.toFixed(3)],
-      // Positive = the face points the same way as the top of the gun.
-      agreesWithGunUp: +normal.dot(new THREE.Vector3(0, 1, 0)).toFixed(3),
-      // Positive = it sits behind the hand, toward the elbow.
+      // 1.0 = the display faces exactly the way the top of the gun does.
+      agreesWithGunUp: +normal.dot(gunUp).toFixed(3),
+      // Should be near 0: a watch face is not pointing down the barrel.
+      alongBarrel: +normal.dot(gunBarrel).toFixed(3),
       towardElbow: +localPos.z.toFixed(3),
       onTopOfArm: +localPos.y.toFixed(3),
     };
   },
   // Is the holster where a hip is, relative to the head?
+  // WHICH SIDE, NOT JUST HOW FAR.
+  //
+  // The first version returned a scalar distance, and a holster on the
+  // wrong hip is exactly the same distance away as one on the right hip.
+  // It passed while the thing sat behind the player's left side, out of
+  // reach of the hand that is supposed to use it. Reported in the head's
+  // own frame now: right is positive, forward is positive.
   debugHolsterPlace: () => {
     if (!vrInput || !vrInput.holster) return null;
     vrInput.holster.updateWorldMatrix(true, false);
     const h = vrInput.holster.getWorldPosition(new THREE.Vector3());
     const eye = camera.getWorldPosition(new THREE.Vector3());
     const floor = rig.group.position.y;
+    // Into the head's frame: +x right of the player, +z in front.
+    const local = camera.worldToLocal(h.clone());
     return {
+      right: +local.x.toFixed(3),
+      forward: +(-local.z).toFixed(3),
       horizontal: +Math.hypot(h.x - eye.x, h.z - eye.z).toFixed(3),
       heightFraction: +((h.y - floor) / Math.max(0.1, eye.y - floor)).toFixed(3),
       lit: !!vrInput._holsterLit,

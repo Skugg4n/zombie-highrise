@@ -67,6 +67,13 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
 // at +Z (toward the elbow) and +Y (on top of the arm), with its face
 // pointing +Y. Both previous versions had both signs wrong.
 {
+  // POSE THE CONTROLLERS FIRST. Headless controllers sit at identity, so
+  // the grip pose and the target-ray pose coincide and the ~47 degrees
+  // that separate them on real Touch hardware simply is not there. The
+  // first version of this check measured the display in a world where
+  // the bug it exists to catch cannot occur, and passed whichever frame
+  // the display was mounted on. debugVRAim fabricates the real tilt.
+  await page.evaluate(() => window.__zhr.debugVRAim(45));
   const f = await page.evaluate(() => window.__zhr.debugWristFrame());
   check(!!f, 'there is a wrist display to measure', JSON.stringify(f));
   check(f && f.onTopOfArm > 0.01,
@@ -417,6 +424,16 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   check(at && at.horizontal < 0.4,
     'it is beside your body, not across the room',
     at ? `${at.horizontal} m from the head, horizontally` : '');
+  // WHICH SIDE. A holster on the left hip is exactly the same DISTANCE
+  // away as one on the right, so the scalar check above passed while the
+  // thing sat behind the player's left side, out of reach of the hand
+  // that uses it. A 180-degree yaw error is invisible to a magnitude.
+  check(at && at.right > 0.12,
+    'and on your RIGHT, where the gun hand is',
+    at ? `${at.right} m to the right (negative is the wrong hip)` : '');
+  check(at && Math.abs(at.forward) < 0.15,
+    'and beside you rather than behind you',
+    at ? `${at.forward} m forward` : '');
   check(at && at.heightFraction > 0.4 && at.heightFraction < 0.75,
     'and at hip height for whoever is wearing it',
     at ? `${(at.heightFraction * 100).toFixed(0)}% of eye height` : '');
