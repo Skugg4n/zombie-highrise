@@ -26,12 +26,30 @@ const PULSE_SECONDS = 1.4;              // how long an announcement plays
 // rotation back toward the eyes.
 const TILTS = [0, 0.35, 0.7, 1.05, 1.4];
 
-// The derived home position, in GRIP space. Exported so a probe can check
-// it against the weapon's frame rather than against a number I typed.
+// The angle that puts the face flat on the forearm, like a watch lying on
+// the arm. Every calibration angle is this plus one of TILTS.
+const FLAT_TILT = -(Math.PI / 2 - 0.34);
+// And the one the display starts at. A watch lies flat and you rotate your
+// whole forearm to read it, which is what Ola asked for ("angled so a
+// natural turn of the forearm brings it to the eyes"). But flat is 19.5
+// degrees from straight up, and reading that means holding the forearm
+// level in front of you and bending your neck down at it, which is not
+// the watch movement, it is a worse one. C tips the face 60 degrees back
+// toward the eyes: you still turn the forearm, just less far.
+//
+// This is a judgement call between two readings of the same sentence, so
+// it is noted in OPEN-QUESTIONS.md and the dial reaches every other angle
+// in a couple of presses.
+const DEFAULT_TILT = 2;    // 'C'
+export const DEFAULT_WRIST_TILT = DEFAULT_TILT;
+
+// The derived home position, in the WEAPON's frame (see the arm frames in
+// vr.js). Exported so a probe can check it against the weapon rather than
+// against a number typed by hand.
 export const WRIST_HOME = {
   y: 0.038,          // ON TOP of the forearm, not under it
   z: 0.115,          // back toward the elbow, clear of the hand
-  tilt: -(Math.PI / 2 - 0.34),   // face up, tipped back toward the eyes
+  tilt: FLAT_TILT + TILTS[DEFAULT_TILT],
 };
 
 // A single character on a dark chip, for the bracelet.
@@ -134,7 +152,13 @@ export class WristDisplay {
     this.pulseT = 0;              // 1 -> 0 while an announcement plays
     this._lastObjective = null;
     this.calPip = 0;
-    this.calTilt = 2;
+    // 0, not 2. attachTo() puts the display at the orientation this class
+    // calls 1A, so a default of tilt index 2 made label() report "1C" for
+    // a display that was physically at 1A. That label is now a status row
+    // in the debug menu, added specifically so Ola can read the
+    // coordinate out loud, so it was about to tell him the wrong one.
+    // It also meant the first press of "change the ANGLE" jumped A to D.
+    this.calTilt = DEFAULT_TILT;
     this.calibrating = false;
     this.bracelet = null;
   }
@@ -170,7 +194,14 @@ export class WristDisplay {
         }));
       // Around the arm's long axis, which is Z in grip space.
       pip.position.set(Math.sin(a) * ringR, Math.cos(a) * ringR, 0.10);
-      pip.lookAt(pip.position.clone().multiplyScalar(3));
+      // Rolled about the forearm axis, the same way setCalibration does
+      // it. This used the lookAt-through-the-arm trick that made the
+      // calibration ring collapse; the positions agreed with the dial
+      // while the directions did not, which is two different sets of
+      // maths for one control.
+      pip.rotation.set(0, 0, 0);
+      pip.rotateZ(-a);
+      pip.rotateX(-Math.PI / 2);
       pip.renderOrder = 998;
       g.add(pip);
     }
@@ -201,7 +232,9 @@ export class WristDisplay {
     this.calPip = ((pipIndex % 12) + 12) % 12;
     this.calTilt = Math.max(0, Math.min(TILTS.length - 1, tiltIndex));
     const a = (this.calPip / 12) * Math.PI * 2;
-    const r = 0.055;
+    // The ring radius IS the home offset, so stepping to 1A lands exactly
+    // where attachTo() puts it rather than 1.7 cm away from it.
+    const r = WRIST_HOME.y;
     this.group.position.set(Math.sin(a) * r, Math.cos(a) * r, WRIST_HOME.z);
     // ROLL AROUND THE FOREARM, then tilt. The previous version used
     // lookAt(position * 4), and the position carries a Z of 0.115 along
@@ -216,7 +249,10 @@ export class WristDisplay {
     // comes out identical to attachTo()'s home pose.
     this.group.rotation.set(0, 0, 0);
     this.group.rotateZ(-a);
-    this.group.rotateX(WRIST_HOME.tilt + TILTS[this.calTilt]);
+    // FLAT_TILT, not WRIST_HOME.tilt: the home already has a tilt baked
+    // into it, so adding the dial's tilt on top would double it and 1C
+    // would not be the place attachTo() puts the display.
+    this.group.rotateX(FLAT_TILT + TILTS[this.calTilt]);
     this._key = '';
     return this.label();
   }

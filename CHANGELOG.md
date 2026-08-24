@@ -1,5 +1,70 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.22.2 - 2026-08-25 - the same bug, mirrored onto the other hand
+
+A second critic pass on v0.22.1. It confirmed three of Ola's five
+complaints were genuinely fixed, and found that I had moved one bug rather
+than removed it.
+
+**The right grip at the hip stowed the pistol instead of reloading.** The
+grab radius had been widened to 0.34 m to compensate for the holster being
+in the wrong PLACE. The place got fixed and the compensation stayed, so
+the bug that had just been removed from the left hand appeared on the
+right, where it is worse: the left grip is mines and wall repair, but the
+right grip is the RELOAD. Lowering the gun and squeezing is how everyone
+reloads, and it would have stowed the weapon instead, mid-wave, leaving
+him unarmed in front of a horde.
+
+No probe could see it. The holster seam teleports the hand onto the
+holster before measuring, so any radius passes.
+
+**And no radius can fix it**, which is the actual lesson. A holster sits
+at the hip and a relaxed arm hangs at the hip: about 18 cm apart. Any
+radius big enough to find by feel also catches the reload. So the
+distinction is the HOLD, not the distance: a quick squeeze at the hip
+reloads exactly as it does anywhere else, and holding for a third of a
+second stows or draws. That is the same hold-to-act vocabulary the wall
+repair and the door already use. The new test squeezes with the hand
+directly on the holster and requires the ammunition to go up.
+
+Also from the same pass:
+
+- **The status row was about to report the wrong coordinate.** The display
+  starts at the orientation the class calls 1A, but the default tilt index
+  was 2, so `label()` said "1C". That label was added to the debug menu
+  specifically so Ola could read it out loud. The first press of "change
+  the ANGLE" also jumped A straight to D.
+- **The bracelet still used the collapsed maths** the calibration ring had
+  just been rid of, so the dial on the arm and the display it drives
+  disagreed about direction.
+- **`debugWristFrame` compared the wrong hand's gun**, and only agreed
+  because the test poses both controllers identically. It takes the weapon
+  on the same arm now.
+- **The paint check stalled the most expensive frame of the whole
+  feature.** `readPixels` is a synchronous GPU stall of several
+  milliseconds against a 13.9 ms budget, and it was running on the frame
+  that also places the panel, walks the level to hide ceilings, and does
+  the first map render. It happens two passes later now. It also sampled 8
+  pixels from the exact centre, which on a dark underground level could
+  read as blank and cover a WORKING map with an error message; it samples
+  32 and the panel clears to a colour, so black now means one thing only.
+- **A sleeping controller could let you holster the flashlight**, because
+  `disconnected` cleared the hand assignment without re-dressing.
+- **Hand tracking was in `optionalFeatures`** while nothing supports it,
+  and it breaks the wrist mount: with tracked hands the target ray comes
+  from a finger rather than being rigid to the grip, so the display would
+  swim along the forearm.
+
+**The default angle is now C**, tipped 60 degrees back toward the eyes
+rather than lying flat. Flat is what a watch does, but reading a flat face
+means holding the forearm level and bending your neck at it. Noted in
+OPEN-QUESTIONS.md; the dial reaches every other angle in two presses.
+
+One more small lesson: my first version of the new "is it tipped toward
+your eyes" assertion had the sign backwards and went red for the correct
+behaviour. An assertion written from a guess about a sign is the same
+mistake as code written from a guess about a sign.
+
 ## v0.22.1 - 2026-08-24 - v0.22.0 claimed four fixes and shipped two
 
 Ola asked for critics: "använd critics för att kontrollera att fucking

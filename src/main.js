@@ -4061,6 +4061,13 @@ window.__zhr = {
   },
   // The holster and the strategy view, as a player would meet them.
   debugReachHolster: () => (vrInput ? vrInput.debugReachHolster() : null),
+  // Squeeze with the hand at a given place, so "what does the grip do
+  // when my arm is by my side" is a question a test can ask.
+  debugSqueezeAt: (hand, x, y, z, hold = 0) => (vrInput ? vrInput.debugSqueezeAt(hand, x, y, z, hold) : null),
+  // Where the holster is, in the rig's own space, so a probe can put a
+  // hand near it without putting it exactly on it.
+  debugHolsterLocal: () => (vrInput && vrInput.holster
+    ? vrInput.holster.position.toArray().map((n) => +n.toFixed(3)) : null),
   // The wrist display measured against the WEAPON's frame, which is the
   // one known to be right because Ola can see the gun and aim it.
   // Re-dress the VR hands after a weapon change, the way the game does.
@@ -4117,9 +4124,15 @@ window.__zhr = {
     if (!frame) return null;
     frame.updateWorldMatrix(true, true);
     g.updateWorldMatrix(true, false);
-    // The gun the player can actually see, in the hand that has one.
-    const gun = vrInput.gripWeapons.find((h) => h.userData.shown !== 'light')
-      || vrInput.gripWeapons[0];
+    // THE GUN ON THE SAME ARM. Taking "the first armed hand" compared a
+    // display on the LEFT forearm against a weapon in the RIGHT hand,
+    // which only agreed because the test poses both controllers
+    // identically. On a real device the hands point different ways and
+    // the number means nothing, and it would go red for a non-bug the
+    // moment anyone posed them differently.
+    const armGrip = frame.parent;
+    const gi = vrInput.grips.indexOf(armGrip);
+    const gun = (gi >= 0 && vrInput.gripWeapons[gi]) || vrInput.gripWeapons[0];
     if (!gun) return null;
     gun.updateWorldMatrix(true, false);
     const gunUp = new THREE.Vector3(0, 1, 0)

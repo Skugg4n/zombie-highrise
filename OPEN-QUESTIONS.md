@@ -46,3 +46,26 @@ reversible; say the word and I change it.
    barrels always did. Now it does, inside 70% of the blast radius, which
    matches the barrel rule. Roughly 3 to 7 damage at close range, so it
    stings without being a death sentence.
+12. **The wrist display's default angle (v0.22.2):** Ola asked for it
+   "angled so a natural turn of the forearm brings it to the eyes", which
+   describes a watch: the face lies flat on the arm and you turn the whole
+   forearm to read it. But flat is 19.5 degrees from straight up, and
+   reading that means holding the forearm level in front of you and
+   bending your neck down at it, which is a worse movement than the one he
+   described. I have defaulted to angle C, which tips the face 60 degrees
+   back toward the eyes: you still turn the forearm, just less far. The
+   dial reaches A through E in a couple of presses if C is wrong.
+13. **Hand tracking is no longer requested (v0.22.2):** it was in
+   `optionalFeatures` while nothing in the game supports it. It also
+   breaks the wrist mount: with controllers the grip pose and the
+   target-ray pose are two fixed frames on one piece of plastic, so the
+   arm frame is rigid; with tracked hands the ray comes from a finger and
+   the display would swim along the forearm as you point. If hand
+   tracking is ever wanted, the arm frame needs locking to the grip plus a
+   constant sampled from the controllers.
+14. **Holstering is a HOLD (v0.22.2):** a quick squeeze at the hip
+   reloads, holding for a third of a second stows or draws. Proximity
+   alone cannot work: a holster sits at the hip and a relaxed arm hangs at
+   the hip, about 18 cm apart, so any radius large enough to find by feel
+   also catches the reload. The hold is the same vocabulary the wall
+   repair and the door already use.

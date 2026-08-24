@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeWeaponMesh, makeFlashlightMesh, makeUnderBarrelLight } from '../world/weapons3d.js';
-import { WristDisplay, WeaponAmmoTag, CalibrationCard } from '../world/wrist.js';
+import { WristDisplay, WeaponAmmoTag, CalibrationCard, DEFAULT_WRIST_TILT } from '../world/wrist.js';
 import { VrPanel } from '../world/vrpanel.js';
 
 // Quest touch controller gamepad button indices (xr-standard mapping):
@@ -21,6 +21,9 @@ const BTN_STICK = 3, BTN_AX = 4, BTN_BY = 5;
 
 // How long the gun must point at the floor before it reloads.
 const RELOAD_HOLD = 0.35;
+// Long enough that a reload squeeze at the hip never trips it, short
+// enough that stowing feels immediate.
+const HOLSTER_HOLD = 0.35;
 
 // Six buttons in the xr-standard layout, all released. Used only by the
 // test seam below.
@@ -129,14 +132,17 @@ export class VRInput {
         // runtime (`this.hands` is filled in by a `connected` event that
         // does not always fire) the gesture went to the wrong branch and
         // reloaded instead.
-        // ONLY THE GUN HAND USES THE HOLSTER. Checking either hand made
-        // the left grip's meaning depend on where it happened to be, and
-        // the left grip is the mine and the wall repair: standing at a
-        // damaged wall, squeezing to patch it, and having your pistol
-        // vanish instead is a worse bug than the one being fixed. Your
-        // off hand does not holster your gun.
+        // ONLY THE GUN HAND USES THE HOLSTER, and only on a HOLD.
+        //
+        // Your hip and your resting hand are in the same place, so being
+        // near the holster cannot mean "I meant the holster". A quick
+        // squeeze there still reloads, exactly as it does everywhere
+        // else; holding for a third of a second stows or draws. That is
+        // the same hold-to-act vocabulary the wall repair and the door
+        // already use, so it is a gesture the game has taught already.
         if (grip === this.gripFor('right') && this._handAtHolster(grip)) {
-          this.setHolstered(!this.holstered);
+          this._holsterHold = 0;
+          this._holsterFired = false;
         } else if (this.gripFor('left') === grip) {
           // Left squeeze is contextual: HOLD it to patch the base wall if
           // you are standing at a damaged bit, otherwise it drops a mine.
@@ -153,6 +159,12 @@ export class VRInput {
       });
       controller.addEventListener('squeezeend', () => {
         if (this.gripFor('left') === grip) ctx.actions.repairHold(false);
+        // Let go before the hold completed: you meant the reload.
+        if (this._holsterHold !== null && !this._holsterFired) {
+          ctx.actions.reload();
+        }
+        this._holsterHold = null;
+        this._holsterFired = false;
       });
       // THE ARM FRAME. Same alignment as the weapon holder, and nothing
       // else on top of it.
@@ -191,6 +203,11 @@ export class VRInput {
       });
       controller.addEventListener('disconnected', () => {
         for (const h of ['left', 'right']) if (this.hands[h] === grip) this.hands[h] = null;
+        // Re-dress, or the hand assignment and what each hand is HOLDING
+        // fall out of step: a controller going to sleep would move
+        // gripFor('right') to the other hand while the meshes stayed put,
+        // and you could end up holstering the flashlight.
+        this._dressHands();
       });
       this.controllers.push(controller);
     }
@@ -202,7 +219,14 @@ export class VRInput {
       }
       navigator.xr.requestSession('immersive-vr', {
         requiredFeatures: ['local-floor'],
-        optionalFeatures: ['bounded-floor', 'hand-tracking'],
+        // NO HAND TRACKING. Nothing in the game supports it (no hand
+        // meshes, no pinch gestures), and asking for it half-enables
+        // something that breaks the wrist mount: with controllers the
+        // grip and target-ray poses are two fixed frames on one piece of
+        // plastic, so the arm frame is rigid, but with tracked hands the
+        // ray is derived from a finger and the display would swim along
+        // the forearm as he points. Noted in OPEN-QUESTIONS.md.
+        optionalFeatures: ['bounded-floor'],
       }).then((session) => {
         renderer.xr.setSession(session);
       }).catch((err) => {
@@ -386,7 +410,7 @@ export class VRInput {
     // 1A is the derived home, not 1C. The reset went to the middle of the
     // tilt list, which is a different place from the one the code calls
     // "the default" everywhere else.
-    const label = this.wrist.setCalibration(0, 0);
+    const label = this.wrist.setCalibration(0, DEFAULT_WRIST_TILT);
     const card = this.getCalCard();
     card.show(true);
     card.draw(this.wrist.calPip, this.wrist.calTilt, label);
@@ -627,11 +651,30 @@ export class VRInput {
     if (!this.holster) return false;
     const a = grip.getWorldPosition(new THREE.Vector3());
     const b = this.holster.getWorldPosition(new THREE.Vector3());
-    // Generous: you reach for your own hip by feel, without looking, and
-    // a target you have to hit precisely while blind is a target you
-    // will conclude does not work. 0.26 was too mean even when the
-    // holster was in the right place.
-    return a.distanceTo(b) < 0.34;
+    // 0.22, and PROXIMITY IS NOT THE WHOLE GESTURE (see setHolstered's
+    // caller). A holster sits at the hip and a relaxed arm hangs at the
+    // hip: they are about 0.18 m apart, so no radius can tell them
+    // apart. Widening this to 0.34 to compensate for the holster being
+    // in the wrong place mirrored onto the right hand exactly the bug
+    // that had just been removed from the left, and the right grip is
+    // the RELOAD. Lowering the gun and squeezing is how everyone
+    // reloads; it would have stowed the pistol instead, mid-wave.
+    //
+    // The distinction is the HOLD, not the distance.
+    return a.distanceTo(b) < 0.22;
+  }
+
+  // The hold that separates "stow this" from "reload this". Fires while
+  // the grip is still held, because a gesture that only resolves when you
+  // let go feels like it did not work.
+  _stepHolsterHold(dt) {
+    if (this._holsterHold === null || this._holsterHold === undefined) return;
+    if (this._holsterFired) return;
+    this._holsterHold += dt;
+    if (this._holsterHold >= HOLSTER_HOLD) {
+      this._holsterFired = true;
+      this.setHolstered(!this.holstered);
+    }
   }
 
   // Light it up when a hand is close enough to use it, so "am I near it"
@@ -661,6 +704,10 @@ export class VRInput {
     const i = this.grips.indexOf(grip);
     const holder = this.gripWeapons[i];
     if (!holder) return this.holstered;
+    // You cannot holster a torch. Without this, a hand reassignment
+    // (which a sleeping controller can cause) could put the flashlight in
+    // the holster and leave the gun in mid-air.
+    if (!this.holstered && holder.userData.shown === 'light') return this.holstered;
     this.holstered = on;
     if (on) {
       this.holsterSlot.add(holder);
@@ -687,6 +734,30 @@ export class VRInput {
 
   // TEST SEAM: the holster, as a player experiences it. Move the hand to
   // the hip and squeeze: the same listener a real controller calls.
+  // TEST SEAM: squeeze the gun hand's grip with the arm WHERE IT IS,
+  // rather than teleported onto the holster. This is the gesture that the
+  // holster check hijacked, and no probe could see it because the only
+  // holster seam moved the hand onto the target first.
+  // holdSeconds: how long the grip is held before letting go. The
+  // holster is a HOLD now, so a seam that only presses and releases can
+  // only ever test the quick squeeze.
+  debugSqueezeAt(hand, x, y, z, holdSeconds = 0) {
+    const grip = this.gripFor(hand);
+    const i = this.grips.indexOf(grip);
+    const controller = this.controllers[i];
+    if (!controller) return null;
+    grip.position.set(x, y, z);
+    grip.updateMatrix();
+    grip.updateWorldMatrix(true, false);
+    const atHolster = this._handAtHolster(grip);
+    controller.dispatchEvent({ type: 'squeezestart' });
+    // Run the hold forward in real frames' worth of time.
+    let t = 0;
+    while (t < holdSeconds) { this._stepHolsterHold(1 / 60); t += 1 / 60; }
+    controller.dispatchEvent({ type: 'squeezeend' });
+    return { atHolster, holstered: this.holstered, held: holdSeconds };
+  }
+
   debugReachHolster() {
     this._buildHolster();
     const grip = this.gripFor('right');
@@ -706,6 +777,10 @@ export class VRInput {
     grip.updateWorldMatrix(true, false);
     const near = this._handAtHolster(grip);
     controller.dispatchEvent({ type: 'squeezestart' });
+    // HOLD it: a quick squeeze at the hip is the reload now, so a seam
+    // that only taps would be testing the wrong gesture.
+    let t = 0;
+    while (t < 0.5) { this._stepHolsterHold(1 / 60); t += 1 / 60; }
     controller.dispatchEvent({ type: 'squeezeend' });
     return { near, holstered: this.holstered, visible: !!this.holster.visible };
   }
@@ -1062,6 +1137,7 @@ export class VRInput {
     this._stepRecoil(dt);
     this._reloadGesture(dt);
     this._placeHolster();
+    this._stepHolsterHold(dt);
     this._highlightHolster();
     this._strategyGesture(dt);
     const stationary = this.ctx.getLocoMode() === 'stationary';

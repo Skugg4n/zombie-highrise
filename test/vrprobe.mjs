@@ -82,9 +82,23 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   check(f && f.towardElbow > 0.05,
     'and back toward the elbow, not out over the hand',
     f ? `local z ${f.towardElbow}` : '');
-  check(f && f.agreesWithGunUp > 0.7,
-    'and its face points the same way as the top of the gun',
-    f ? `dot ${f.agreesWithGunUp}, want > 0.7` : '');
+  // The default angle tips the face 60 degrees back toward the eyes, so
+  // the dot against the gun's straight-up is 0.5, not 1. What matters is
+  // that it is on the UP side of the arm at all: mounted on the grip
+  // instead of the weapon's frame it comes out at 0.05, and under the
+  // arm it goes negative.
+  check(f && f.agreesWithGunUp > 0.35,
+    'and its face is on the same side of the arm as the top of the gun',
+    f ? `dot ${f.agreesWithGunUp}, want > 0.35` : '');
+  // NEGATIVE is right. The face is tipped BACK toward the elbow, which
+  // is where your eyes are when you raise your forearm, so its normal
+  // points away from the barrel. My first version of this asserted the
+  // opposite and went red for the correct behaviour, which is its own
+  // small lesson: an assertion written from a guess about the sign is
+  // the same mistake as the code written from a guess about the sign.
+  check(f && f.alongBarrel < -0.3,
+    'and it is tipped back toward your eyes, not forward down the barrel',
+    f ? `dot with the barrel ${f.alongBarrel}, want clearly negative` : '');
 }
 
 // ---- 2b. The torch has a switch, and it is not on your face ----
@@ -335,12 +349,12 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   check(h.reach && h.reach.near === true,
     'the hand can reach it', JSON.stringify(h.reach));
   check(h.after.stowed === true && h.after.onHip === true,
-    'squeezing at the hip stows the weapon, and it is visibly on the hip',
+    'holding at the hip stows the weapon, and it is visibly on the hip',
     JSON.stringify(h.after));
   check(h.fired && h.fired.armed === false,
     'a stowed weapon does not fire');
   check(h.drawn.stowed === false && h.drawn.onHip === false,
-    'squeezing there again draws it back', JSON.stringify(h.drawn));
+    'holding there again draws it back', JSON.stringify(h.drawn));
 }
 
 // ---- 2e. The reload READS as a reload ----
@@ -450,6 +464,59 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   check(moved && moved.horizontal < 0.4,
     'and it comes with you when you move',
     moved ? `${moved.horizontal} m from the head after walking 8 m` : '');
+
+  // THE GESTURE IT MUST NOT STEAL.
+  //
+  // The right grip is the reload, and lowering the gun and squeezing is
+  // the most natural way anyone does it. The holster check runs first, so
+  // a grab radius that reaches a hand hanging by its owner's side turns
+  // the reload into "your pistol vanishes", mid-wave. This exact bug was
+  // just removed from the LEFT hand and then inherited on the right,
+  // because the radius had been widened to compensate for the holster
+  // being in the wrong place to begin with.
+  //
+  // No existing probe could see it: the holster seam teleports the hand
+  // ONTO the holster before measuring, so any radius passes.
+  // A relaxed arm hangs at hip height, so it is genuinely near the
+  // holster and no radius can tell them apart. The distinction is the
+  // HOLD: a quick squeeze reloads wherever you are, a held one at the hip
+  // stows. This checks the quick squeeze right ON the holster, which is
+  // the hardest case for the rule.
+  const quick = await page.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugRefill();
+    D.debugFireOnce(true);
+    await new Promise((r) => setTimeout(r, 60));
+    const h = D.debugHolsterLocal();
+    const ammoBefore = D.ammo();
+    const r = D.debugSqueezeAt('right', h[0], h[1], h[2], 0.10);
+    // A pistol reload is 1.4 s. 900 ms measured the middle of it.
+    await new Promise((r2) => setTimeout(r2, 1800));
+    return { holsterAt: h, ...r, ammoBefore, ammoAfter: D.ammo() };
+  });
+  check(quick && quick.atHolster === true,
+    'the hand is right on the holster for this test', JSON.stringify(quick.holsterAt));
+  check(quick && quick.holstered === false,
+    'a QUICK squeeze at the hip does not make your pistol vanish',
+    JSON.stringify(quick));
+  check(quick && quick.ammoAfter > quick.ammoBefore,
+    'it reloads, which is what the right grip has always meant',
+    `${quick && quick.ammoBefore} -> ${quick && quick.ammoAfter} rounds`);
+
+  // And holding there stows it.
+  const held = await page.evaluate(() => {
+    const D = window.__zhr;
+    const h = D.debugHolsterLocal();
+    return D.debugSqueezeAt('right', h[0], h[1], h[2], 0.5);
+  });
+  check(held && held.holstered === true,
+    'while HOLDING at the hip stows the weapon', JSON.stringify(held));
+  const drawn = await page.evaluate(() => {
+    const D = window.__zhr;
+    const h = D.debugHolsterLocal();
+    return D.debugSqueezeAt('right', h[0], h[1], h[2], 0.5);
+  });
+  check(drawn && drawn.holstered === false, 'and holding again draws it back');
 }
 
 // ---- 3. Manual reload works in VR (regression guard) ----

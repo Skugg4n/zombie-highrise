@@ -128,7 +128,12 @@ export class StrategyView {
   // read back off the render target.
   _hasContent() {
     try {
-      const n = 8;
+      // 32, not 8. Eight pixels from the exact centre of a dark
+      // underground level, with the ceilings hidden and the fog off,
+      // can genuinely all be under the threshold, and a false negative
+      // here covers a WORKING map with a full-panel error message, on
+      // exactly the levels where it is most needed.
+      const n = 32;
       const buf = new Uint8Array(n * n * 4);
       this.renderer.readRenderTargetPixels(this.rt,
         (this.rt.width - n) / 2, (this.rt.height - n) / 2, n, n, buf);
@@ -146,8 +151,11 @@ export class StrategyView {
   show(camera) {
     this.placeFor(camera);
     this.open = true;
-    this.painted = false;
-    this._checkedPaint = false;
+    // Assume it works until proven otherwise. The error state is for a
+    // panel that is genuinely blank, and showing it for the first three
+    // passes of every open would be its own bug.
+    this.painted = true;
+    this._passes = 0;
     this.group.visible = true;
     this._key = '';
     this._mapT = 99;                     // force a map render this frame
@@ -187,8 +195,16 @@ export class StrategyView {
     this.group.visible = false;
     this.renderer.xr.enabled = false;
     this.renderer.setRenderTarget(this.rt);
+    // Clear to a colour, not to black. With a black clear, "the map did
+    // not render" and "the map rendered a dark underground level" look
+    // identical, and the emptiness check cannot tell them apart. Against
+    // this ground, black means one thing only: nothing was drawn.
+    const prevClear = this.renderer.getClearColor(new THREE.Color());
+    const prevAlpha = this.renderer.getClearAlpha();
+    this.renderer.setClearColor(0x0d1a22, 1);
     this.renderer.clear();
     this.renderer.render(scene, mapCam);
+    this.renderer.setClearColor(prevClear, prevAlpha);
     this.renderer.setRenderTarget(prevTarget);
     this.renderer.xr.enabled = wasXr;
     this.group.visible = true;
@@ -197,10 +213,15 @@ export class StrategyView {
     // appear in the one case it was written for. Checked once, on the
     // first pass after opening, because reading pixels back is a stall
     // and doing it ten times a second is not free.
-    if (!this._checkedPaint) {
-      this._checkedPaint = true;
-      this.painted = this._hasContent();
-    }
+    // Checked on the THIRD pass, not the first. readPixels is a synchronous
+    // stall of several milliseconds against a 13.9 ms budget at 72 Hz, and
+    // the opening frame is already the most expensive one there is: it
+    // places the panel, walks the whole level to hide ceilings, and does
+    // the first full map render with its own shadow pass. Putting the
+    // stall there would hitch every time the map unfolds. Two passes
+    // later is 200 ms, and 200 ms only matters if the map is fine.
+    this._passes++;
+    if (this._passes === 3) this.painted = this._hasContent();
     return true;
   }
 

@@ -12,7 +12,10 @@ wrong, say which and I will not treat it as a matter of taste again.
 **The wrist display.** It was two sign errors, not ergonomics: it was
 below the arm and facing down. It is derived from the gun's own axes now.
 
-- [ ] It sits on TOP of your forearm, like a watch, facing up.
+- [ ] It sits on TOP of your forearm, tipped back toward your eyes, so a
+      modest turn of the forearm brings it into view. It starts at
+      position 1C. If flat-like-a-watch is what you wanted, step the
+      ANGLE back to A.
 - [ ] Raising your forearm naturally brings it to your eyes.
 - [ ] If it is still off, open the debug menu (Y). A card now floats in
       FRONT OF YOUR FACE with twelve numbers in a ring and five angle
@@ -28,13 +31,17 @@ below the arm and facing down. It is derived from the gun's own axes now.
 - [ ] It should NOT open by itself while you are shooting.
 - [ ] Y still cycles the drone payload while it is open.
 
-**The holster.**
+**The holster.** Note the change: it is a HOLD now.
 
-- [ ] The loop is beside your right hip and comes with you when you walk.
-      It used to sit where the level started.
-- [ ] It LIGHTS UP when your hand is close enough to use it.
-- [ ] Squeeze there to stow the pistol, squeeze there again to draw.
-      Squeeze anywhere else and you still reload.
+- [ ] The loop is beside your RIGHT hip and comes with you when you walk.
+      It was on the left hip and behind you, which is why you could not
+      find it.
+- [ ] It LIGHTS UP when your gun hand is close enough to use it.
+- [ ] HOLD the right grip there for about a third of a second to stow the
+      pistol. Hold again to draw it.
+- [ ] A QUICK squeeze there must still RELOAD. This is the important one:
+      a holster and a resting hand are in the same place, so if a quick
+      squeeze stows instead of reloading, say so immediately.
 
 **Two pistols.**
 
