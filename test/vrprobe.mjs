@@ -197,6 +197,43 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   // is a fair question with a bad answer.
   await dark.screenshot({ path: 'test-artifacts/strategy-dark-level.png' });
   await dark.evaluate(() => window.__zhr.debugStrategyOpen(false));
+
+  // ---- NOSE AGAINST A WALL, where walls are actually TALL. ----
+  // The panel wants 1.05 m of room. Placed blindly with your face near an
+  // underground wall it spawns inside the wall, invisible with depth
+  // testing on, while still owning the trigger: "I looked at my watch
+  // and now the gun does not fire" with nothing on screen to explain.
+  // The distance is clamped to the free space, and under half a metre
+  // the panel draws over the wall instead of vanishing.
+  //
+  // Tested underground on purpose: the first version tried it against
+  // floor 1's base wall, which is LOW so you can shoot over it, and the
+  // panel at eye height is legitimately visible above it. The trap only
+  // exists where walls are taller than your eyes.
+  {
+    const wall = await dark.evaluate(async () => {
+      const D = window.__zhr;
+      const b = D.debugPlayBounds();
+      const me0 = D.playerPos();
+      D.debugTeleport(b.minX + 0.7, me0[2]);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const me = D.playerPos();
+      D.debugLook(b.minX - 2, me[2]);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      D.debugStrategyOpen(true);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return { size: D.debugStrategySize(), st: D.debugStrategy(),
+        wallDist: +(me[0] - b.minX).toFixed(2) };
+    });
+    check(wall.size && wall.size.dist < 1.0,
+      'facing an underground wall, the panel does not spawn at full distance inside it',
+      wall.size ? `placed at ${wall.size.dist} m, wall about ${wall.wallDist} m away` : '');
+    check(wall.st && (wall.st.xray === true
+      || (wall.size && wall.size.dist <= wall.wallDist)),
+      'and it is either in front of the wall or drawn over it, never invisible',
+      JSON.stringify({ xray: wall.st && wall.st.xray, dist: wall.size && wall.size.dist, wallDist: wall.wallDist }));
+    await dark.evaluate(() => window.__zhr.debugStrategyOpen(false));
+  }
   await dark.close();
 }
 
@@ -296,6 +333,14 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   check(pix && pix.xrRestored === true,
     'and the pass puts the headset renderer back the way it found it',
     pix ? `xr.enabled ${pix.xrRestored}` : '');
+  // AND NOT BLOWN OUT EITHER. This page is floor 1, daylight. Render
+  // target passes skip tone mapping, so the diagram light that makes a
+  // dark level readable would clip a sunlit one to a whiteboard with
+  // dots on it. The light scales with the level's darkness; this is the
+  // ceiling that keeps it that way.
+  check(pix && pix.meanBrightness < 230,
+    'the DAYLIGHT map is not clipped to white',
+    pix ? `mean ${pix.meanBrightness}, ceiling 230` : '');
   await page.evaluate(() => window.__zhr.debugStrategyOpen(false));
 
   // ---- THE WAY OUT. Ola: "den går inte att ta bort igen! Så man måste

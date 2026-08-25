@@ -75,6 +75,7 @@ export class StrategyView {
         toneMapped: false,
       }));
     back.renderOrder = 10;
+    this.back = back;
     this.group.add(back);
 
     // The map itself.
@@ -139,32 +140,51 @@ export class StrategyView {
   // display that triggered it. Now it hangs ahead at eye level, so the
   // wrist stays visible below it and the two are never in the same
   // sightline.
-  placeFor(camera) {
+  placeFor(camera, dist = PANEL_DIST) {
     const p = camera.getWorldPosition(new THREE.Vector3());
     const fwd = camera.getWorldDirection(new THREE.Vector3());
     fwd.y = 0;
     if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
     fwd.normalize();
-    this.group.position.copy(p).addScaledVector(fwd, PANEL_DIST);
+    this.group.position.copy(p).addScaledVector(fwd, dist);
     this.group.position.y = p.y - 0.06;
     this.group.lookAt(p.x, p.y, p.z);
+  }
+
+  // X-RAY MODE: depth testing off, drawn over the world. The fallback for
+  // opening the map with your nose against a wall. With depth ON and no
+  // room in front of you, the panel spawns inside the wall and is
+  // completely invisible while it still OWNS THE TRIGGER: from the
+  // player's chair that is "I looked at my watch and now the gun does not
+  // fire and nothing explains why", which is the quiet cousin of the
+  // black-map trap. Better a panel over the wall than a haunted trigger.
+  setXray(on) {
+    this.xray = !!on;
+    for (const m of [this.back, this.mapMesh, this.overlay]) {
+      m.material.depthTest = !on;
+      m.renderOrder = on ? 990 + m.renderOrder % 10 : 10 + m.renderOrder % 10;
+    }
   }
 
   // Does the panel have anything on it? A small sample from the middle,
   // read back off the render target.
   _hasContent() {
     try {
-      // 32, not 8. Eight pixels from the exact centre of a dark
-      // underground level, with the ceilings hidden and the fog off,
-      // can genuinely all be under the threshold, and a false negative
-      // here covers a WORKING map with a full-panel error message, on
-      // exactly the levels where it is most needed.
+      // 32 pixels, compared against the CLEAR COLOUR, not against a
+      // brightness threshold. The previous version asked "is anything
+      // brighter than 12" while the clear colour itself averages 24, so
+      // in exactly the case this guard exists for, a pass that cleared
+      // and drew nothing, it answered "content". A safety net with the
+      // hole under the load is worse than none, because it reassures.
+      // Content now means: some pixel DIFFERS from the ground colour.
       const n = 32;
       const buf = new Uint8Array(n * n * 4);
       this.renderer.readRenderTargetPixels(this.rt,
         (this.rt.width - n) / 2, (this.rt.height - n) / 2, n, n, buf);
+      const cr = 0x0d, cg = 0x1a, cb = 0x22;   // must match renderMap's clear
       for (let i = 0; i < buf.length; i += 4) {
-        if ((buf[i] + buf[i + 1] + buf[i + 2]) / 3 > 12) return true;
+        if (Math.abs(buf[i] - cr) > 10 || Math.abs(buf[i + 1] - cg) > 10
+          || Math.abs(buf[i + 2] - cb) > 10) return true;
       }
       return false;
     } catch {
@@ -174,8 +194,9 @@ export class StrategyView {
     }
   }
 
-  show(camera) {
-    this.placeFor(camera);
+  show(camera, dist = PANEL_DIST, xray = false) {
+    this.placeFor(camera, dist);
+    this.setXray(xray);
     this.open = true;
     // Assume it works until proven otherwise. The error state is for a
     // panel that is genuinely blank, and showing it for the first three

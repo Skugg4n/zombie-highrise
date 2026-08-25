@@ -188,14 +188,20 @@ export class WristDisplay {
     if (this.bracelet) return;
     const g = new THREE.Group();
     const ringR = 0.062;
+    this.braceletPips = [];
     for (let i = 0; i < 12; i++) {
       const a = (i / 12) * Math.PI * 2;
+      // No pip is special at build time. The old amber highlight on pip 1
+      // was a leftover from when 1 was home; home is 10 now, and a baked
+      // highlight is a second source of truth waiting to disagree. The
+      // CURRENT pip is marked live by _markBracelet instead.
       const pip = new THREE.Mesh(
         new THREE.PlaneGeometry(0.03, 0.022),
         new THREE.MeshBasicMaterial({
-          map: glyphTexture(String(i + 1), i === 0 ? '#e0a33c' : '#e8e4da'),
+          map: glyphTexture(String(i + 1), '#e8e4da'),
           transparent: true, depthTest: false, toneMapped: false,
         }));
+      this.braceletPips.push(pip);
       // Around the arm's long axis, which is Z in grip space.
       pip.position.set(Math.sin(a) * ringR, Math.cos(a) * ringR, 0.10);
       // Rolled about the forearm axis, the same way setCalibration does
@@ -209,6 +215,7 @@ export class WristDisplay {
       pip.renderOrder = 998;
       g.add(pip);
     }
+    this._markBracelet();
     for (let i = 0; i < TILTS.length; i++) {
       const mark = new THREE.Mesh(
         new THREE.PlaneGeometry(0.026, 0.026),
@@ -255,12 +262,23 @@ export class WristDisplay {
     // into it, so adding the dial's tilt on top would double it and 1C
     // would not be the place attachTo() puts the display.
     this.group.rotateX(FLAT_TILT + TILTS[this.calTilt]);
+    this._markBracelet();
     this._key = '';
     return this.label();
   }
 
   label() {
     return `${this.calPip + 1}${'ABCDE'[this.calTilt]}`;
+  }
+
+  // The lit pip on the bracelet is the one you are AT. Scale is the cue,
+  // because swapping textures per step would be twelve canvases for a
+  // highlight.
+  _markBracelet() {
+    if (!this.braceletPips) return;
+    for (let i = 0; i < this.braceletPips.length; i++) {
+      this.braceletPips[i].scale.setScalar(i === this.calPip ? 1.6 : 1.0);
+    }
   }
 
   showBracelet(on) {

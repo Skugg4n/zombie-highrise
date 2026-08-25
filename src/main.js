@@ -2005,7 +2005,36 @@ function toggleStrategy(on) {
     mapMarkers.visible = true;
     strategyTarget = null;
     s.target = null;
-    s.show(camera);
+    // HOW MUCH ROOM IS IN FRONT OF YOU. The panel wants to hang 1.05 m
+    // ahead, and on the underground corridors you are often closer to a
+    // wall than that: placed blindly it spawns INSIDE the wall and, with
+    // depth testing on, is completely invisible while still owning the
+    // trigger. March along the heading through the same colliders the
+    // player collides with, clamp the distance to the free space, and if
+    // there is not even half a metre, draw the panel over the wall
+    // instead (x-ray) rather than ever letting it vanish.
+    const eyeP = camera.getWorldPosition(new THREE.Vector3());
+    const fwdP = camera.getWorldDirection(new THREE.Vector3());
+    fwdP.y = 0;
+    if (fwdP.lengthSq() < 1e-6) fwdP.set(0, 0, -1);
+    fwdP.normalize();
+    const solids = blockingFor(level, controller.pos.y);
+    let free = 1.05;
+    for (let t = 0.25; t <= 1.05; t += 0.05) {
+      const px = eyeP.x + fwdP.x * t, pz = eyeP.z + fwdP.z * t;
+      if (solids.some((c) => Math.abs(px - c.x) < c.hx && Math.abs(pz - c.z) < c.hz)) {
+        free = t - 0.2;
+        break;
+      }
+    }
+    const dist = Math.max(0.5, Math.min(1.05, free));
+    // The map is a DIAGRAM, so it gets diagram light, but how much
+    // depends on where you are: 5.0 makes an underground level readable,
+    // and the same 5.0 on a sunlit field would clip everything bright to
+    // white, because render-target passes skip tone mapping entirely.
+    // Daylight already lights its own map.
+    s.mapLight.intensity = level.lighting && level.lighting.dark ? 5.0 : 1.2;
+    s.show(camera, dist, free < 0.5);
     audio.play('wristping');
   } else {
     s.hide();
@@ -3692,6 +3721,13 @@ window.__zhr = {
   debugLook: (x, z) => {
     rig.yaw = Math.atan2(rig.group.position.x - x, rig.group.position.z - z);
     rig.pitch = 0;
+    // Applied to the rig NOW, not on the next frame. The flat frame loop
+    // copies rig.yaw onto the group every frame, but the VR path does
+    // not, so in a fake VR session this seam set a variable nobody read
+    // and the caller kept facing whatever it faced before: the wall test
+    // measured a player looking into open field while claiming to stare
+    // at a wall.
+    rig.group.rotation.y = rig.yaw;
   },
 
   // Foundation bug 3 check: feed the VR rig a grip pose rotated away from the
@@ -4193,6 +4229,7 @@ window.__zhr = {
     if (!strategy) return { open: false };
     return {
       open: strategy.open,
+      xray: !!strategy.xray,
       label: strategy.label,
       hint: strategy.hint,
       cursor: strategy.cursor ? [+strategy.cursor.u.toFixed(3), +strategy.cursor.v.toFixed(3)] : null,
@@ -4221,6 +4258,7 @@ window.__zhr = {
   // being ignored and the pass was drawing into the wrong buffer.
   // How big the panel is in the player's view, in degrees. "It fills
   // nearly the whole screen" is a claim about angle, not metres.
+  debugPlayBounds: () => (level.playBounds ? { ...level.playBounds } : null),
   debugStrategySize: () => {
     if (!strategy || !strategy.open) return null;
     const d = strategy.group.position.distanceTo(camera.getWorldPosition(new THREE.Vector3()));
@@ -4229,6 +4267,21 @@ window.__zhr = {
       wDeg: +(2 * Math.atan(0.31 / d) * 180 / Math.PI).toFixed(1),
       hDeg: +(2 * Math.atan(0.25 / d) * 180 / Math.PI).toFixed(1),
     };
+  },
+  // Diagnostic: what the panel-placement march actually sees ahead.
+  debugWallMarch: () => {
+    const eyeP = camera.getWorldPosition(new THREE.Vector3());
+    const fwdP = camera.getWorldDirection(new THREE.Vector3());
+    fwdP.y = 0; fwdP.normalize();
+    const solids = blockingFor(level, controller.pos.y);
+    const hits = [];
+    for (let t = 0.25; t <= 1.05; t += 0.05) {
+      const px = eyeP.x + fwdP.x * t, pz = eyeP.z + fwdP.z * t;
+      const hit = solids.find((c) => Math.abs(px - c.x) < c.hx && Math.abs(pz - c.z) < c.hz);
+      if (hit) hits.push({ t: +t.toFixed(2), c: { x: hit.x, z: hit.z, hx: hit.hx, hz: hit.hz } });
+    }
+    return { eye: [+eyeP.x.toFixed(2), +eyeP.z.toFixed(2)], fwd: [+fwdP.x.toFixed(2), +fwdP.z.toFixed(2)],
+      solids: solids.length, hits: hits.slice(0, 3) };
   },
   debugStrategyPixels: () => {
     if (!strategy || !strategy.open) return null;

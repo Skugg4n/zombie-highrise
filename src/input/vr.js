@@ -552,11 +552,21 @@ export class VRInput {
       let attending = look.dot(toPanel) >= 0.6;
       const w = this.wrist && this.wrist.group;
       if (!attending && w) {
+        // Same conditions as the OPEN gesture, including that the display
+        // faces you. Without the facing check, the back of the wrist
+        // counted as attention, and on a dark level the torch hand rides
+        // 25 to 35 degrees under the gaze all the time: the fold timer
+        // was half-disabled exactly where the map is used most, so the
+        // panel would linger long after he had gone back to playing.
         w.updateWorldMatrix(true, false);
         const at = w.getWorldPosition(_v4);
         const toWrist = at.sub(eye);
         const d = toWrist.length();
-        if (d > 0.12 && d < 0.85 && look.dot(toWrist.divideScalar(d)) > 0.86) attending = true;
+        if (d > 0.12 && d < 0.85) {
+          toWrist.divideScalar(d);
+          const facing = _v5.set(0, 0, 1).applyQuaternion(w.getWorldQuaternion(_q1));
+          if (look.dot(toWrist) > 0.86 && facing.dot(toWrist) < -0.45) attending = true;
+        }
       }
       this.awayT = attending ? 0 : this.awayT + dt;
       if (this.awayT > 0.8) { this.awayT = 0; acts.strategy(false); return; }

@@ -1,5 +1,54 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.23.1 - 2026-08-25 - the critic's pass over the sketch round
+
+The critic confirmed the direction of v0.23.0 (right axis per the sketch,
+verified maths, one code path) and found four real holes. All verified in
+the code before acting, all fixed:
+
+**The panel could spawn inside a wall, invisible, while owning the
+trigger.** placeFor hung the map 1.05 m ahead with no collision check, and
+underground corridors are often narrower than that. With depth testing on
+the panel was then completely invisible while `selectstart` still went to
+it instead of the gun: "I looked at my watch and now the pistol does not
+fire", the quiet cousin of the black-map trap. The opening now marches
+along the heading through the same colliders the player collides with and
+clamps the distance to the free space; under half a metre the panel draws
+over the wall (x-ray) instead of ever vanishing. Probed underground
+against a tall wall, and falsified: removing the clamp goes red.
+
+Finding the trap also surfaced two test-seam bugs: `debugLook` set yaw
+variables that only the flat frame loop applies, so in a fake VR session
+it did nothing and the wall test measured a player facing open field; and
+teleporting closer to a wall than the body's push-out radius shoves the
+player to the far side before the panel opens. The first wall test
+"passed" on floor 1 for a third reason: the base wall is LOW so you shoot
+over it, and a panel at eye height is legitimately visible above it. The
+trap only exists where walls are taller than your eyes, so that is where
+the test lives.
+
+**The empty-map guard was defeated by its own clear colour.** _hasContent
+asked "is any pixel brighter than 12" while the clear colour itself
+averages 24, so in exactly the case the guard exists for, a pass that
+cleared and drew nothing, it answered "content". It now compares samples
+against the clear colour: content means something DIFFERS from the
+ground.
+
+**The diagram light would have clipped the daylight map to white.**
+Render-target passes skip tone mapping (verified in the vendored build),
+so the ambient 5.0 that makes an underground map readable would push a
+sunlit field into linear clipping: a whiteboard with dots. The light now
+scales with the level's darkness (5.0 dark, 1.2 daylight), and the probe
+holds a ceiling on the daylight map (mean under 230) next to the floor on
+the dark one (over 80).
+
+**Two smaller ones:** the bracelet still highlighted pip 1 as home from
+the era when 1 WAS home; the current pip is now marked live, one source of
+truth. And the fold timer's attention check now requires the display to
+face you, same as the open gesture, so the torch hand riding just under
+your gaze on a dark level no longer keeps the panel open after you have
+gone back to playing.
+
 ## v0.23.0 - 2026-08-25 - the sketch ends the guessing, and the map becomes a map
 
 **The wrist display, with a drawing this time.** Ola drew it
