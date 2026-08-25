@@ -1,5 +1,52 @@
 # CHANGELOG - ZOMBIE HIGH RISE
 
+## v0.23.0 - 2026-08-25 - the sketch ends the guessing, and the map becomes a map
+
+**The wrist display, with a drawing this time.** Ola drew it
+(docs/sketches/wrist-side.md): the display sat on the PALM side of the
+wrist, it belongs along the arm on the BACK-OF-HAND side. The drawing
+localised my error exactly. I had derived "on top of the arm" as the
+weapon's +Y, which is UP when you aim, and the derivation was fine: the
+premise was wrong. When you hold a controller, the palm faces inward and
+the back of the hand faces OUTWARD, sideways. The dorsal side of the
+wrist, where every watch in the world sits, is the weapon frame's -X for
+the left arm, roughly perpendicular to the weapon's up. Right maths,
+wrong axis, three versions running.
+
+The home is dial position 10B now, and it is applied THROUGH the dial's
+own maths: attachTo() calls setCalibration() instead of carrying its own
+copy of the transform, so "where the display is" and "what the label
+says" are one computation. The probe asserts the sketch itself: on the
+back-of-hand side, facing out through it, tipped toward the eyes, and NOT
+up the way the gun points up, which was the old wrong guess and now goes
+red if it comes back.
+
+**The map was so dark you could only sense where things were.** Ola:
+"tittar du inte hur det ser ut?" No, was the honest answer: I measured
+it, and the measurement passed while the picture was murk. The map
+rendered the scene with the scene's own lighting, so on a dark level the
+map of the dark level was dark. The pass adds its own flat diagram light
+now, the same rule ?levelpreview=N already follows, and the intensity was
+set by LOOKING at the saved screenshot until it read as a plan drawing:
+light floor, walls, the chasm, the doors, the blips. The screenshot is
+regenerated on every probe run (test-artifacts/strategy-dark-level.png)
+so the number's honesty can keep being checked by eye, and the threshold
+sits above the value that had passed while the picture was still murky.
+
+**The map filled nearly the whole view and covered the wrist display.**
+0.92 m wide at 0.72 m is 65 degrees, hung at arm height, drawn with depth
+testing off so it painted over everything nearer, including the display
+that had just opened it. It is 33 x 27 degrees at eye level now, and
+depth-tested, so it behaves like an object in the world: raise your arm
+in front of it and your arm wins. The wrist sits below it, both visible
+at once, and glancing back down at the wrist no longer starts the fold
+timer, so comparing the two does not make the panel flap.
+
+Also: the phone repair check in interactprobe held for a fixed 1.1
+seconds and lost the race one run in three on a busy machine. It holds
+until the ring fills now. A flaky test teaches people to rerun failures,
+which is the end of trusting red.
+
 ## v0.22.2 - 2026-08-25 - the same bug, mirrored onto the other hand
 
 A second critic pass on v0.22.1. It confirmed three of Ola's five

@@ -4135,21 +4135,27 @@ window.__zhr = {
     const gun = (gi >= 0 && vrInput.gripWeapons[gi]) || vrInput.gripWeapons[0];
     if (!gun) return null;
     gun.updateWorldMatrix(true, false);
-    const gunUp = new THREE.Vector3(0, 1, 0)
-      .applyQuaternion(gun.getWorldQuaternion(new THREE.Quaternion()));
-    const gunBarrel = new THREE.Vector3(0, 0, -1)
-      .applyQuaternion(gun.getWorldQuaternion(new THREE.Quaternion()));
+    const gunQ = gun.getWorldQuaternion(new THREE.Quaternion());
+    const gunUp = new THREE.Vector3(0, 1, 0).applyQuaternion(gunQ);
+    const gunBarrel = new THREE.Vector3(0, 0, -1).applyQuaternion(gunQ);
+    // The BACK-OF-HAND direction for the left arm: the weapon frame's -X.
+    // Ola's sketch (docs/sketches/wrist-side.jpg) is the authority here:
+    // a watch sits on the dorsal side, which faces outward and sideways
+    // when you hold a controller, NOT up. "Up" was the previous wrong
+    // guess, derived correctly from the wrong premise.
+    const backOfHand = new THREE.Vector3(-1, 0, 0).applyQuaternion(gunQ);
     const normal = new THREE.Vector3(0, 0, 1)
       .applyQuaternion(g.getWorldQuaternion(new THREE.Quaternion()));
     const localPos = g.position.clone();
     return {
       pos: [+localPos.x.toFixed(3), +localPos.y.toFixed(3), +localPos.z.toFixed(3)],
-      // 1.0 = the display faces exactly the way the top of the gun does.
+      // 1.0 = the face points straight out through the back of the hand.
+      agreesWithBackOfHand: +normal.dot(backOfHand).toFixed(3),
       agreesWithGunUp: +normal.dot(gunUp).toFixed(3),
-      // Should be near 0: a watch face is not pointing down the barrel.
       alongBarrel: +normal.dot(gunBarrel).toFixed(3),
       towardElbow: +localPos.z.toFixed(3),
-      onTopOfArm: +localPos.y.toFixed(3),
+      // Positive = the dorsal side of the LEFT arm (local -X).
+      onBackOfHandSide: +(-localPos.x).toFixed(3),
     };
   },
   // Is the holster where a hip is, relative to the head?
@@ -4213,6 +4219,17 @@ window.__zhr = {
   // render target, which is the thing the player is looking at. Ola:
   // "den är HELT svart." Nothing in the code said so; the map camera was
   // being ignored and the pass was drawing into the wrong buffer.
+  // How big the panel is in the player's view, in degrees. "It fills
+  // nearly the whole screen" is a claim about angle, not metres.
+  debugStrategySize: () => {
+    if (!strategy || !strategy.open) return null;
+    const d = strategy.group.position.distanceTo(camera.getWorldPosition(new THREE.Vector3()));
+    return {
+      dist: +d.toFixed(2),
+      wDeg: +(2 * Math.atan(0.31 / d) * 180 / Math.PI).toFixed(1),
+      hDeg: +(2 * Math.atan(0.25 / d) * 180 / Math.PI).toFixed(1),
+    };
+  },
   debugStrategyPixels: () => {
     if (!strategy || !strategy.open) return null;
     const w = 24, h = 24;

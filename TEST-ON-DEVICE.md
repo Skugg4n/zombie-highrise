@@ -4,7 +4,33 @@ Live build: https://skugg4n.github.io/zombie-highrise/
 Always check the version tag (top-right corner) FIRST: Quest caches hard.
 Report breakage as "device + what you did + what you saw".
 
-## v0.22.0 - THE FOUR THINGS YOU REPORTED (START HERE)
+## v0.23.0 - YOUR SKETCH, APPLIED (START HERE)
+
+**The wrist display.** Per your drawing: along the arm on the
+back-of-hand side.
+
+- [ ] Hold the controller naturally and turn your forearm as if checking
+      a watch. The display should be on the handrygg side, readable with
+      that motion. It starts at dial position 10B.
+- [ ] If the angle is off, the debug menu (Y) steps it, the card in front
+      of you shows the dial, and the "wrist" row in the menu shows the
+      current coordinate. Tell me the two characters that work.
+
+**The map.**
+
+- [ ] Open it (look at the wrist half a second). It should be a BRIGHT
+      plan drawing now, even underground: light floor, walls, doors, the
+      chasm, blips. Not murk.
+- [ ] It should be a comfortable size ahead of you at eye level, NOT
+      filling the view.
+- [ ] Raise your arm in front of it: your arm should block it, and the
+      wrist display should be visible below it. It must not cover the
+      display any more.
+- [ ] Glancing down at the wrist while it is open must NOT close it.
+      Looking away somewhere else for a second closes it. A, B or X
+      closes it instantly.
+
+## v0.22.0 - THE FOUR THINGS YOU REPORTED
 
 Each of these is a thing you told me was broken. If any of them is still
 wrong, say which and I will not treat it as a matter of taste again.

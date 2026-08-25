@@ -76,29 +76,27 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   await page.evaluate(() => window.__zhr.debugVRAim(45));
   const f = await page.evaluate(() => window.__zhr.debugWristFrame());
   check(!!f, 'there is a wrist display to measure', JSON.stringify(f));
-  check(f && f.onTopOfArm > 0.01,
-    'it sits ON TOP of the forearm, not under the hand',
-    f ? `local y ${f.onTopOfArm}` : '');
+  // THE SKETCH IS THE SPEC (docs/sketches/wrist-side.jpg): the display
+  // sits along the arm on the BACK-OF-HAND side, "handryggens sida -
+  // ovansidan av armen". Two previous versions asserted "on top", which
+  // was a correct derivation from the wrong premise: the back of the
+  // hand faces OUTWARD when you hold a controller, roughly the weapon
+  // frame's -X for the left arm, perpendicular to the weapon's up.
+  check(f && f.onBackOfHandSide > 0.01,
+    'it sits on the BACK-OF-HAND side of the arm, per the sketch',
+    f ? `local -x ${f.onBackOfHandSide}` : '');
   check(f && f.towardElbow > 0.05,
     'and back toward the elbow, not out over the hand',
     f ? `local z ${f.towardElbow}` : '');
-  // The default angle tips the face 60 degrees back toward the eyes, so
-  // the dot against the gun's straight-up is 0.5, not 1. What matters is
-  // that it is on the UP side of the arm at all: mounted on the grip
-  // instead of the weapon's frame it comes out at 0.05, and under the
-  // arm it goes negative.
-  check(f && f.agreesWithGunUp > 0.35,
-    'and its face is on the same side of the arm as the top of the gun',
-    f ? `dot ${f.agreesWithGunUp}, want > 0.35` : '');
-  // NEGATIVE is right. The face is tipped BACK toward the elbow, which
-  // is where your eyes are when you raise your forearm, so its normal
-  // points away from the barrel. My first version of this asserted the
-  // opposite and went red for the correct behaviour, which is its own
-  // small lesson: an assertion written from a guess about the sign is
-  // the same mistake as the code written from a guess about the sign.
+  check(f && f.agreesWithBackOfHand > 0.5,
+    'and its face points out through the back of the hand',
+    f ? `dot ${f.agreesWithBackOfHand}, want > 0.5` : '');
+  check(f && Math.abs(f.agreesWithGunUp) < 0.5,
+    'and NOT up the way the gun points up, which was the old wrong guess',
+    f ? `dot with gun-up ${f.agreesWithGunUp}` : '');
   check(f && f.alongBarrel < -0.3,
     'and it is tipped back toward your eyes, not forward down the barrel',
-    f ? `dot with the barrel ${f.alongBarrel}, want clearly negative` : '');
+    f ? `dot with the barrel ${f.alongBarrel}` : '');
 }
 
 // ---- 2b. The torch has a switch, and it is not on your face ----
@@ -174,6 +172,31 @@ check(hands && hands.filter((h) => h === 'light').length === 1,
   check(beam.back.hand === true, 'and on again');
   check(beam.lit.head === false && beam.off.head === false,
     'still no headlamp on a dark level');
+
+  // THE MAP ON A DARK LEVEL, which is where Ola actually judged it:
+  // "den kartan är SÅ MÖRK så man ser NÄSTAN [ingenting]". A map lit by
+  // the level's own lighting is dark when the level is, so the pass adds
+  // its own flat diagram light. Measured where the complaint was made.
+  const darkMap = await dark.evaluate(async () => {
+    const D = window.__zhr;
+    D.debugStrategyOpen(true);
+    for (let i = 0; i < 40; i++) await new Promise((r) => requestAnimationFrame(r));
+    return { px: D.debugStrategyPixels(), size: D.debugStrategySize() };
+  });
+  // 80, not 45. At mean 74 the number passed while the screenshot still
+  // showed murk; at 103 it reads as a plan drawing. The threshold is set
+  // from looking at the picture, and the picture is saved on every run
+  // so a human can keep checking the number's honesty.
+  check(darkMap.px && darkMap.px.meanBrightness > 80,
+    'the map is READABLE even on a dark underground level',
+    darkMap.px ? `mean brightness ${darkMap.px.meanBrightness} of 255` : 'no pixels');
+  check(darkMap.size && darkMap.size.wDeg < 40,
+    'and it does not fill the whole view',
+    darkMap.size ? `${darkMap.size.wDeg} x ${darkMap.size.hDeg} degrees at ${darkMap.size.dist} m` : '');
+  // A picture for a person to look at, because "did you even look at it"
+  // is a fair question with a bad answer.
+  await dark.screenshot({ path: 'test-artifacts/strategy-dark-level.png' });
+  await dark.evaluate(() => window.__zhr.debugStrategyOpen(false));
   await dark.close();
 }
 

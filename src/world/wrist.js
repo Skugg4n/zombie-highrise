@@ -26,30 +26,37 @@ const PULSE_SECONDS = 1.4;              // how long an announcement plays
 // rotation back toward the eyes.
 const TILTS = [0, 0.35, 0.7, 1.05, 1.4];
 
-// The angle that puts the face flat on the forearm, like a watch lying on
-// the arm. Every calibration angle is this plus one of TILTS.
+// The angle that puts the face flat against the arm's surface. Every
+// calibration angle is this plus one of TILTS.
 const FLAT_TILT = -(Math.PI / 2 - 0.34);
-// And the one the display starts at. A watch lies flat and you rotate your
-// whole forearm to read it, which is what Ola asked for ("angled so a
-// natural turn of the forearm brings it to the eyes"). But flat is 19.5
-// degrees from straight up, and reading that means holding the forearm
-// level in front of you and bending your neck down at it, which is not
-// the watch movement, it is a worse one. C tips the face 60 degrees back
-// toward the eyes: you still turn the forearm, just less far.
+
+// WHERE A WATCH ACTUALLY SITS, from Ola's sketch
+// (docs/sketches/wrist-side.jpg), which finally ended the guessing.
 //
-// This is a judgement call between two readings of the same sentence, so
-// it is noted in OPEN-QUESTIONS.md and the dial reaches every other angle
-// in a couple of presses.
-const DEFAULT_TILT = 2;    // 'C'
+// The previous derivation said "on top of the forearm = the weapon's
+// +Y", and that was the wrong AXIS, not a wrong sign. When you hold a
+// controller and point it forward, your palm faces inward and the back
+// of your hand faces OUTWARD, sideways. The dorsal side of the wrist,
+// where every watch in the world sits, continues the back of the hand:
+// it is the weapon frame's -X for the LEFT arm (+X if this ever moves to
+// the right arm), and it is roughly perpendicular to the weapon's up.
+// "Ovansidan av armen" in the sketch is the side you see when you look
+// at the back of your own hand, not the side that faces the ceiling.
+//
+// On the calibration dial that is pip 10 (index 9): straight out on the
+// back-of-hand side. Tilt B tips the face a little toward the elbow, so
+// the natural half-turn of the forearm brings it flat to the eyes
+// without needing the full watch-pronation.
+const DEFAULT_PIP = 9;     // '10', the back-of-hand side of the LEFT arm
+const DEFAULT_TILT = 1;    // 'B'
+export const DEFAULT_WRIST_PIP = DEFAULT_PIP;
 export const DEFAULT_WRIST_TILT = DEFAULT_TILT;
 
-// The derived home position, in the WEAPON's frame (see the arm frames in
-// vr.js). Exported so a probe can check it against the weapon rather than
-// against a number typed by hand.
+// Ring geometry, shared by the home pose, the dial and the bracelet so
+// there is exactly ONE piece of maths for where the display sits.
 export const WRIST_HOME = {
-  y: 0.038,          // ON TOP of the forearm, not under it
+  y: 0.042,          // ring radius: how far off the arm's axis the face sits
   z: 0.115,          // back toward the elbow, clear of the hand
-  tilt: FLAT_TILT + TILTS[DEFAULT_TILT],
 };
 
 // A single character on a dark chip, for the bracelet.
@@ -151,13 +158,10 @@ export class WristDisplay {
     this._key = '';
     this.pulseT = 0;              // 1 -> 0 while an announcement plays
     this._lastObjective = null;
-    this.calPip = 0;
-    // 0, not 2. attachTo() puts the display at the orientation this class
-    // calls 1A, so a default of tilt index 2 made label() report "1C" for
-    // a display that was physically at 1A. That label is now a status row
-    // in the debug menu, added specifically so Ola can read the
-    // coordinate out loud, so it was about to tell him the wrong one.
-    // It also meant the first press of "change the ANGLE" jumped A to D.
+    // The dial defaults ARE the home pose, so label() is truthful before
+    // anyone has calibrated anything. A mismatch here once made the
+    // status row report 1C for a display sitting at 1A.
+    this.calPip = DEFAULT_PIP;
     this.calTilt = DEFAULT_TILT;
     this.calibrating = false;
     this.bracelet = null;
@@ -232,8 +236,6 @@ export class WristDisplay {
     this.calPip = ((pipIndex % 12) + 12) % 12;
     this.calTilt = Math.max(0, Math.min(TILTS.length - 1, tiltIndex));
     const a = (this.calPip / 12) * Math.PI * 2;
-    // The ring radius IS the home offset, so stepping to 1A lands exactly
-    // where attachTo() puts it rather than 1.7 cm away from it.
     const r = WRIST_HOME.y;
     this.group.position.set(Math.sin(a) * r, Math.cos(a) * r, WRIST_HOME.z);
     // ROLL AROUND THE FOREARM, then tilt. The previous version used
@@ -311,15 +313,14 @@ export class WristDisplay {
   attachTo(grip) {
     if (!grip || this.group.parent === grip) return;
     grip.add(this.group);
-    // ONLY set the home pose if nothing has chosen one. _placeWrist loads
-    // a saved calibration and THEN calls this, and on the first call the
-    // group has no parent yet so the early return above does not fire: it
-    // stamped the default straight over the thing the player had spent a
-    // session choosing, every single page load.
-    if (!this.calibrated) {
-      this.group.position.set(0.0, WRIST_HOME.y, WRIST_HOME.z);
-      this.group.rotation.set(WRIST_HOME.tilt, 0, 0);
-    }
+    // The home pose IS a dial setting, applied through the dial's own
+    // maths, so "where attachTo puts it" and "where the dial says it is"
+    // cannot disagree: that disagreement has produced a wrong label and a
+    // collapsed ring already. And only if nothing has chosen a pose:
+    // _placeWrist loads a saved calibration BEFORE calling this, and
+    // stamping the default over it threw the calibration away on every
+    // page load.
+    if (!this.calibrated) this.setCalibration(DEFAULT_PIP, DEFAULT_TILT);
   }
 
   // ---- Announcing ----
@@ -622,7 +623,7 @@ export class CalibrationCard {
     c.font = 'bold 24px system-ui, sans-serif';
     c.fillText('AROUND THE ARM', cx, cy + r + 48);
     c.fillStyle = '#8d9aa5';
-    c.fillText('1 = on top', cx, cy - r - 32);
+    c.fillText('1 = top, 10 = back of hand', cx, cy - r - 32);
 
     // The angle: five tilts, drawn as actual tilted bars so the letter
     // means something before you have tried it.

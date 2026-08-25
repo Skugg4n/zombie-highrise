@@ -14,6 +14,31 @@ doing the bookkeeping. That is my job.
 
 ---
 
+## Open: Ola's v0.22 VR playtest (2026-08-25) - with a sketch
+
+- [x] (v0.23.0) THE DISPLAY IS ON THE WRONG SIDE OF THE ARM, and this
+      time there is a drawing (docs/sketches/wrist-side.md): it sat on the
+      PALM side, it must sit along the arm on the BACK-OF-HAND side. My
+      error, finally localised: I derived "on top" as the weapon's +Y,
+      but the back of the hand faces OUTWARD, sideways, when you hold a
+      controller. The home is now dial position 10B, the dorsal side, and
+      the home pose is applied THROUGH the dial's own maths so the two
+      can never disagree again. The probe asserts the sketch: on the
+      back-of-hand side, facing out through it, and NOT up the way the
+      gun points up.
+- [x] (v0.23.0) The strategy map is SO DARK you can barely make anything
+      out. It rendered the scene with the scene's own lighting, so the map
+      of a dark level was dark. The pass adds its own flat diagram light
+      now, tuned by LOOKING at the saved screenshot (test-artifacts/
+      strategy-dark-level.png, regenerated every probe run) rather than by
+      a number: mean brightness went 17.7 -> 103.6 and the picture reads
+      as a plan drawing.
+- [x] (v0.23.0) The map fills nearly the whole view AND it draws on top
+      of the wrist display. 65 degrees wide down at arm height with depth
+      testing off. Now 33 x 27 degrees at eye level, depth-tested so your
+      own arm occludes it like a real object, and glancing back down at
+      the wrist no longer starts the fold timer.
+
 ## Open: Ola's v0.21 VR playtest (2026-08-24) - ANGRY, AND RIGHT
 
 ### Blocking bugs

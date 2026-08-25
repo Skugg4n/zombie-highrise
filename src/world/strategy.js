@@ -24,7 +24,12 @@
 //   hand. You look away, it stays; you look back, it is where you left it.
 import * as THREE from 'three';
 
-const PANEL_W = 0.92, PANEL_H = 0.72;    // metres, roughly a large tablet
+// 0.62 x 0.50 at 1.05 m is about 33 x 27 degrees of view: a large map
+// you glance between, not a wall. The first version was 0.92 m wide at
+// 0.72 m, which is 65 degrees, and Ola's review of it was exact: "en
+// stor karta som fyller nästan hela skärmen".
+const PANEL_W = 0.62, PANEL_H = 0.50;
+const PANEL_DIST = 1.05;
 const OVER_W = 1024, OVER_H = 800;       // overlay canvas
 
 const COL = {
@@ -59,23 +64,27 @@ export class StrategyView {
     this.group.matrixAutoUpdate = true;
 
     // Backing: a dark slab so the map reads against a bright sky.
+    // depthTest ON, everywhere on this panel. With it off, the map drew
+    // over everything nearer, including the player's own forearm and the
+    // wrist display that had just opened it. A map is furniture, not a
+    // HUD: raise your arm in front of it and your arm should win.
     const back = new THREE.Mesh(
       new THREE.PlaneGeometry(PANEL_W + 0.06, PANEL_H + 0.06),
       new THREE.MeshBasicMaterial({
         color: 0x0a1016, transparent: true, opacity: 0.92,
-        depthTest: false, toneMapped: false,
+        toneMapped: false,
       }));
-    back.renderOrder = 990;
+    back.renderOrder = 10;
     this.group.add(back);
 
     // The map itself.
     this.mapMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(PANEL_W, PANEL_H),
       new THREE.MeshBasicMaterial({
-        map: this.rt.texture, depthTest: false, toneMapped: false,
+        map: this.rt.texture, toneMapped: false,
       }));
     this.mapMesh.position.z = 0.001;
-    this.mapMesh.renderOrder = 991;
+    this.mapMesh.renderOrder = 11;
     this.group.add(this.mapMesh);
 
     // Overlay: reticle, target marker, mode line, instructions. A separate
@@ -90,11 +99,23 @@ export class StrategyView {
     this.overlay = new THREE.Mesh(
       new THREE.PlaneGeometry(PANEL_W, PANEL_H),
       new THREE.MeshBasicMaterial({
-        map: this.tex, transparent: true, depthTest: false, toneMapped: false,
+        map: this.tex, transparent: true, toneMapped: false,
       }));
     this.overlay.position.z = 0.002;
-    this.overlay.renderOrder = 992;
+    this.overlay.renderOrder = 12;
     this.group.add(this.overlay);
+
+    // Diagram light: added to the scene only for the map pass. A map lit
+    // by the level's own lighting is dark exactly when the level is dark,
+    // and a dark map of a dark level answers nothing. Ola: "den kartan är
+    // SÅ MÖRK så man ser NÄSTAN [ingenting]. Man kan ANA var saker är."
+    // ?levelpreview=N already treats the top-down view as a diagram and
+    // lights it flat; this is the same rule applied to the same view.
+    // 5.0, set by LOOKING at the screenshot, not by the number: at 2.4
+    // the mean brightness passed a threshold while the floor still read
+    // as murk. The materials underground are dark on purpose, so the
+    // diagram light has to overpower them, not nudge them.
+    this.mapLight = new THREE.AmbientLight(0xffffff, 5.0);
 
     this._plane = new THREE.Plane();
     this._ray = new THREE.Ray();
@@ -112,16 +133,21 @@ export class StrategyView {
   // below eye level and tilted up, the angle you would hold a clipboard.
   // Placed in WORLD space, from the head's position and heading only, so
   // it does not inherit head roll or pitch and end up askew.
+  // AT EYE HEIGHT, NOT DOWN AT THE ARM. It used to unfold 0.30 m below
+  // the eyes, which is exactly where the forearm is when you have just
+  // glanced at the wrist to open it: the map appeared on top of the
+  // display that triggered it. Now it hangs ahead at eye level, so the
+  // wrist stays visible below it and the two are never in the same
+  // sightline.
   placeFor(camera) {
     const p = camera.getWorldPosition(new THREE.Vector3());
     const fwd = camera.getWorldDirection(new THREE.Vector3());
     fwd.y = 0;
     if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
     fwd.normalize();
-    this.group.position.copy(p).addScaledVector(fwd, 0.72);
-    this.group.position.y = p.y - 0.30;
-    this.group.lookAt(p.x, p.y - 0.02, p.z);
-    this.group.rotateX(-0.22);           // tilt the top away, like a desk
+    this.group.position.copy(p).addScaledVector(fwd, PANEL_DIST);
+    this.group.position.y = p.y - 0.06;
+    this.group.lookAt(p.x, p.y, p.z);
   }
 
   // Does the panel have anything on it? A small sample from the middle,
@@ -193,6 +219,8 @@ export class StrategyView {
     const prevTarget = this.renderer.getRenderTarget();
     // The panel must not photograph itself.
     this.group.visible = false;
+    // Flat, even light for the diagram, for this pass only.
+    scene.add(this.mapLight);
     this.renderer.xr.enabled = false;
     this.renderer.setRenderTarget(this.rt);
     // Clear to a colour, not to black. With a black clear, "the map did
@@ -205,6 +233,7 @@ export class StrategyView {
     this.renderer.clear();
     this.renderer.render(scene, mapCam);
     this.renderer.setClearColor(prevClear, prevAlpha);
+    scene.remove(this.mapLight);
     this.renderer.setRenderTarget(prevTarget);
     this.renderer.xr.enabled = wasXr;
     this.group.visible = true;
@@ -340,6 +369,7 @@ export class StrategyView {
   }
 
   dispose() {
+    if (this.mapLight.parent) this.mapLight.parent.remove(this.mapLight);
     this.rt.dispose();
     this.tex.dispose();
   }

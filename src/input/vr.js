@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { makeWeaponMesh, makeFlashlightMesh, makeUnderBarrelLight } from '../world/weapons3d.js';
-import { WristDisplay, WeaponAmmoTag, CalibrationCard, DEFAULT_WRIST_TILT } from '../world/wrist.js';
+import { WristDisplay, WeaponAmmoTag, CalibrationCard, DEFAULT_WRIST_PIP, DEFAULT_WRIST_TILT } from '../world/wrist.js';
 import { VrPanel } from '../world/vrpanel.js';
 
 // Quest touch controller gamepad button indices (xr-standard mapping):
@@ -410,7 +410,7 @@ export class VRInput {
     // 1A is the derived home, not 1C. The reset went to the middle of the
     // tilt list, which is a different place from the one the code calls
     // "the default" everywhere else.
-    const label = this.wrist.setCalibration(0, DEFAULT_WRIST_TILT);
+    const label = this.wrist.setCalibration(DEFAULT_WRIST_PIP, DEFAULT_WRIST_TILT);
     const card = this.getCalCard();
     card.show(true);
     card.draw(this.wrist.calPip, this.wrist.calTilt, label);
@@ -540,12 +540,25 @@ export class VRInput {
       return;
     }
 
-    // Open: point, and fold when you look away.
+    // Open: point, and fold when you look away. Looking at the WRIST
+    // counts as attention too: the panel now sits at eye level while the
+    // wrist is below it, so glancing back down at the display that
+    // opened the map must not start the folding timer, or the panel
+    // flaps open and shut while you compare the two.
     this.glanceT = 0;
     const panelAt = acts.strategyCentre ? acts.strategyCentre() : null;
     if (panelAt) {
       const toPanel = _v3.set(panelAt[0], panelAt[1], panelAt[2]).sub(eye).normalize();
-      this.awayT = look.dot(toPanel) < 0.6 ? this.awayT + dt : 0;
+      let attending = look.dot(toPanel) >= 0.6;
+      const w = this.wrist && this.wrist.group;
+      if (!attending && w) {
+        w.updateWorldMatrix(true, false);
+        const at = w.getWorldPosition(_v4);
+        const toWrist = at.sub(eye);
+        const d = toWrist.length();
+        if (d > 0.12 && d < 0.85 && look.dot(toWrist.divideScalar(d)) > 0.86) attending = true;
+      }
+      this.awayT = attending ? 0 : this.awayT + dt;
       if (this.awayT > 0.8) { this.awayT = 0; acts.strategy(false); return; }
     } else {
       // No panel centre means the game no longer thinks it is open, so

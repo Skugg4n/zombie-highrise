@@ -146,11 +146,16 @@ check(inVr && /GRIP/.test(inVr.label), 'and it names the VR control',
     'and the prompt names the button, not a key you do not have',
     before.prompt && before.prompt.label);
 
-  // Press it the way a thumb does.
+  // Press it the way a thumb does, and hold UNTIL THE RING FILLS rather
+  // than for a fixed time. The hold is 0.8 s of game time, and a fixed
+  // 1.1 s of wall-clock waiting lost the race about one run in three
+  // when the machine was busy: a flaky test teaches people to rerun
+  // failures, which is the end of trusting red.
   await p.dispatchEvent('#btn-act', 'touchstart');
-  await p.waitForTimeout(1100);
+  await p.waitForFunction(
+    (hp0) => window.__zhr.debugWallSeg(2).hp > hp0, before.hp, { timeout: 6000 }
+  ).catch(() => {});
   await p.dispatchEvent('#btn-act', 'touchend');
-  await p.waitForTimeout(400);
   const after = await p.evaluate(() => window.__zhr.debugWallSeg(2));
   check(after && after.hp > before.hp,
     `holding it actually repairs the wall (${before.hp} -> ${after && after.hp})`);
